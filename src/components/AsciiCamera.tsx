@@ -3,18 +3,42 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useBodySegmentation } from "@/hooks/useBodySegmentation";
 
-// ASCII chars from dark to light
-const ASCII_RAMP = " .,:;+*?%S#@";
-const CELL_W = 8;
-const CELL_H = 14;
-const MASK_THRESHOLD = 0.5;
+// ASCII style presets
+const STYLES = {
+  dense:    { name: "Dense",    ramp: " `.-':_,^=;><+!rc*/z?sLTv)J7(|Fi{C}fI31tlu[neoZ5Yxjya]2ESwqkP6h9d4VpOGbUAKXHm8RD#$Bg0MNWQ%&@" },
+  simple:   { name: "Simple",   ramp: " .:-=+*#%@" },
+  blocks:   { name: "Blocks",   ramp: " ░░▒▒▓▓██" },
+  dots:     { name: "Dots",     ramp: " ·∙•●⬤" },
+  binary:   { name: "Binary",   ramp: " 01" },
+  katakana: { name: "Katakana", ramp: " ｦｱｳｴｵｶｷｸｹｺｻｼｽｾｿﾀﾁﾂﾃﾅﾆﾇﾈﾉﾊﾋﾌﾍﾎﾏﾐﾑﾒﾓﾔﾕﾖﾗﾘﾙﾚﾛﾜﾝ" },
+} as const;
+type StyleKey = keyof typeof STYLES;
+const STYLE_KEYS = Object.keys(STYLES) as StyleKey[];
+
+// Color theme presets
+const THEMES = {
+  color:  { name: "Color",  fg: null,              bg: null },              // original pixel colors
+  matrix: { name: "Matrix", fg: [0, 255, 70],      bg: [0, 255, 70] },     // green
+  amber:  { name: "Amber",  fg: [255, 176, 0],     bg: [255, 176, 0] },    // amber
+  cyan:   { name: "Cyan",   fg: [0, 255, 255],     bg: [0, 255, 255] },    // cyan
+  purple: { name: "Purple", fg: [200, 80, 255],    bg: [200, 80, 255] },   // purple
+  white:  { name: "White",  fg: [255, 255, 255],   bg: [255, 255, 255] },  // white
+} as const;
+type ThemeKey = keyof typeof THEMES;
+const THEME_KEYS = Object.keys(THEMES) as ThemeKey[];
+
+const CELL_W = 6;
+const CELL_H = 10;
+const BG_DIM = 0.3;       // background brightness multiplier
+const FG_BOOST = 1.35;    // foreground brightness boost
 
 export default function AsciiCamera() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const sampleCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const [webcamReady, setWebcamReady] = useState(false);
-  const [colorMode, setColorMode] = useState(true);
+  const [theme, setTheme] = useState<ThemeKey>("color");
+  const [style, setStyle] = useState<StyleKey>("dense");
   const rafRef = useRef<number>(0);
 
   const { isLoading, maskRef, maskSizeRef, startSegmentation } =
@@ -91,6 +115,9 @@ export default function AsciiCamera() {
     const maskW = maskSizeRef.current.width;
     const maskH = maskSizeRef.current.height;
 
+    const ramp = STYLES[style].ramp;
+    const themeColors = THEMES[theme];
+
     // Clear
     ctx.fillStyle = "#000";
     ctx.fillRect(0, 0, displayW, displayH);
@@ -100,31 +127,41 @@ export default function AsciiCamera() {
 
     for (let row = 0; row < rows; row++) {
       for (let col = 0; col < cols; col++) {
-        // Check segmentation mask — is this pixel part of the person?
-        if (mask && maskW > 0 && maskH > 0) {
-          // Map grid position to mask position (mask is not mirrored, so flip x)
-          const maskX = Math.floor(((cols - 1 - col) / cols) * maskW);
-          const maskY = Math.floor((row / rows) * maskH);
-          const maskIdx = maskY * maskW + maskX;
-          if (mask[maskIdx] < MASK_THRESHOLD) continue;
-        }
-
         const pIdx = (row * cols + col) * 4;
         const r = pixels[pIdx];
         const g = pixels[pIdx + 1];
         const b = pixels[pIdx + 2];
 
+        // Check segmentation mask
+        let isPerson = true;
+        if (mask && maskW > 0 && maskH > 0) {
+          const maskX = Math.floor(((cols - 1 - col) / cols) * maskW);
+          const maskY = Math.floor((row / rows) * maskH);
+          const maskIdx = maskY * maskW + maskX;
+          isPerson = mask[maskIdx] > 0.5;
+        }
+
+        // Boost foreground, dim background
+        const mult = isPerson ? FG_BOOST : BG_DIM;
+        const dr = Math.min(255, r * mult);
+        const dg = Math.min(255, g * mult);
+        const db = Math.min(255, b * mult);
+
         // Perceived brightness (luminance)
-        const brightness = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
-        const charIdx = Math.floor(brightness * (ASCII_RAMP.length - 1));
-        const char = ASCII_RAMP[charIdx];
+        const brightness = (0.299 * dr + 0.587 * dg + 0.114 * db) / 255;
+        const charIdx = Math.floor(brightness * (ramp.length - 1));
+        const char = ramp[charIdx];
 
         if (char === " ") continue;
 
-        if (colorMode) {
-          ctx.fillStyle = `rgb(${r},${g},${b})`;
+        if (themeColors.fg === null) {
+          // Color mode — use original (boosted/dimmed) pixel colors
+          ctx.fillStyle = `rgb(${Math.round(dr)},${Math.round(dg)},${Math.round(db)})`;
         } else {
-          ctx.fillStyle = "#0f0";
+          // Mono mode — tint with theme color, scale by brightness
+          const intensity = isPerson ? brightness : brightness * BG_DIM;
+          const [tr, tg, tb] = themeColors.fg;
+          ctx.fillStyle = `rgb(${Math.round(tr * intensity)},${Math.round(tg * intensity)},${Math.round(tb * intensity)})`;
         }
 
         ctx.fillText(char, col * CELL_W, row * CELL_H);
@@ -132,7 +169,7 @@ export default function AsciiCamera() {
     }
 
     rafRef.current = requestAnimationFrame(renderAscii);
-  }, [maskRef, maskSizeRef, colorMode]);
+  }, [maskRef, maskSizeRef, theme, style]);
 
   // Start/stop render loop
   useEffect(() => {
@@ -184,13 +221,46 @@ export default function AsciiCamera() {
       </div>
 
       {/* Controls */}
-      <div className="absolute bottom-4 right-4 flex gap-2">
-        <button
-          onClick={() => setColorMode((c) => !c)}
-          className="px-3 py-1.5 bg-white/10 hover:bg-white/20 text-white text-sm font-mono rounded transition-colors"
-        >
-          {colorMode ? "color" : "mono"}
-        </button>
+      <div className="absolute bottom-4 right-4 flex gap-3 items-end">
+        {/* Style picker */}
+        <div className="flex flex-col gap-1">
+          <span className="text-white/40 text-[10px] font-mono uppercase tracking-wider">style</span>
+          <div className="flex gap-1">
+            {STYLE_KEYS.map((k) => (
+              <button
+                key={k}
+                onClick={() => setStyle(k)}
+                className={`px-2 py-1 text-xs font-mono rounded transition-colors ${
+                  style === k
+                    ? "bg-white/25 text-white"
+                    : "bg-white/5 text-white/50 hover:bg-white/15 hover:text-white/80"
+                }`}
+              >
+                {STYLES[k].name}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Theme picker */}
+        <div className="flex flex-col gap-1">
+          <span className="text-white/40 text-[10px] font-mono uppercase tracking-wider">color</span>
+          <div className="flex gap-1">
+            {THEME_KEYS.map((k) => (
+              <button
+                key={k}
+                onClick={() => setTheme(k)}
+                className={`px-2 py-1 text-xs font-mono rounded transition-colors ${
+                  theme === k
+                    ? "bg-white/25 text-white"
+                    : "bg-white/5 text-white/50 hover:bg-white/15 hover:text-white/80"
+                }`}
+              >
+                {THEMES[k].name}
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
     </div>
   );
