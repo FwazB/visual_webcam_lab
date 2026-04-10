@@ -27,8 +27,19 @@ const THEMES = {
 type ThemeKey = keyof typeof THEMES;
 const THEME_KEYS = Object.keys(THEMES) as ThemeKey[];
 
-const CELL_W = 6;
-const CELL_H = 10;
+// Density presets: [cellW, cellH]
+const DENSITY_STEPS: [number, number][] = [
+  [14, 22], // 1 - very sparse
+  [12, 20], // 2
+  [10, 16], // 3
+  [8, 14],  // 4
+  [6, 10],  // 5 - default
+  [5, 8],   // 6
+  [4, 7],   // 7
+  [3, 5],   // 8
+  [2, 4],   // 9 - max density
+];
+const DEFAULT_DENSITY = 4; // index into DENSITY_STEPS (0-based)
 const BG_DIM = 0.3;       // background brightness multiplier
 const FG_BOOST = 1.35;    // foreground brightness boost
 
@@ -39,6 +50,7 @@ export default function AsciiCamera() {
   const [webcamReady, setWebcamReady] = useState(false);
   const [theme, setTheme] = useState<ThemeKey>("color");
   const [style, setStyle] = useState<StyleKey>("dense");
+  const [density, setDensity] = useState(DEFAULT_DENSITY);
   const rafRef = useRef<number>(0);
 
   const { isLoading, maskRef, maskSizeRef, startSegmentation } =
@@ -90,11 +102,12 @@ export default function AsciiCamera() {
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    // Calculate grid dimensions from display size
+    // Calculate grid dimensions from display size and density
+    const [cellW, cellH] = DENSITY_STEPS[density];
     const displayW = canvas.width;
     const displayH = canvas.height;
-    const cols = Math.floor(displayW / CELL_W);
-    const rows = Math.floor(displayH / CELL_H);
+    const cols = Math.floor(displayW / cellW);
+    const rows = Math.floor(displayH / cellH);
 
     // Sample video at grid resolution
     const sCtx = sampleCanvas.getContext("2d", { willReadFrequently: true });
@@ -122,7 +135,7 @@ export default function AsciiCamera() {
     ctx.fillStyle = "#000";
     ctx.fillRect(0, 0, displayW, displayH);
 
-    ctx.font = `${CELL_H}px monospace`;
+    ctx.font = `${cellH}px monospace`;
     ctx.textBaseline = "top";
 
     for (let row = 0; row < rows; row++) {
@@ -164,12 +177,12 @@ export default function AsciiCamera() {
           ctx.fillStyle = `rgb(${Math.round(tr * intensity)},${Math.round(tg * intensity)},${Math.round(tb * intensity)})`;
         }
 
-        ctx.fillText(char, col * CELL_W, row * CELL_H);
+        ctx.fillText(char, col * cellW, row * cellH);
       }
     }
 
     rafRef.current = requestAnimationFrame(renderAscii);
-  }, [maskRef, maskSizeRef, theme, style]);
+  }, [maskRef, maskSizeRef, theme, style, density]);
 
   // Start/stop render loop
   useEffect(() => {
@@ -222,6 +235,23 @@ export default function AsciiCamera() {
 
       {/* Controls */}
       <div className="absolute bottom-4 right-4 flex gap-3 items-end">
+        {/* Density slider */}
+        <div className="flex flex-col gap-1">
+          <span className="text-white/40 text-[10px] font-mono uppercase tracking-wider">density</span>
+          <div className="flex items-center gap-2">
+            <span className="text-white/30 text-[10px] font-mono">A</span>
+            <input
+              type="range"
+              min={0}
+              max={DENSITY_STEPS.length - 1}
+              value={density}
+              onChange={(e) => setDensity(Number(e.target.value))}
+              className="w-24 accent-white/60"
+            />
+            <span className="text-white/30 text-[8px] font-mono">A</span>
+          </div>
+        </div>
+
         {/* Style picker */}
         <div className="flex flex-col gap-1">
           <span className="text-white/40 text-[10px] font-mono uppercase tracking-wider">style</span>
