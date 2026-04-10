@@ -56,14 +56,19 @@ export default function AsciiCamera() {
   const { isLoading, maskRef, maskSizeRef, startSegmentation } =
     useBodySegmentation(videoRef);
 
-  // Start webcam
+  // Start webcam — use lower resolution on mobile
   useEffect(() => {
     let stream: MediaStream | null = null;
+    const isMobile = window.innerWidth < 768;
 
     async function initCamera() {
       try {
         stream = await navigator.mediaDevices.getUserMedia({
-          video: { width: 1280, height: 720, facingMode: "user" },
+          video: {
+            width: isMobile ? 640 : 1280,
+            height: isMobile ? 480 : 720,
+            facingMode: "user",
+          },
           audio: false,
         });
         if (videoRef.current) {
@@ -194,17 +199,22 @@ export default function AsciiCamera() {
     };
   }, [webcamReady, renderAscii]);
 
-  // Resize canvas to fill window
+  // Resize canvas to fill viewport (accounts for mobile browser chrome)
   useEffect(() => {
     function resize() {
       if (canvasRef.current) {
-        canvasRef.current.width = window.innerWidth;
-        canvasRef.current.height = window.innerHeight;
+        const vv = window.visualViewport;
+        canvasRef.current.width = vv ? vv.width : window.innerWidth;
+        canvasRef.current.height = vv ? vv.height : window.innerHeight;
       }
     }
     resize();
     window.addEventListener("resize", resize);
-    return () => window.removeEventListener("resize", resize);
+    window.visualViewport?.addEventListener("resize", resize);
+    return () => {
+      window.removeEventListener("resize", resize);
+      window.visualViewport?.removeEventListener("resize", resize);
+    };
   }, []);
 
   return (
@@ -234,10 +244,10 @@ export default function AsciiCamera() {
       </div>
 
       {/* Controls */}
-      <div className="absolute bottom-4 right-4 flex gap-3 items-end">
+      <div className="absolute bottom-3 right-3 sm:bottom-4 sm:right-4 flex flex-col sm:flex-row gap-2 sm:gap-3 items-end safe-bottom">
         {/* Density slider */}
         <div className="flex flex-col gap-1">
-          <span className="text-white/40 text-[10px] font-mono uppercase tracking-wider">density</span>
+          <span className="text-white/40 text-[10px] sm:text-[10px] font-mono uppercase tracking-wider">density</span>
           <div className="flex items-center gap-2">
             <span className="text-white/30 text-[10px] font-mono">A</span>
             <input
@@ -246,7 +256,7 @@ export default function AsciiCamera() {
               max={DENSITY_STEPS.length - 1}
               value={density}
               onChange={(e) => setDensity(Number(e.target.value))}
-              className="w-24 accent-white/60"
+              className="w-20 sm:w-24 accent-white/60"
             />
             <span className="text-white/30 text-[8px] font-mono">A</span>
           </div>
@@ -255,15 +265,15 @@ export default function AsciiCamera() {
         {/* Style picker */}
         <div className="flex flex-col gap-1">
           <span className="text-white/40 text-[10px] font-mono uppercase tracking-wider">style</span>
-          <div className="flex gap-1">
+          <div className="flex flex-wrap gap-1">
             {STYLE_KEYS.map((k) => (
               <button
                 key={k}
                 onClick={() => setStyle(k)}
-                className={`px-2 py-1 text-xs font-mono rounded transition-colors ${
+                className={`px-2.5 py-1.5 sm:px-2 sm:py-1 text-xs font-mono rounded transition-colors active:scale-95 ${
                   style === k
                     ? "bg-white/25 text-white"
-                    : "bg-white/5 text-white/50 hover:bg-white/15 hover:text-white/80"
+                    : "bg-white/5 text-white/50 hover:bg-white/15 active:bg-white/20 hover:text-white/80"
                 }`}
               >
                 {STYLES[k].name}
@@ -275,15 +285,15 @@ export default function AsciiCamera() {
         {/* Theme picker */}
         <div className="flex flex-col gap-1">
           <span className="text-white/40 text-[10px] font-mono uppercase tracking-wider">color</span>
-          <div className="flex gap-1">
+          <div className="flex flex-wrap gap-1">
             {THEME_KEYS.map((k) => (
               <button
                 key={k}
                 onClick={() => setTheme(k)}
-                className={`px-2 py-1 text-xs font-mono rounded transition-colors ${
+                className={`px-2.5 py-1.5 sm:px-2 sm:py-1 text-xs font-mono rounded transition-colors active:scale-95 ${
                   theme === k
                     ? "bg-white/25 text-white"
-                    : "bg-white/5 text-white/50 hover:bg-white/15 hover:text-white/80"
+                    : "bg-white/5 text-white/50 hover:bg-white/15 active:bg-white/20 hover:text-white/80"
                 }`}
               >
                 {THEMES[k].name}

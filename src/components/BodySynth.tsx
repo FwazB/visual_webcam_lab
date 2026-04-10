@@ -26,12 +26,17 @@ export default function BodySynth() {
     resetLocks,
   } = useAudioEngine();
 
-  // Start webcam
+  // Start webcam — lower resolution on mobile for performance
   useEffect(() => {
     async function startCamera() {
       try {
+        const isMobile = window.innerWidth < 768;
         const stream = await navigator.mediaDevices.getUserMedia({
-          video: { width: 1280, height: 720, facingMode: "user" },
+          video: {
+            width: isMobile ? 640 : 1280,
+            height: isMobile ? 480 : 720,
+            facingMode: "user",
+          },
           audio: false,
         });
         if (videoRef.current) {
@@ -130,10 +135,10 @@ export default function BodySynth() {
       <ParamDisplay audioParams={audioParams} isPlaying={isPlaying} locks={locks} handTargets={handTargets} />
 
       {/* Controls overlay */}
-      <div className="absolute top-0 left-0 right-0 flex items-center justify-between p-6">
-        <div>
-          <h1 className="text-white text-2xl font-bold tracking-tight">body.synth</h1>
-          <p className="text-zinc-400 text-sm">
+      <div className="absolute top-0 left-0 right-0 flex items-center justify-between p-3 sm:p-6 safe-top">
+        <div className="min-w-0">
+          <h1 className="text-white text-lg sm:text-2xl font-bold tracking-tight">body.synth</h1>
+          <p className="text-zinc-400 text-xs sm:text-sm">
             {poseLoading
               ? "Loading hand tracking model..."
               : webcamReady
@@ -142,15 +147,15 @@ export default function BodySynth() {
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 sm:gap-3 shrink-0">
           {trackName && (
-            <span className="text-zinc-400 text-sm font-mono truncate max-w-48">
+            <span className="text-zinc-400 text-xs sm:text-sm font-mono truncate max-w-24 sm:max-w-48 hidden sm:inline">
               {trackName}
             </span>
           )}
 
           {!audioLoaded ? (
-            <label className="cursor-pointer bg-white/10 hover:bg-white/20 backdrop-blur-md text-white px-5 py-2.5 rounded-full text-sm font-medium transition-colors border border-white/10">
+            <label className="cursor-pointer bg-white/10 hover:bg-white/20 active:bg-white/25 backdrop-blur-md text-white px-4 py-2 sm:px-5 sm:py-2.5 rounded-full text-sm font-medium transition-colors border border-white/10">
               Load MP3
               <input
                 type="file"
@@ -162,10 +167,10 @@ export default function BodySynth() {
           ) : (
             <button
               onClick={togglePlayback}
-              className={`px-5 py-2.5 rounded-full text-sm font-medium transition-colors border backdrop-blur-md ${
+              className={`px-4 py-2 sm:px-5 sm:py-2.5 rounded-full text-sm font-medium transition-colors border backdrop-blur-md active:scale-95 ${
                 isPlaying
-                  ? "bg-red-500/20 border-red-500/30 text-red-300 hover:bg-red-500/30"
-                  : "bg-green-500/20 border-green-500/30 text-green-300 hover:bg-green-500/30"
+                  ? "bg-red-500/20 border-red-500/30 text-red-300 hover:bg-red-500/30 active:bg-red-500/40"
+                  : "bg-green-500/20 border-green-500/30 text-green-300 hover:bg-green-500/30 active:bg-green-500/40"
               }`}
             >
               {isPlaying ? "Stop" : "Play"}
@@ -177,7 +182,7 @@ export default function BodySynth() {
       {/* Drag overlay */}
       {dragOver && (
         <div className="absolute inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50">
-          <div className="text-white text-xl font-semibold border-2 border-dashed border-white/30 rounded-2xl p-12">
+          <div className="text-white text-base sm:text-xl font-semibold border-2 border-dashed border-white/30 rounded-2xl p-6 sm:p-12 mx-4">
             Drop your audio file here
           </div>
         </div>
@@ -185,9 +190,9 @@ export default function BodySynth() {
 
       {/* Instructions (show when no audio loaded) */}
       {!audioLoaded && webcamReady && !poseLoading && (
-        <div className="absolute bottom-8 left-1/2 -translate-x-1/2 text-center">
-          <p className="text-zinc-400 text-sm">
-            Drop an MP3 or click &quot;Load MP3&quot; to get started
+        <div className="absolute bottom-6 sm:bottom-8 left-1/2 -translate-x-1/2 text-center px-4 safe-bottom">
+          <p className="text-zinc-400 text-xs sm:text-sm">
+            Drop an MP3 or tap &quot;Load MP3&quot; to get started
           </p>
         </div>
       )}

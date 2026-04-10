@@ -95,7 +95,7 @@ export default function ParamDisplay({
 
   return (
     <div
-      className={`absolute bottom-6 left-6 bg-black/70 backdrop-blur-md rounded-xl p-4 space-y-2 w-80 border ${
+      className={`absolute bottom-3 left-3 sm:bottom-6 sm:left-6 bg-black/70 backdrop-blur-md rounded-xl p-3 sm:p-4 space-y-2 w-[calc(100%-1.5rem)] sm:w-80 max-w-80 border safe-bottom ${
         anyLocked ? "border-yellow-500/40" : "border-zinc-800"
       }`}
     >
