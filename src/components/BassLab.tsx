@@ -1,13 +1,18 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState } from "react";
 import { usePoseTracking } from "@/hooks/usePoseTracking";
-import { useFretboardCalibration } from "@/hooks/useFretboardCalibration";
-import { fretToPixel, pixelToFret, type Point } from "@/lib/bass/homography";
+import {
+  inferFretboard,
+  smoothFretboard,
+  fretToPixel,
+  pixelToFret,
+  type HandFretboard,
+  type Point,
+} from "@/lib/bass/handFretboard";
 
-// MediaPipe hand landmark indices for fingertips
+// MediaPipe fingertip landmark indices
 const FINGERTIPS = {
-  thumb: 4,
   index: 8,
   middle: 12,
   ring: 16,
@@ -21,8 +26,6 @@ const FINGERTIP_COLORS = {
   pinky: "#FFCC00",
 };
 
-const CALIB_COLORS = ["#FF4466", "#FF8844", "#44FF88", "#44AAFF"];
-
 export default function BassLab() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -30,22 +33,7 @@ export default function BassLab() {
   const [webcamReady, setWebcamReady] = useState(false);
 
   const { poseDataRef, isLoading: handsLoading } = usePoseTracking(videoRef);
-  const {
-    points,
-    step,
-    isComplete,
-    currentLabel,
-    homography,
-    addPoint,
-    undo,
-    reset,
-  } = useFretboardCalibration();
-
-  // Store latest refs so RAF loop reads fresh values without re-binding
-  const homographyRef = useRef(homography);
-  homographyRef.current = homography;
-  const pointsRef = useRef(points);
-  pointsRef.current = points;
+  const fretboardRef = useRef<HandFretboard | null>(null);
 
   // Start webcam
   useEffect(() => {
@@ -75,14 +63,14 @@ export default function BassLab() {
     };
   }, []);
 
-  // Render loop — draws calibration dots, fretboard grid, fingertip markers
+  // Render loop — hand-inferred fretboard + fingertip overlay
   useEffect(() => {
     let rafId = 0;
 
     function sizeCanvas() {
       const canvas = canvasRef.current;
       const container = containerRef.current;
-      if (!canvas || !container) return;
+      if (!canvas || !container) return null;
       const dpr = window.devicePixelRatio || 1;
       const w = container.clientWidth;
       const h = container.clientHeight;
@@ -115,115 +103,90 @@ export default function BassLab() {
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.clearRect(0, 0, w, h);
 
-      const h13 = homographyRef.current;
+      // Infer fretboard from current hand landmarks
+      const pose = poseDataRef.current;
+      let fb: HandFretboard | null = null;
+      if (pose && pose.landmarks.length >= 21) {
+        const raw = inferFretboard(pose.landmarks, w, h, true);
+        if (raw) {
+          fb = smoothFretboard(fretboardRef.current, raw, 0.35);
+          fretboardRef.current = fb;
+        }
+      } else {
+        // Slowly fade confidence when no hand is present
+        if (fretboardRef.current) {
+          fretboardRef.current = {
+            ...fretboardRef.current,
+            confidence: fretboardRef.current.confidence * 0.9,
+          };
+          if (fretboardRef.current.confidence > 0.02) fb = fretboardRef.current;
+          else fretboardRef.current = null;
+        }
+      }
 
-      // -- Fretboard grid (if calibrated) --
-      if (h13) {
-        // Fret lines (vertical relative to neck)
+      // Draw fretboard grid
+      if (fb && fb.confidence > 0.15) {
+        const alpha = Math.min(1, fb.confidence * 1.5);
+
+        // Fret lines (perpendicular to neck axis)
         ctx.lineWidth = 1.5;
-        for (let f = 0; f <= 12; f++) {
-          const isOctave = f === 0 || f === 12;
-          const isMarker = [3, 5, 7, 9].includes(f);
-          ctx.strokeStyle = isOctave
-            ? "rgba(255, 220, 0, 0.9)"
-            : isMarker
-              ? "rgba(255, 255, 255, 0.55)"
-              : "rgba(255, 255, 255, 0.22)";
-          const pTop = fretToPixel(h13, f, 0);
-          const pBot = fretToPixel(h13, f, 3);
+        for (let f = 0; f <= fb.fretCount; f++) {
+          const isEdge = f === 0 || f === fb.fretCount;
+          ctx.strokeStyle = isEdge
+            ? `rgba(255, 220, 0, ${0.85 * alpha})`
+            : `rgba(255, 255, 255, ${0.28 * alpha})`;
+          const pTop = fretToPixel(fb, f, 0);
+          const pBot = fretToPixel(fb, f, fb.stringCount - 1);
           ctx.beginPath();
           ctx.moveTo(pTop.x, pTop.y);
           ctx.lineTo(pBot.x, pBot.y);
           ctx.stroke();
-
-          // Fret number label
-          if (f === 0 || isOctave || isMarker) {
-            ctx.fillStyle = "rgba(255, 220, 0, 0.85)";
-            ctx.font = "bold 11px monospace";
-            ctx.textAlign = "center";
-            ctx.textBaseline = "top";
-            ctx.fillText(f.toString(), pTop.x, pTop.y + 4);
-          }
         }
 
-        // String lines
+        // String lines (along neck axis)
         const stringLabels = ["E", "A", "D", "G"];
-        for (let s = 0; s < 4; s++) {
-          ctx.strokeStyle = "rgba(255, 255, 255, 0.35)";
-          ctx.lineWidth = s === 0 || s === 3 ? 1.5 : 1;
-          const pStart = fretToPixel(h13, 0, s);
-          const pEnd = fretToPixel(h13, 12, s);
+        for (let s = 0; s < fb.stringCount; s++) {
+          const isEdge = s === 0 || s === fb.stringCount - 1;
+          ctx.strokeStyle = `rgba(200, 220, 255, ${(isEdge ? 0.55 : 0.35) * alpha})`;
+          ctx.lineWidth = isEdge ? 1.5 : 1;
+          const pStart = fretToPixel(fb, 0, s);
+          const pEnd = fretToPixel(fb, fb.fretCount, s);
           ctx.beginPath();
           ctx.moveTo(pStart.x, pStart.y);
           ctx.lineTo(pEnd.x, pEnd.y);
           ctx.stroke();
 
-          // String label at nut side
-          ctx.fillStyle = "rgba(200, 220, 255, 0.85)";
+          ctx.fillStyle = `rgba(200, 220, 255, ${0.9 * alpha})`;
           ctx.font = "bold 12px monospace";
           ctx.textAlign = "right";
           ctx.textBaseline = "middle";
-          ctx.fillText(stringLabels[s], pStart.x - 6, pStart.y);
+          ctx.fillText(stringLabels[s] ?? "", pStart.x - 6, pStart.y);
         }
 
-        // Position inlays at traditional fret markers (single dot at 3,5,7,9; double at 12)
-        const inlayFrets = [3, 5, 7, 9];
-        for (const f of inlayFrets) {
-          const mid = fretToPixel(h13, f - 0.5, 1.5);
-          ctx.fillStyle = "rgba(255, 220, 0, 0.35)";
-          ctx.beginPath();
-          ctx.arc(mid.x, mid.y, 5, 0, Math.PI * 2);
-          ctx.fill();
+        // Grid cell dots (faint) to make the 4x4 space readable
+        for (let f = 0; f < fb.fretCount; f++) {
+          for (let s = 0; s < fb.stringCount; s++) {
+            const mid = fretToPixel(fb, f + 0.5, s);
+            ctx.fillStyle = `rgba(255, 255, 255, ${0.12 * alpha})`;
+            ctx.beginPath();
+            ctx.arc(mid.x, mid.y, 2, 0, Math.PI * 2);
+            ctx.fill();
+          }
         }
       }
 
-      // -- Calibration dots (user's taps so far) --
-      pointsRef.current.forEach((p, i) => {
-        ctx.fillStyle = CALIB_COLORS[i] ?? "white";
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, 8, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.strokeStyle = "rgba(0,0,0,0.6)";
-        ctx.lineWidth = 2;
-        ctx.stroke();
-        // Number label
-        ctx.fillStyle = "white";
-        ctx.font = "bold 14px monospace";
-        ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
-        ctx.fillText((i + 1).toString(), p.x, p.y);
-      });
-
-      // Connect the dots if we have 2+ (polygon preview)
-      if (pointsRef.current.length >= 2) {
-        ctx.strokeStyle = "rgba(255, 255, 255, 0.4)";
-        ctx.lineWidth = 1.5;
-        ctx.setLineDash([6, 4]);
-        ctx.beginPath();
-        pointsRef.current.forEach((p, i) => {
-          if (i === 0) ctx.moveTo(p.x, p.y);
-          else ctx.lineTo(p.x, p.y);
-        });
-        if (pointsRef.current.length === 4) ctx.closePath();
-        ctx.stroke();
-        ctx.setLineDash([]);
-      }
-
-      // -- Fingertip markers + fret coords (if calibrated and hand visible) --
-      const pose = poseDataRef.current;
-      if (h13 && pose && pose.landmarks.length > 0) {
-        const landmarks = pose.landmarks;
+      // Draw fingertip markers
+      if (fb && pose && pose.landmarks.length >= 21) {
         const drawFinger = (idx: number, name: keyof typeof FINGERTIP_COLORS) => {
-          const lm = landmarks[idx];
+          const lm = pose.landmarks[idx];
           if (!lm) return;
-          // Un-mirror X because the video is CSS-flipped
-          const px: Point = {
-            x: (1 - lm.x) * w,
-            y: lm.y * h,
-          };
-          const fp = pixelToFret(h13, px);
-
-          const onFretboard = fp.fret >= -0.5 && fp.fret <= 12.5 && fp.string >= -0.5 && fp.string <= 3.5;
+          const px: Point = { x: (1 - lm.x) * w, y: lm.y * h };
+          const fp = pixelToFret(fb!, px);
+          const onBoard =
+            fp.fret >= -0.5 &&
+            fp.fret <= fb!.fretCount + 0.5 &&
+            fp.string >= -0.5 &&
+            fp.string <= fb!.stringCount - 0.5;
 
           // Outer ring
           ctx.strokeStyle = FINGERTIP_COLORS[name];
@@ -237,18 +200,17 @@ export default function BassLab() {
           ctx.arc(px.x, px.y, 4, 0, Math.PI * 2);
           ctx.fill();
 
-          // Label with fret/string if on the neck
-          if (onFretboard) {
-            const sIdx = Math.round(Math.max(0, Math.min(3, fp.string)));
-            const fIdx = Math.round(Math.max(0, Math.min(12, fp.fret)));
-            const stringName = ["E", "A", "D", "G"][sIdx];
-            ctx.fillStyle = "rgba(0, 0, 0, 0.75)";
-            ctx.fillRect(px.x + 14, px.y - 8, 46, 16);
+          if (onBoard) {
+            const sIdx = Math.round(Math.max(0, Math.min(fb!.stringCount - 1, fp.string)));
+            const fIdx = Math.round(Math.max(0, Math.min(fb!.fretCount, fp.fret)));
+            const stringName = ["E", "A", "D", "G"][sIdx] ?? "?";
+            ctx.fillStyle = "rgba(0, 0, 0, 0.8)";
+            ctx.fillRect(px.x + 14, px.y - 9, 50, 18);
             ctx.fillStyle = FINGERTIP_COLORS[name];
-            ctx.font = "bold 10px monospace";
+            ctx.font = "bold 11px monospace";
             ctx.textAlign = "left";
             ctx.textBaseline = "middle";
-            ctx.fillText(`${stringName}${fIdx}`, px.x + 18, px.y);
+            ctx.fillText(`${stringName} f${fIdx}`, px.x + 18, px.y);
           }
         };
 
@@ -265,28 +227,15 @@ export default function BassLab() {
     return () => cancelAnimationFrame(rafId);
   }, [poseDataRef]);
 
-  // Click handler for calibration taps
-  const handlePointer = useCallback(
-    (e: React.PointerEvent<HTMLDivElement>) => {
-      if (isComplete) return;
-      const container = containerRef.current;
-      if (!container) return;
-      const rect = container.getBoundingClientRect();
-      const x = e.clientX - rect.left;
-      const y = e.clientY - rect.top;
-      addPoint({ x, y });
-    },
-    [isComplete, addPoint]
-  );
+  const status = !webcamReady
+    ? "Starting webcam..."
+    : handsLoading
+      ? "Loading hand tracking..."
+      : "Move your fretting hand into view — grid follows automatically";
 
   return (
     <div className="fixed inset-0 bg-black text-white overflow-hidden">
-      {/* Webcam container — relative so canvas can overlay */}
-      <div
-        ref={containerRef}
-        className="absolute inset-0 cursor-crosshair touch-none"
-        onPointerDown={handlePointer}
-      >
+      <div ref={containerRef} className="absolute inset-0">
         <video
           ref={videoRef}
           autoPlay
@@ -294,22 +243,14 @@ export default function BassLab() {
           muted
           className="absolute inset-0 w-full h-full object-cover -scale-x-100"
         />
-        <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" />
+        <canvas ref={canvasRef} className="absolute inset-0 w-full h-full pointer-events-none" />
       </div>
 
       {/* Top bar */}
       <div className="absolute top-0 left-0 right-0 p-3 sm:p-4 flex items-start justify-between pointer-events-none">
         <div className="pointer-events-auto">
           <h1 className="text-lg sm:text-xl font-bold tracking-tight">bass.lab</h1>
-          <p className="text-zinc-400 text-xs">
-            {!webcamReady
-              ? "Starting webcam..."
-              : handsLoading
-                ? "Loading hand tracking..."
-                : isComplete
-                  ? "Calibrated — move your fretting hand into view"
-                  : "Calibrate your fretboard"}
-          </p>
+          <p className="text-zinc-400 text-xs">{status}</p>
         </div>
         <a
           href="/"
@@ -319,49 +260,11 @@ export default function BassLab() {
         </a>
       </div>
 
-      {/* Calibration prompt (centered top) */}
-      {!isComplete && webcamReady && !handsLoading && (
-        <div className="absolute top-16 sm:top-20 left-1/2 -translate-x-1/2 pointer-events-none">
-          <div className="bg-black/75 backdrop-blur-md border border-white/15 rounded-xl px-4 py-2.5 text-center">
-            <div className="text-xs text-zinc-400 mb-1">Step {step + 1} of 4</div>
-            <div className="text-sm font-medium">
-              {currentLabel}
-            </div>
-            <div
-              className="w-3 h-3 mx-auto mt-2 rounded-full"
-              style={{ backgroundColor: CALIB_COLORS[step] }}
-            />
-          </div>
-        </div>
-      )}
-
-      {/* Bottom controls */}
-      <div className="absolute bottom-0 left-0 right-0 p-3 sm:p-4 flex items-center justify-center gap-2 pointer-events-none">
-        <div className="pointer-events-auto flex gap-2">
-          {points.length > 0 && !isComplete && (
-            <button
-              onClick={undo}
-              className="px-3 py-2 text-xs rounded-full bg-white/10 hover:bg-white/20 border border-white/10 active:scale-95 transition"
-            >
-              ← undo
-            </button>
-          )}
-          {points.length > 0 && (
-            <button
-              onClick={reset}
-              className="px-3 py-2 text-xs rounded-full bg-white/10 hover:bg-white/20 border border-white/10 active:scale-95 transition"
-            >
-              {isComplete ? "recalibrate" : "reset"}
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* First-time hint */}
-      {points.length === 0 && webcamReady && !handsLoading && (
-        <div className="absolute bottom-14 sm:bottom-16 left-1/2 -translate-x-1/2 text-center pointer-events-none px-4">
-          <p className="text-zinc-400 text-xs max-w-xs">
-            Hold your bass in playing position. Tap the 4 corners of the fretboard when prompted.
+      {/* Bottom hint */}
+      {webcamReady && !handsLoading && (
+        <div className="absolute bottom-3 sm:bottom-4 left-1/2 -translate-x-1/2 text-center pointer-events-none px-4">
+          <p className="text-zinc-500 text-[11px] max-w-xs">
+            4-fret × 4-string grid auto-aligns to your hand. Shapes & matching coming in sprint 2.
           </p>
         </div>
       )}
