@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useMemo } from "react";
 import { usePoseTracking } from "@/hooks/usePoseTracking";
 import {
   inferFretboard,
@@ -8,6 +8,14 @@ import {
   pixelToFret,
   type HandFretboard,
 } from "@/lib/bass/handFretboard";
+import {
+  SHAPES,
+  KEYS,
+  resolveShape,
+  matchShape,
+  type MatchState,
+} from "@/lib/bass/shapes";
+import { NOTE_NAMES, noteAt } from "@/lib/bass/theory";
 
 // MediaPipe fingertip landmark indices
 const FINGERTIPS = {
@@ -27,9 +35,13 @@ const FINGERTIP_COLORS: Record<FingerName, string> = {
 };
 
 const FRET_COUNT = 12;
-// Diagram string order top→bottom: E (thickest) at top, G (thinnest) at bottom.
-// This matches the hand-inferred fretboard's string-axis direction (0=E..3=G).
 const STRING_LABELS = ["E", "A", "D", "G"];
+
+const TRAFFIC_COLORS: Record<MatchState, string> = {
+  green: "#22dd55",
+  yellow: "#ffcc00",
+  red: "#ff4455",
+};
 
 type FingerPos = { string: number; fret: number };
 
@@ -41,12 +53,24 @@ export default function BassLab() {
   const fretboardContainerRef = useRef<HTMLDivElement>(null);
   const [webcamReady, setWebcamReady] = useState(false);
   const [handPosition, setHandPosition] = useState(0);
+  const [shapeId, setShapeId] = useState(SHAPES[0].id);
+  const [keyName, setKeyName] = useState<(typeof KEYS)[number]>("A");
+  const [matchState, setMatchState] = useState<MatchState>("red");
 
   const { poseDataRef, isLoading: handsLoading } = usePoseTracking(videoRef);
   const fbRef = useRef<HandFretboard | null>(null);
   const fingerPositionsRef = useRef<Partial<Record<FingerName, FingerPos>>>({});
   const handPositionRef = useRef(handPosition);
   handPositionRef.current = handPosition;
+
+  const shape = useMemo(
+    () => SHAPES.find((s) => s.id === shapeId) ?? SHAPES[0],
+    [shapeId]
+  );
+  const rootPc = NOTE_NAMES.indexOf(keyName);
+  const targets = useMemo(() => resolveShape(shape, rootPc), [shape, rootPc]);
+  const targetsRef = useRef(targets);
+  targetsRef.current = targets;
 
   // Start webcam
   useEffect(() => {
@@ -76,9 +100,11 @@ export default function BassLab() {
     };
   }, []);
 
-  // Render loop — two canvases driven by one RAF
+  // Render loop
   useEffect(() => {
     let rafId = 0;
+    let lastMatch: MatchState = "red";
+    let matchFrameCounter = 0;
 
     function sizeCanvas(
       canvas: HTMLCanvasElement | null,
@@ -102,11 +128,8 @@ export default function BassLab() {
       ctx.clearRect(0, 0, w, h);
 
       const pose = poseDataRef.current;
-
-      // Keep per-finger (string, fret) in a local ref for the fretboard panel
       const positions: Partial<Record<FingerName, FingerPos>> = {};
 
-      // Update hand-inferred fretboard (used only for finger→string/fret mapping)
       let fb: HandFretboard | null = null;
       if (pose && pose.landmarks.length >= 21) {
         const raw = inferFretboard(pose.landmarks, w, h, true);
@@ -123,7 +146,6 @@ export default function BassLab() {
         else fbRef.current = null;
       }
 
-      // Fingertip markers + position extraction
       if (pose && pose.landmarks.length >= 21) {
         (Object.keys(FINGERTIPS) as FingerName[]).forEach((name) => {
           const idx = FINGERTIPS[name];
@@ -131,7 +153,6 @@ export default function BassLab() {
           if (!lm) return;
           const px = { x: (1 - lm.x) * w, y: lm.y * h };
 
-          // Outer ring + inner dot
           ctx.strokeStyle = FINGERTIP_COLORS[name];
           ctx.lineWidth = 2;
           ctx.beginPath();
@@ -173,13 +194,13 @@ export default function BassLab() {
       const boardW = w - padL - padR;
       const boardH = h - padT - padB;
       const fretW = boardW / FRET_COUNT;
-      const stringH = boardH / 3; // 4 strings → 3 gaps
+      const stringH = boardH / 3;
 
       // Fretboard body
       ctx.fillStyle = "#1c1410";
       ctx.fillRect(padL, padT, boardW, boardH);
 
-      // Inlay dots at 3, 5, 7, 9
+      // Inlay dots
       ctx.fillStyle = "rgba(255, 255, 255, 0.2)";
       for (const f of [3, 5, 7, 9]) {
         if (f > FRET_COUNT) continue;
@@ -187,7 +208,6 @@ export default function BassLab() {
         ctx.arc(padL + (f - 0.5) * fretW, padT + boardH / 2, 5, 0, Math.PI * 2);
         ctx.fill();
       }
-      // Double inlay at 12
       if (FRET_COUNT >= 12) {
         ctx.beginPath();
         ctx.arc(padL + 11.5 * fretW, padT + boardH / 3, 5, 0, Math.PI * 2);
@@ -212,7 +232,7 @@ export default function BassLab() {
       // Strings
       for (let s = 0; s < 4; s++) {
         const y = padT + s * stringH;
-        ctx.lineWidth = 2 - s * 0.35; // E (s=0) thickest, G (s=3) thinnest
+        ctx.lineWidth = 2 - s * 0.35;
         ctx.strokeStyle = "rgba(220, 200, 160, 0.7)";
         ctx.beginPath();
         ctx.moveTo(padL, y);
@@ -226,7 +246,7 @@ export default function BassLab() {
         ctx.fillText(STRING_LABELS[s], padL - 8, y);
       }
 
-      // Fret numbers below
+      // Fret numbers
       ctx.fillStyle = "rgba(170, 170, 170, 0.7)";
       ctx.font = "10px monospace";
       ctx.textAlign = "center";
@@ -235,9 +255,72 @@ export default function BassLab() {
         ctx.fillText(f.toString(), padL + (f - 0.5) * fretW, padT + boardH + 4);
       }
 
-      // Finger dots — map hand-local (string, fret) to absolute diagram position
-      const positions = fingerPositionsRef.current;
+      // Compute absolute finger positions (for matching + drawing)
       const base = handPositionRef.current;
+      const absFingers: Array<{ string: number; fret: number }> = [];
+      const positions = fingerPositionsRef.current;
+      (Object.keys(FINGERTIPS) as FingerName[]).forEach((name) => {
+        const fp = positions[name];
+        if (!fp) return;
+        absFingers.push({
+          string: Math.max(0, Math.min(3, fp.string)),
+          fret: base + fp.fret,
+        });
+      });
+
+      // Shape match
+      const curTargets = targetsRef.current;
+      const { state, coveredIdx } = matchShape(curTargets, absFingers);
+      if (state !== lastMatch) {
+        matchFrameCounter++;
+        if (matchFrameCounter >= 3) {
+          lastMatch = state;
+          matchFrameCounter = 0;
+          setMatchState(state);
+        }
+      } else {
+        matchFrameCounter = 0;
+      }
+
+      // Target positions — draw as glowing rings with role labels
+      curTargets.forEach((tgt, i) => {
+        if (tgt.fret < 0 || tgt.fret > FRET_COUNT) return;
+        const x = padL + tgt.fret * fretW;
+        const y = padT + tgt.string * stringH;
+        const isCovered = coveredIdx.has(i);
+        const color = isCovered ? TRAFFIC_COLORS.green : TRAFFIC_COLORS.yellow;
+
+        // Outer glow
+        const glow = ctx.createRadialGradient(x, y, 4, x, y, 22);
+        glow.addColorStop(0, color + "aa");
+        glow.addColorStop(1, color + "00");
+        ctx.fillStyle = glow;
+        ctx.beginPath();
+        ctx.arc(x, y, 22, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Ring
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2.5;
+        ctx.beginPath();
+        ctx.arc(x, y, 13, 0, Math.PI * 2);
+        ctx.stroke();
+
+        // Role label
+        ctx.fillStyle = color;
+        ctx.font = "bold 11px monospace";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(tgt.role, x, y);
+
+        // Note name above
+        const note = noteAt(tgt.string, tgt.fret);
+        ctx.fillStyle = "rgba(255,255,255,0.55)";
+        ctx.font = "9px monospace";
+        ctx.fillText(note, x, y - 20);
+      });
+
+      // Finger dots on top
       (Object.keys(FINGERTIPS) as FingerName[]).forEach((name) => {
         const fp = positions[name];
         if (!fp) return;
@@ -248,15 +331,13 @@ export default function BassLab() {
         const x = padL + absFret * fretW;
         const y = padT + sIdx * stringH;
 
-        // Glow
         ctx.fillStyle = FINGERTIP_COLORS[name] + "40";
         ctx.beginPath();
         ctx.arc(x, y, 14, 0, Math.PI * 2);
         ctx.fill();
-        // Dot
         ctx.fillStyle = FINGERTIP_COLORS[name];
         ctx.beginPath();
-        ctx.arc(x, y, 8, 0, Math.PI * 2);
+        ctx.arc(x, y, 7, 0, Math.PI * 2);
         ctx.fill();
         ctx.strokeStyle = "rgba(0,0,0,0.7)";
         ctx.lineWidth = 1.5;
@@ -303,19 +384,35 @@ export default function BassLab() {
     ? "Starting webcam..."
     : handsLoading
       ? "Loading hand tracking..."
-      : "Finger positions show on the fretboard below";
+      : `${keyName} ${shape.name}`;
 
   return (
     <div className="fixed inset-0 bg-black text-white overflow-hidden flex flex-col">
       {/* Top header */}
-      <div className="relative z-10 p-3 sm:p-4 flex items-start justify-between flex-shrink-0">
-        <div>
+      <div className="relative z-10 p-3 sm:p-4 flex items-start justify-between flex-shrink-0 gap-3">
+        <div className="min-w-0">
           <h1 className="text-lg sm:text-xl font-bold tracking-tight">bass.lab</h1>
-          <p className="text-zinc-400 text-xs">{status}</p>
+          <p className="text-zinc-400 text-xs truncate">{status}</p>
         </div>
+
+        {/* Traffic light */}
+        <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/5 border border-white/10">
+          {(["red", "yellow", "green"] as MatchState[]).map((s) => (
+            <div
+              key={s}
+              className="w-3 h-3 rounded-full transition-all"
+              style={{
+                backgroundColor: matchState === s ? TRAFFIC_COLORS[s] : "#222",
+                boxShadow:
+                  matchState === s ? `0 0 12px ${TRAFFIC_COLORS[s]}` : "none",
+              }}
+            />
+          ))}
+        </div>
+
         <a
           href="/"
-          className="text-xs text-zinc-400 hover:text-white active:scale-95 transition px-3 py-1.5 rounded-full bg-white/10 border border-white/10"
+          className="text-xs text-zinc-400 hover:text-white active:scale-95 transition px-3 py-1.5 rounded-full bg-white/10 border border-white/10 flex-shrink-0"
         >
           ← back
         </a>
@@ -334,17 +431,29 @@ export default function BassLab() {
           ref={webcamCanvasRef}
           className="absolute inset-0 w-full h-full pointer-events-none"
         />
+        {/* Lesson blurb overlay */}
+        <div className="absolute bottom-3 left-3 right-3 max-w-md bg-black/60 backdrop-blur-sm rounded-lg px-3 py-2 border border-white/10">
+          <div className="text-[10px] text-zinc-500 uppercase tracking-wider">
+            Lesson
+          </div>
+          <div className="text-sm font-medium">
+            {keyName} {shape.name}
+          </div>
+          <div className="text-xs text-zinc-400 mt-0.5">{shape.description}</div>
+        </div>
       </div>
 
       {/* Static fretboard panel */}
       <div className="bg-zinc-950/95 border-t border-white/10 flex-shrink-0">
-        <div
-          ref={fretboardContainerRef}
-          className="relative h-36 sm:h-44"
-        >
-          <canvas ref={fretboardCanvasRef} className="absolute inset-0 w-full h-full" />
+        <div ref={fretboardContainerRef} className="relative h-36 sm:h-44">
+          <canvas
+            ref={fretboardCanvasRef}
+            className="absolute inset-0 w-full h-full"
+          />
         </div>
-        <div className="flex items-center gap-3 px-4 py-2.5 border-t border-white/5">
+
+        {/* Hand position slider */}
+        <div className="flex items-center gap-3 px-4 py-2 border-t border-white/5">
           <label className="text-xs text-zinc-400 font-mono whitespace-nowrap">
             Hand at fret
           </label>
@@ -359,6 +468,40 @@ export default function BassLab() {
           <span className="text-xs font-mono text-white w-6 text-center tabular-nums">
             {handPosition}
           </span>
+        </div>
+
+        {/* Shape + key pickers */}
+        <div className="border-t border-white/5 px-3 py-2 space-y-2">
+          <div className="flex flex-wrap gap-1.5">
+            {SHAPES.map((s) => (
+              <button
+                key={s.id}
+                onClick={() => setShapeId(s.id)}
+                className={`text-[11px] font-mono px-2.5 py-1.5 rounded transition active:scale-95 ${
+                  shapeId === s.id
+                    ? "bg-white text-black"
+                    : "bg-white/10 hover:bg-white/20 text-white"
+                }`}
+              >
+                {s.name}
+              </button>
+            ))}
+          </div>
+          <div className="flex flex-wrap gap-1">
+            {KEYS.map((k) => (
+              <button
+                key={k}
+                onClick={() => setKeyName(k)}
+                className={`text-[11px] font-mono w-8 h-7 rounded transition active:scale-95 ${
+                  keyName === k
+                    ? "bg-yellow-400 text-black"
+                    : "bg-white/5 hover:bg-white/15 text-zinc-300"
+                }`}
+              >
+                {k}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
     </div>
