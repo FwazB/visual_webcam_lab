@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import CameraDistortion, { type DistortionMode } from "./CameraDistortion";
 import { useAudioReactiveInput } from "@/hooks/useAudioReactiveInput";
+import { useBodySegmentation } from "@/hooks/useBodySegmentation";
 
 const DISTORTION_MODES: DistortionMode[] = [
   "clean",
@@ -18,6 +19,12 @@ export default function Visualz() {
   const [webcamReady, setWebcamReady] = useState(false);
   const [mode, setMode] = useState<DistortionMode>("overdrive");
   const [meterLevel, setMeterLevel] = useState(0);
+  const {
+    isLoading: bodyMaskLoading,
+    maskRef,
+    maskSizeRef,
+    startSegmentation,
+  } = useBodySegmentation(videoRef);
   const {
     isListening,
     error,
@@ -58,6 +65,12 @@ export default function Visualz() {
   }, []);
 
   useEffect(() => {
+    if (webcamReady && !bodyMaskLoading) {
+      startSegmentation();
+    }
+  }, [bodyMaskLoading, startSegmentation, webcamReady]);
+
+  useEffect(() => {
     if (!isListening) {
       return;
     }
@@ -81,13 +94,15 @@ export default function Visualz() {
         autoPlay
         playsInline
         muted
-        className="absolute inset-0 h-px w-px opacity-0 pointer-events-none"
+        className="absolute inset-0 h-full w-full object-cover -scale-x-100 opacity-80 pointer-events-none"
       />
 
       <CameraDistortion
         videoRef={videoRef}
         levelRef={levelRef}
         peakRef={peakRef}
+        maskRef={maskRef}
+        maskSizeRef={maskSizeRef}
         enabled={isListening}
         mode={mode}
       />
@@ -98,8 +113,10 @@ export default function Visualz() {
           <p className="text-xs text-zinc-400">
             {!webcamReady
               ? "Starting camera..."
+              : bodyMaskLoading
+                ? "Loading body mask..."
               : isListening
-                ? "Audio-reactive distortion active"
+                ? "Body-reactive distortion active"
                 : "Start audio input and strum"}
           </p>
         </div>
@@ -125,6 +142,9 @@ export default function Visualz() {
             >
               {isListening ? "Stop audio" : "Start audio"}
             </button>
+            <span className="rounded bg-white/10 px-2.5 py-2 text-[10px] font-mono uppercase text-zinc-300">
+              body mask
+            </span>
 
             <div className="flex flex-wrap gap-1">
               {DISTORTION_MODES.map((distortionMode) => (
