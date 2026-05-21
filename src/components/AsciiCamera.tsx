@@ -100,7 +100,6 @@ export default function AsciiCamera() {
     const canvas = canvasRef.current;
     const sampleCanvas = sampleCanvasRef.current;
     if (!video || !canvas || !sampleCanvas || video.readyState < 2) {
-      rafRef.current = requestAnimationFrame(renderAscii);
       return;
     }
 
@@ -185,14 +184,17 @@ export default function AsciiCamera() {
         ctx.fillText(char, col * cellW, row * cellH);
       }
     }
-
-    rafRef.current = requestAnimationFrame(renderAscii);
   }, [maskRef, maskSizeRef, theme, style, density]);
 
   // Start/stop render loop
   useEffect(() => {
+    function tick() {
+      renderAscii();
+      rafRef.current = requestAnimationFrame(tick);
+    }
+
     if (webcamReady) {
-      rafRef.current = requestAnimationFrame(renderAscii);
+      rafRef.current = requestAnimationFrame(tick);
     }
     return () => {
       if (rafRef.current) cancelAnimationFrame(rafRef.current);

@@ -26,7 +26,6 @@ export interface HandFretboard {
 
 // MediaPipe hand landmark indices (https://ai.google.dev/mediapipe)
 const INDEX_MCP = 5;
-const MIDDLE_MCP = 9;
 const PINKY_MCP = 17;
 const INDEX_TIP = 8;
 const MIDDLE_TIP = 12;
@@ -61,7 +60,6 @@ export function inferFretboard(
 
   const indexMcp = toPx(landmarks[INDEX_MCP]);
   const pinkyMcp = toPx(landmarks[PINKY_MCP]);
-  const middleMcp = toPx(landmarks[MIDDLE_MCP]);
   const indexTip = toPx(landmarks[INDEX_TIP]);
   const middleTip = toPx(landmarks[MIDDLE_TIP]);
   const ringTip = toPx(landmarks[RING_TIP]);

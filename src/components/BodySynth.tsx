@@ -23,15 +23,16 @@ export default function BodySynth() {
     loadTrack,
     togglePlayback,
     updateFromPose,
-    resetLocks,
   } = useAudioEngine();
 
   // Start webcam — lower resolution on mobile for performance
   useEffect(() => {
+    let stream: MediaStream | null = null;
+
     async function startCamera() {
       try {
         const isMobile = window.innerWidth < 768;
-        const stream = await navigator.mediaDevices.getUserMedia({
+        stream = await navigator.mediaDevices.getUserMedia({
           video: {
             width: isMobile ? 640 : 1280,
             height: isMobile ? 480 : 720,
@@ -50,9 +51,7 @@ export default function BodySynth() {
     startCamera();
 
     return () => {
-      if (videoRef.current?.srcObject) {
-        (videoRef.current.srcObject as MediaStream).getTracks().forEach((t) => t.stop());
-      }
+      stream?.getTracks().forEach((t) => t.stop());
     };
   }, []);
 
@@ -63,7 +62,10 @@ export default function BodySynth() {
 
   // Feed pose data to audio engine via RAF loop
   const isPlayingRef = useRef(isPlaying);
-  isPlayingRef.current = isPlaying;
+
+  useEffect(() => {
+    isPlayingRef.current = isPlaying;
+  }, [isPlaying]);
 
   useEffect(() => {
     let rafId: number;

@@ -3,10 +3,6 @@
 import { useEffect, useRef, useState, useMemo } from "react";
 import Link from "next/link";
 import { usePoseTracking } from "@/hooks/usePoseTracking";
-import { useAudioReactiveInput } from "@/hooks/useAudioReactiveInput";
-import BassCameraDistortion, {
-  type DistortionMode,
-} from "./BassCameraDistortion";
 import {
   inferFretboard,
   smoothFretboard,
@@ -48,14 +44,6 @@ const TRAFFIC_COLORS: Record<MatchState, string> = {
   red: "#ff4455",
 };
 
-const DISTORTION_MODES: DistortionMode[] = [
-  "clean",
-  "overdrive",
-  "fuzz",
-  "glitch",
-  "strobe",
-];
-
 type FingerPos = { string: number; fret: number };
 
 export default function BassLab() {
@@ -69,18 +57,8 @@ export default function BassLab() {
   const [shapeId, setShapeId] = useState(SHAPES[0].id);
   const [keyName, setKeyName] = useState<(typeof KEYS)[number]>("A");
   const [matchState, setMatchState] = useState<MatchState>("red");
-  const [distortionMode, setDistortionMode] =
-    useState<DistortionMode>("overdrive");
 
   const { poseDataRef, isLoading: handsLoading } = usePoseTracking(videoRef);
-  const {
-    isListening: audioListening,
-    error: audioError,
-    levelRef,
-    peakRef,
-    start: startAudioFx,
-    stop: stopAudioFx,
-  } = useAudioReactiveInput();
   const fbRef = useRef<HandFretboard | null>(null);
   const fingerPositionsRef = useRef<Partial<Record<FingerName, FingerPos>>>({});
   const handPositionRef = useRef(handPosition);
@@ -457,53 +435,12 @@ export default function BassLab() {
           autoPlay
           playsInline
           muted
-          className="absolute inset-0 h-px w-px opacity-0 pointer-events-none"
-        />
-        <BassCameraDistortion
-          videoRef={videoRef}
-          levelRef={levelRef}
-          peakRef={peakRef}
-          enabled={audioListening}
-          mode={distortionMode}
+          className="absolute inset-0 w-full h-full object-cover -scale-x-100"
         />
         <canvas
           ref={webcamCanvasRef}
           className="absolute inset-0 w-full h-full pointer-events-none"
         />
-        <div className="absolute top-3 left-3 right-3 flex flex-col gap-2 sm:right-auto sm:max-w-xl">
-          <div className="flex flex-wrap items-center gap-2 rounded-lg border border-white/10 bg-black/60 px-3 py-2 backdrop-blur-sm">
-            <button
-              onClick={audioListening ? stopAudioFx : startAudioFx}
-              className={`rounded px-3 py-1.5 text-[11px] font-mono font-semibold uppercase tracking-wide transition active:scale-95 ${
-                audioListening
-                  ? "bg-red-500/20 text-red-200 hover:bg-red-500/30"
-                  : "bg-yellow-400 text-black hover:bg-yellow-300"
-              }`}
-            >
-              {audioListening ? "Stop Audio FX" : "Start Audio FX"}
-            </button>
-            <div className="flex flex-wrap gap-1">
-              {DISTORTION_MODES.map((mode) => (
-                <button
-                  key={mode}
-                  onClick={() => setDistortionMode(mode)}
-                  className={`rounded px-2 py-1 text-[10px] font-mono uppercase transition active:scale-95 ${
-                    distortionMode === mode
-                      ? "bg-white text-black"
-                      : "bg-white/10 text-zinc-300 hover:bg-white/20"
-                  }`}
-                >
-                  {mode}
-                </button>
-              ))}
-            </div>
-          </div>
-          {audioError && (
-            <div className="rounded border border-red-400/30 bg-red-950/70 px-3 py-1.5 text-xs text-red-200">
-              {audioError}
-            </div>
-          )}
-        </div>
         {/* Lesson blurb overlay */}
         <div className="absolute bottom-3 left-3 right-3 max-w-md bg-black/60 backdrop-blur-sm rounded-lg px-3 py-2 border border-white/10">
           <div className="text-[10px] text-zinc-500 uppercase tracking-wider">

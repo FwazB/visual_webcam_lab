@@ -5,7 +5,7 @@ import * as THREE from "three";
 
 export type DistortionMode = "clean" | "overdrive" | "fuzz" | "glitch" | "strobe";
 
-type BassCameraDistortionProps = {
+type CameraDistortionProps = {
   videoRef: RefObject<HTMLVideoElement | null>;
   levelRef: MutableRefObject<number>;
   peakRef: MutableRefObject<number>;
@@ -135,13 +135,13 @@ const fragmentShader = `
   }
 `;
 
-export default function BassCameraDistortion({
+export default function CameraDistortion({
   videoRef,
   levelRef,
   peakRef,
   enabled,
   mode,
-}: BassCameraDistortionProps) {
+}: CameraDistortionProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const enabledRef = useRef(enabled);
   const modeRef = useRef(mode);
