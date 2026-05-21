@@ -2,6 +2,7 @@
 
 import { type MutableRefObject, type RefObject, useEffect, useRef } from "react";
 import * as THREE from "three";
+import type { ToneProfile } from "@/hooks/useAudioReactiveInput";
 
 export type DistortionMode = "clean" | "overdrive" | "fuzz" | "glitch" | "strobe";
 
@@ -11,6 +12,7 @@ type CameraDistortionProps = {
   videoRef: RefObject<HTMLVideoElement | null>;
   levelRef: MutableRefObject<number>;
   peakRef: MutableRefObject<number>;
+  toneRef: MutableRefObject<ToneProfile>;
   maskRef?: MutableRefObject<Float32Array | null>;
   maskSizeRef?: MaskSizeRef;
   enabled: boolean;
@@ -49,6 +51,7 @@ const fragmentShader = `
   uniform float uPeak;
   uniform float uEnabled;
   uniform float uHasMask;
+  uniform vec3 uTone;
   uniform int uMode;
 
   varying vec2 vUv;
@@ -92,14 +95,28 @@ const fragmentShader = `
     return mix(vec3(gray), color, amount);
   }
 
+  vec3 toneColor() {
+    float depth = clamp(uTone.x, 0.0, 1.0);
+    float mids = clamp(uTone.y, 0.0, 1.0);
+    float highs = clamp(uTone.z, 0.0, 1.0);
+    vec3 lowColor = vec3(1.0, 0.12, 0.03);
+    vec3 midColor = vec3(1.0, 0.78, 0.08);
+    vec3 highColor = vec3(0.1, 0.82, 1.0);
+    vec3 warm = mix(midColor, lowColor, depth);
+    return normalize(mix(warm, highColor, clamp(highs * 1.7, 0.0, 1.0)) + mids * vec3(0.2, 0.14, 0.02));
+  }
+
   vec3 distort(vec2 uv, float drive, float body) {
     vec3 color;
+    float depth = clamp(uTone.x, 0.0, 1.0);
+    float mids = clamp(uTone.y, 0.0, 1.0);
+    float highs = clamp(uTone.z, 0.0, 1.0);
 
     if (uMode == 1) {
       float wave = sin((uv.y + uTime * 0.45) * 55.0) * 0.0035 * drive * body;
       vec2 warped = uv + vec2(wave, 0.0);
       color = sampleVideo(warped);
-      color = saturateColor(color, 1.1 + drive * 1.7 * body);
+      color = saturateColor(color, 1.1 + drive * (1.2 + depth * 1.0) * body);
       color = pow(color, vec3(max(0.5, 1.0 - drive * 0.4 * body)));
       color = smoothstep(vec3(0.02), vec3(0.96), color * (1.0 + drive * 0.85 * body));
     } else if (uMode == 2) {
@@ -110,7 +127,10 @@ const fragmentShader = `
       color.r = sampleVideo(warped + shift).r;
       color.g = sampleVideo(warped).g;
       color.b = sampleVideo(warped - shift).b;
-      color = saturateColor(color + (grain - 0.5) * (0.16 + drive * 0.55) * body, 1.2 + drive);
+      color = saturateColor(
+        color + (grain - 0.5) * (0.16 + drive * (0.35 + highs * 0.6)) * body,
+        1.2 + drive + mids * 0.8
+      );
       color = floor(color * (7.0 + 10.0 * (1.0 - drive * body))) / (7.0 + 10.0 * (1.0 - drive * body));
     } else if (uMode == 3) {
       float slice = floor(uv.y * (18.0 + drive * 42.0));
@@ -123,14 +143,14 @@ const fragmentShader = `
       color.r = sampleVideo(warped + shift).r;
       color.g = sampleVideo(warped).g;
       color.b = sampleVideo(warped - shift).b;
-      color = mix(color, color.bgr, step(0.88 - drive * 0.18, block) * 0.65 * body);
+      color = mix(color, color.bgr, step(0.88 - drive * 0.18, block) * (0.45 + highs * 0.45) * body);
     } else {
       float flash = smoothstep(0.48, 1.0, sin(uTime * (10.0 + drive * 28.0)) * 0.5 + 0.5);
       float bars = step(0.78 - drive * 0.28, sin((uv.y + uTime * 0.2) * 95.0) * 0.5 + 0.5);
       vec2 pulseUv = (uv - 0.5) * (1.0 - flash * drive * 0.045 * body) + 0.5;
       color = sampleVideo(pulseUv);
       color = mix(color, vec3(1.0) - color, flash * (0.35 + drive * 0.55) * body);
-      color += bars * vec3(0.08, 0.12, 0.16) * (0.4 + drive) * body;
+      color += bars * vec3(0.08 + highs * 0.16, 0.12 + mids * 0.12, 0.16 + highs * 0.4) * (0.4 + drive) * body;
     }
 
     return clamp(color, 0.0, 1.0);
@@ -170,9 +190,11 @@ const fragmentShader = `
     vec3 effected = distort(uv, drive, body);
     vec3 background = mix(base * 0.62, saturateColor(base, 0.45), 0.72);
     float bodyMix = clamp(body * (0.78 + drive * 0.45) + drive * 0.16, 0.0, 1.0);
+    vec3 palette = toneColor();
+    effected = mix(effected, effected * (0.75 + palette * 1.2), body * drive * 0.55);
     vec3 color = mix(background, effected, bodyMix);
 
-    vec3 pulse = mix(vec3(1.0, 0.18, 0.04), vec3(1.0, 0.9, 0.18), sin(uTime * 12.0) * 0.5 + 0.5);
+    vec3 pulse = mix(palette, vec3(1.0, 0.9, 0.18), sin(uTime * (8.0 + uTone.z * 18.0)) * 0.5 + 0.5);
     color += pulse * body * drive * 0.34;
     color += pulse * maskEdge * (0.35 + drive * 1.35);
     if (uHasMask < 0.5) {
@@ -187,6 +209,7 @@ export default function CameraDistortion({
   videoRef,
   levelRef,
   peakRef,
+  toneRef,
   maskRef,
   maskSizeRef,
   enabled,
@@ -254,6 +277,7 @@ export default function CameraDistortion({
       uPeak: { value: 0 },
       uEnabled: { value: enabledRef.current ? 1 : 0 },
       uHasMask: { value: 0 },
+      uTone: { value: new THREE.Vector3(0, 0, 0) },
       uMode: { value: MODE_INDEX[modeRef.current] },
     };
 
@@ -338,6 +362,11 @@ export default function CameraDistortion({
       uniforms.uTime.value = time * 0.001;
       uniforms.uLevel.value = Number.isFinite(levelRef.current) ? levelRef.current : 0;
       uniforms.uPeak.value = Number.isFinite(peakRef.current) ? peakRef.current : 0;
+      uniforms.uTone.value.set(
+        Number.isFinite(toneRef.current.depth) ? toneRef.current.depth : 0,
+        Number.isFinite(toneRef.current.mid) ? toneRef.current.mid : 0,
+        Number.isFinite(toneRef.current.high) ? toneRef.current.high : 0,
+      );
       uniforms.uEnabled.value = enabledRef.current ? 1 : 0;
       uniforms.uMode.value = MODE_INDEX[modeRef.current];
 
@@ -366,7 +395,7 @@ export default function CameraDistortion({
       renderer.dispose();
       renderer.domElement.remove();
     };
-  }, [levelRef, maskRef, maskSizeRef, peakRef, videoRef]);
+  }, [levelRef, maskRef, maskSizeRef, peakRef, toneRef, videoRef]);
 
   return (
     <div

@@ -32,6 +32,7 @@ export default function Visualz() {
     error,
     levelRef,
     peakRef,
+    toneRef,
     start,
     stop,
   } = useAudioReactiveInput();
@@ -100,6 +101,7 @@ export default function Visualz() {
         videoRef={videoRef}
         levelRef={levelRef}
         peakRef={peakRef}
+        toneRef={toneRef}
         maskRef={maskRef}
         maskSizeRef={maskSizeRef}
         enabled={isListening}
@@ -110,6 +112,7 @@ export default function Visualz() {
         enabled={isListening}
         levelRef={levelRef}
         peakRef={peakRef}
+        toneRef={toneRef}
         maskRef={maskRef}
         maskSizeRef={maskSizeRef}
       />

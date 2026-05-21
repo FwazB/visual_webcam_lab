@@ -1,11 +1,13 @@
 "use client";
 
 import { type MutableRefObject, useEffect, useRef } from "react";
+import type { ToneProfile } from "@/hooks/useAudioReactiveInput";
 
 type BodyPulseOverlayProps = {
   enabled: boolean;
   levelRef: MutableRefObject<number>;
   peakRef: MutableRefObject<number>;
+  toneRef: MutableRefObject<ToneProfile>;
   maskRef: MutableRefObject<Float32Array | null>;
   maskSizeRef: MutableRefObject<{ width: number; height: number }>;
 };
@@ -19,12 +21,14 @@ type TrailFrame = {
   vx: number;
   vy: number;
   drive: number;
+  tone: ToneProfile;
 };
 
 export default function BodyPulseOverlay({
   enabled,
   levelRef,
   peakRef,
+  toneRef,
   maskRef,
   maskSizeRef,
 }: BodyPulseOverlayProps) {
@@ -73,10 +77,16 @@ export default function BodyPulseOverlay({
 
         const level = enabledRef.current ? levelRef.current : 0;
         const peak = enabledRef.current ? peakRef.current : 0;
+        const tone = enabledRef.current
+          ? toneRef.current
+          : { low: 0, mid: 0, high: 0, depth: 0 };
         const drive = Math.min(1, Math.max(0, level * 2.8 + peak * 1.6));
         const idleAlpha = 36;
         const activeAlpha = 190;
         const edgeBoost = enabledRef.current ? 70 + drive * 150 : 40;
+        const red = Math.round(190 + tone.depth * 65);
+        const green = Math.round(92 + tone.mid * 190 + tone.high * 70);
+        const blue = Math.round(18 + tone.high * 220 + (1 - tone.depth) * 35);
         let bodyWeight = 0;
         let centroidX = 0;
         let centroidY = 0;
@@ -100,9 +110,9 @@ export default function BodyPulseOverlay({
               centroidY += y * body;
             }
 
-            imageData.data[idx] = 255;
-            imageData.data[idx + 1] = Math.round(122 + drive * 120);
-            imageData.data[idx + 2] = Math.round(20 + edge * 120);
+            imageData.data[idx] = red;
+            imageData.data[idx + 1] = Math.min(255, Math.round(green + drive * 60));
+            imageData.data[idx + 2] = Math.min(255, Math.round(blue + edge * 120));
             imageData.data[idx + 3] = Math.round(alpha);
           }
         }
@@ -142,6 +152,7 @@ export default function BodyPulseOverlay({
               vx: velocity.x,
               vy: velocity.y,
               drive,
+              tone,
             });
             if (trailFrames.length > TRAIL_LENGTH) trailFrames.pop();
           }
@@ -153,7 +164,11 @@ export default function BodyPulseOverlay({
             const fade = 1 - i / TRAIL_LENGTH;
             const lagX = -trail.vx * scale * age * 3.8;
             const lagY = -trail.vy * scale * age * 3.8 - age * (0.8 + trail.drive * 2.8);
-            const sway = Math.sin((frameCount - i * 4) * 0.06) * age * trail.drive * 1.4;
+            const sway =
+              Math.sin((frameCount - i * 4) * (0.045 + trail.tone.high * 0.12)) *
+              age *
+              trail.drive *
+              (1.0 + trail.tone.mid);
 
             ctx.globalAlpha = fade * fade * (0.16 + trail.drive * 0.34);
             ctx.filter = `blur(${3 + age * 1.2 + trail.drive * 8}px)`;
@@ -185,7 +200,7 @@ export default function BodyPulseOverlay({
       cancelAnimationFrame(rafId);
       window.removeEventListener("resize", resize);
     };
-  }, [levelRef, maskRef, maskSizeRef, peakRef]);
+  }, [levelRef, maskRef, maskSizeRef, peakRef, toneRef]);
 
   return (
     <canvas
