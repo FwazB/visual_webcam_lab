@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
-import BodyPulseOverlay from "./BodyPulseOverlay";
+import BodyPulseOverlay, { type BackgroundEffect } from "./BodyPulseOverlay";
 import CameraDistortion, { type DistortionMode } from "./CameraDistortion";
 import { useAudioReactiveInput } from "@/hooks/useAudioReactiveInput";
 import { useBodySegmentation } from "@/hooks/useBodySegmentation";
@@ -23,12 +23,23 @@ const MODE_LABELS: Record<DistortionMode, string> = {
   pulse: "Pulse",
 };
 
+const BACKGROUND_EFFECTS: BackgroundEffect[] = ["off", "orbits", "grid", "bursts"];
+
+const BACKGROUND_LABELS: Record<BackgroundEffect, string> = {
+  off: "Off",
+  orbits: "Orbits",
+  grid: "Grid",
+  bursts: "Bursts",
+};
+
 export default function Visualz() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [webcamReady, setWebcamReady] = useState(false);
   const [mode, setMode] = useState<DistortionMode>("aura");
-  const [intensity, setIntensity] = useState(1);
-  const [baseColor, setBaseColor] = useState("#ff7a18");
+  const [intensityPercent, setIntensityPercent] = useState(25);
+  const [baseColor, setBaseColor] = useState("#18c8ff");
+  const [backgroundEffect, setBackgroundEffect] =
+    useState<BackgroundEffect>("orbits");
   const [meterLevel, setMeterLevel] = useState(0);
   const [maskReady, setMaskReady] = useState(false);
   const {
@@ -96,6 +107,7 @@ export default function Visualz() {
   }, [isListening, levelRef, maskRef]);
 
   const displayedMeterLevel = isListening ? meterLevel : 0;
+  const scaledIntensity = Math.pow(intensityPercent / 60, 1.85) * 0.72;
 
   return (
     <div className="fixed inset-0 overflow-hidden bg-black text-white">
@@ -116,7 +128,7 @@ export default function Visualz() {
         maskSizeRef={maskSizeRef}
         enabled={isListening}
         mode={mode}
-        intensity={intensity}
+        intensity={scaledIntensity}
         baseColor={baseColor}
       />
 
@@ -128,8 +140,9 @@ export default function Visualz() {
         maskRef={maskRef}
         maskSizeRef={maskSizeRef}
         mode={mode}
-        intensity={intensity}
+        intensity={scaledIntensity}
         baseColor={baseColor}
+        backgroundEffect={backgroundEffect}
       />
 
       <div className="absolute inset-x-0 top-0 z-10 flex items-start justify-between gap-3 p-3 sm:p-4">
@@ -195,16 +208,16 @@ export default function Visualz() {
               <div className="flex items-center justify-between gap-3 text-[10px] font-mono uppercase text-zinc-400">
                 <span>Intensity</span>
                 <span className="tabular-nums text-zinc-300">
-                  {Math.round(intensity * 100)}%
+                  {intensityPercent}%
                 </span>
               </div>
               <input
                 type="range"
-                min="0.25"
-                max="2"
-                step="0.05"
-                value={intensity}
-                onChange={(event) => setIntensity(Number(event.target.value))}
+                min="0"
+                max="60"
+                step="1"
+                value={intensityPercent}
+                onChange={(event) => setIntensityPercent(Number(event.target.value))}
                 className="w-full accent-white/80"
               />
             </label>
@@ -219,6 +232,27 @@ export default function Visualz() {
                 aria-label="Projection color"
               />
             </label>
+          </div>
+
+          <div className="mt-3 grid gap-1.5">
+            <div className="text-[10px] font-mono uppercase text-zinc-400">
+              Background sequence
+            </div>
+            <div className="flex flex-wrap gap-1">
+              {BACKGROUND_EFFECTS.map((effect) => (
+                <button
+                  key={effect}
+                  onClick={() => setBackgroundEffect(effect)}
+                  className={`rounded px-2.5 py-1.5 text-[10px] font-mono uppercase transition active:scale-95 ${
+                    backgroundEffect === effect
+                      ? "bg-white text-black"
+                      : "bg-white/10 text-zinc-300 hover:bg-white/20"
+                  }`}
+                >
+                  {BACKGROUND_LABELS[effect]}
+                </button>
+              ))}
+            </div>
           </div>
 
           <div className="mt-3 h-2 overflow-hidden rounded-full bg-white/10">

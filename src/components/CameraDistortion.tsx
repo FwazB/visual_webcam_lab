@@ -103,11 +103,11 @@ const fragmentShader = `
     float depth = clamp(uTone.x, 0.0, 1.0);
     float mids = clamp(uTone.y, 0.0, 1.0);
     float highs = clamp(uTone.z, 0.0, 1.0);
-    vec3 lowColor = mix(uBaseColor, vec3(1.0, 0.08, 0.02), 0.42 + depth * 0.26);
-    vec3 midColor = mix(uBaseColor, vec3(1.0, 0.78, 0.08), 0.3 + mids * 0.28);
-    vec3 highColor = mix(uBaseColor, vec3(0.1, 0.82, 1.0), 0.45 + highs * 0.32);
+    vec3 lowColor = mix(uBaseColor, vec3(1.0, 0.08, 0.02), 0.16 + depth * 0.22);
+    vec3 midColor = mix(uBaseColor, vec3(1.0, 0.78, 0.08), 0.12 + mids * 0.18);
+    vec3 highColor = mix(uBaseColor, vec3(0.1, 0.82, 1.0), 0.2 + highs * 0.24);
     vec3 warm = mix(midColor, lowColor, depth);
-    return clamp(mix(warm, highColor, clamp(highs * 1.45, 0.0, 1.0)) + mids * uBaseColor * 0.18, 0.0, 1.0);
+    return clamp(mix(warm, highColor, clamp(highs * 1.2, 0.0, 1.0)) + uBaseColor * 0.22, 0.0, 1.0);
   }
 
   vec3 project(vec2 uv, float drive, float body, float room, float edge) {
@@ -177,9 +177,9 @@ const fragmentShader = `
     float level = clamp(uLevel, 0.0, 1.0);
     float peak = clamp(uPeak, 0.0, 1.0);
     float active = step(0.5, uEnabled);
-    float intensity = clamp(uIntensity, 0.0, 2.5);
+    float intensity = clamp(uIntensity, 0.0, 1.0);
     float drive = clamp((level * 3.8 + peak * 2.7) * intensity, 0.0, 1.0) * active;
-    drive = max(drive, 0.14 * active * min(intensity, 1.0));
+    drive = max(drive, 0.06 * active * intensity);
     vec2 uv = vUv;
     vec3 base = sampleVideo(uv);
     vec3 palette = toneColor();
@@ -206,7 +206,7 @@ const fragmentShader = `
     }
 
     float grid = sin((uv.x + uTime * 0.025) * 46.0) * sin((uv.y - uTime * 0.018) * 32.0);
-    float room = clamp(0.12 + drive * 0.52 + uTone.z * 0.16 + smoothstep(0.72, 1.0, grid) * 0.12 * intensity, 0.0, 1.0);
+    float room = clamp(0.05 + drive * 0.52 + uTone.z * 0.1 + smoothstep(0.72, 1.0, grid) * 0.1 * intensity, 0.0, 1.0);
     vec3 effected = project(uv, drive, body, room, maskEdge);
     vec3 background = mix(base * 0.72, base * (0.52 + palette * 0.7), room * drive * 0.78);
     background += palette * smoothstep(0.78, 1.0, grid) * drive * 0.12;

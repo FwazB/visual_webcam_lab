@@ -4,6 +4,8 @@ import { type MutableRefObject, useEffect, useRef } from "react";
 import type { DistortionMode } from "./CameraDistortion";
 import type { ToneProfile } from "@/hooks/useAudioReactiveInput";
 
+export type BackgroundEffect = "off" | "orbits" | "grid" | "bursts";
+
 type BodyPulseOverlayProps = {
   enabled: boolean;
   levelRef: MutableRefObject<number>;
@@ -14,6 +16,7 @@ type BodyPulseOverlayProps = {
   mode: DistortionMode;
   intensity: number;
   baseColor: string;
+  backgroundEffect: BackgroundEffect;
 };
 
 const MAX_DPR = 1.5;
@@ -38,19 +41,22 @@ export default function BodyPulseOverlay({
   mode,
   intensity,
   baseColor,
+  backgroundEffect,
 }: BodyPulseOverlayProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const enabledRef = useRef(enabled);
   const modeRef = useRef(mode);
   const intensityRef = useRef(intensity);
   const baseColorRef = useRef(baseColor);
+  const backgroundEffectRef = useRef(backgroundEffect);
 
   useEffect(() => {
     enabledRef.current = enabled;
     modeRef.current = mode;
     intensityRef.current = intensity;
     baseColorRef.current = baseColor;
-  }, [baseColor, enabled, intensity, mode]);
+    backgroundEffectRef.current = backgroundEffect;
+  }, [backgroundEffect, baseColor, enabled, intensity, mode]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -61,6 +67,9 @@ export default function BodyPulseOverlay({
     let frameCount = 0;
     let imageData: ImageData | null = null;
     let previousCentroid: { x: number; y: number } | null = null;
+    let previousSignal = 0;
+    let beatCooldown = 0;
+    let beatIndex = 0;
     const trailFrames: TrailFrame[] = [];
     const maskCanvas = document.createElement("canvas");
     const maskCtx = maskCanvas.getContext("2d");
@@ -90,6 +99,7 @@ export default function BodyPulseOverlay({
 
         const level = enabledRef.current ? levelRef.current : 0;
         const peak = enabledRef.current ? peakRef.current : 0;
+        const signal = level * 0.65 + peak * 0.35;
         const tone = enabledRef.current
           ? toneRef.current
           : { low: 0, mid: 0, high: 0, depth: 0 };
@@ -103,9 +113,9 @@ export default function BodyPulseOverlay({
         const activeAlpha = 190;
         const edgeBoost = (enabledRef.current ? 70 + drive * 150 : 40) * edgeModeBoost;
         const [baseRed, baseGreen, baseBlue] = hexToRgb(baseColorRef.current);
-        const red = Math.round(baseRed * (160 + tone.depth * 95) + tone.mid * 26);
-        const green = Math.round(baseGreen * (150 + tone.mid * 105) + tone.high * 70);
-        const blue = Math.round(baseBlue * (150 + tone.high * 105) + (1 - tone.depth) * 28);
+        const red = Math.round(baseRed * 210 + tone.depth * 45 + tone.mid * 16);
+        const green = Math.round(baseGreen * 210 + tone.mid * 42 + tone.high * 28);
+        const blue = Math.round(baseBlue * 210 + tone.high * 54 + (1 - tone.depth) * 10);
         let bodyWeight = 0;
         let centroidX = 0;
         let centroidY = 0;
@@ -158,8 +168,21 @@ export default function BodyPulseOverlay({
                   y: centroid.y - previousCentroid.y,
                 }
               : { x: 0, y: 0 };
+          const centerX = centroid ? dx + centroid.x * scale : canvas.width / 2;
+          const centerY = centroid ? dy + centroid.y * scale : canvas.height / 2;
 
           if (centroid) previousCentroid = centroid;
+          if (
+            enabledRef.current &&
+            signal > 0.18 &&
+            previousSignal <= 0.16 &&
+            beatCooldown <= 0
+          ) {
+            beatIndex++;
+            beatCooldown = 12;
+          }
+          beatCooldown = Math.max(0, beatCooldown - 1);
+          previousSignal = signal * 0.7 + previousSignal * 0.3;
 
           if (frameCount % TRAIL_SAMPLE_RATE === 0) {
             const snapshot = document.createElement("canvas");
@@ -178,6 +201,21 @@ export default function BodyPulseOverlay({
 
           ctx.save();
           ctx.globalCompositeOperation = "screen";
+          drawBackgroundSequence({
+            ctx,
+            effect: backgroundEffectRef.current,
+            centerX,
+            centerY,
+            width: canvas.width,
+            height: canvas.height,
+            beatIndex,
+            frameCount,
+            drive,
+            tone,
+            color: [baseRed, baseGreen, baseBlue],
+            intensity,
+          });
+
           trailFrames.forEach((trail, i) => {
             const age = i + 1;
             const fade = 1 - i / TRAIL_LENGTH;
@@ -241,5 +279,96 @@ export default function BodyPulseOverlay({
 function hexToRgb(hex: string): [number, number, number] {
   const normalized = /^#[0-9a-fA-F]{6}$/.test(hex) ? hex.slice(1) : "ff7a18";
   const value = Number.parseInt(normalized, 16);
-  return [(value >> 16) & 255, (value >> 8) & 255, value & 255];
+  return [
+    ((value >> 16) & 255) / 255,
+    ((value >> 8) & 255) / 255,
+    (value & 255) / 255,
+  ];
+}
+
+function drawBackgroundSequence({
+  ctx,
+  effect,
+  centerX,
+  centerY,
+  width,
+  height,
+  beatIndex,
+  frameCount,
+  drive,
+  tone,
+  color,
+  intensity,
+}: {
+  ctx: CanvasRenderingContext2D;
+  effect: BackgroundEffect;
+  centerX: number;
+  centerY: number;
+  width: number;
+  height: number;
+  beatIndex: number;
+  frameCount: number;
+  drive: number;
+  tone: ToneProfile;
+  color: [number, number, number];
+  intensity: number;
+}) {
+  if (effect === "off" || intensity <= 0.01) return;
+
+  const alpha = Math.min(0.85, (0.08 + drive * 0.55) * Math.max(0.15, intensity));
+  const red = Math.round(Math.min(255, color[0] * 225 + tone.depth * 30));
+  const green = Math.round(Math.min(255, color[1] * 225 + tone.mid * 55));
+  const blue = Math.round(Math.min(255, color[2] * 225 + tone.high * 70));
+  const stroke = `rgba(${red}, ${green}, ${blue}, ${alpha})`;
+  const fill = `rgba(${red}, ${green}, ${blue}, ${alpha * 0.28})`;
+  const phase = beatIndex % 8;
+
+  ctx.save();
+  ctx.lineWidth = Math.max(1, 1 + drive * 3);
+  ctx.strokeStyle = stroke;
+  ctx.fillStyle = fill;
+
+  if (effect === "orbits") {
+    const count = 6;
+    const radius = 90 + phase * 18 + drive * 140;
+    for (let i = 0; i < count; i++) {
+      const angle = (Math.PI * 2 * i) / count + beatIndex * 0.55 + frameCount * 0.012;
+      const x = centerX + Math.cos(angle) * radius * (1.1 + tone.high * 0.5);
+      const y = centerY + Math.sin(angle) * radius * (0.72 + tone.depth * 0.45);
+      const size = 10 + ((phase + i) % 4) * 7 + drive * 34;
+      ctx.beginPath();
+      ctx.arc(x, y, size, 0, Math.PI * 2);
+      ctx.stroke();
+      if ((phase + i) % 2 === 0) ctx.fill();
+    }
+  } else if (effect === "grid") {
+    const spacing = 42 + phase * 4;
+    const offset = (frameCount * (0.6 + drive * 2.4) + beatIndex * spacing * 0.25) % spacing;
+    for (let x = -spacing; x < width + spacing; x += spacing) {
+      ctx.beginPath();
+      ctx.moveTo(x + offset, 0);
+      ctx.lineTo(x - offset * 0.35, height);
+      ctx.stroke();
+    }
+    for (let y = -spacing; y < height + spacing; y += spacing) {
+      ctx.beginPath();
+      ctx.moveTo(0, y + offset);
+      ctx.lineTo(width, y - offset * 0.35);
+      ctx.stroke();
+    }
+  } else {
+    const rays = 10;
+    for (let i = 0; i < rays; i++) {
+      const step = (phase + i) % rays;
+      const angle = (Math.PI * 2 * step) / rays + frameCount * 0.006;
+      const inner = 45 + drive * 40;
+      const outer = Math.max(width, height) * (0.35 + ((i + phase) % 5) * 0.08);
+      ctx.beginPath();
+      ctx.moveTo(centerX + Math.cos(angle) * inner, centerY + Math.sin(angle) * inner);
+      ctx.lineTo(centerX + Math.cos(angle) * outer, centerY + Math.sin(angle) * outer);
+      ctx.stroke();
+    }
+  }
+
+  ctx.restore();
 }
