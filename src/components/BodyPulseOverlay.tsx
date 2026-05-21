@@ -13,7 +13,7 @@ type BodyPulseOverlayProps = {
   toneRef: MutableRefObject<ToneProfile>;
   maskRef: MutableRefObject<Float32Array | null>;
   maskSizeRef: MutableRefObject<{ width: number; height: number }>;
-  mode: DistortionMode;
+  modes: DistortionMode[];
   intensity: number;
   baseColor: string;
   backgroundEffect: BackgroundEffect;
@@ -38,25 +38,25 @@ export default function BodyPulseOverlay({
   toneRef,
   maskRef,
   maskSizeRef,
-  mode,
+  modes,
   intensity,
   baseColor,
   backgroundEffect,
 }: BodyPulseOverlayProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const enabledRef = useRef(enabled);
-  const modeRef = useRef(mode);
+  const modesRef = useRef(modes);
   const intensityRef = useRef(intensity);
   const baseColorRef = useRef(baseColor);
   const backgroundEffectRef = useRef(backgroundEffect);
 
   useEffect(() => {
     enabledRef.current = enabled;
-    modeRef.current = mode;
+    modesRef.current = modes;
     intensityRef.current = intensity;
     baseColorRef.current = baseColor;
     backgroundEffectRef.current = backgroundEffect;
-  }, [backgroundEffect, baseColor, enabled, intensity, mode]);
+  }, [backgroundEffect, baseColor, enabled, intensity, modes]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -103,12 +103,16 @@ export default function BodyPulseOverlay({
         const tone = enabledRef.current
           ? toneRef.current
           : { low: 0, mid: 0, high: 0, depth: 0 };
-        const mode = modeRef.current;
+        const modes = modesRef.current;
+        const hasMode = (mode: DistortionMode) => modes.includes(mode);
         const intensity = Math.max(0, Math.min(2.5, intensityRef.current));
         const drive = Math.min(1, Math.max(0, (level * 2.8 + peak * 1.6) * intensity));
         const trailBoost =
-          mode === "echo" ? 1.9 : mode === "rift" ? 1.35 : mode === "pulse" ? 1.1 : 0.85;
-        const edgeModeBoost = mode === "shatter" ? 1.5 : mode === "pulse" ? 1.25 : 1;
+          (hasMode("echo") ? 1.25 : 0.7) +
+          (hasMode("rift") ? 0.35 : 0) +
+          (hasMode("pulse") ? 0.2 : 0);
+        const edgeModeBoost =
+          1 + (hasMode("shatter") ? 0.5 : 0) + (hasMode("pulse") ? 0.25 : 0);
         const idleAlpha = 36;
         const activeAlpha = 190;
         const edgeBoost = (enabledRef.current ? 70 + drive * 150 : 40) * edgeModeBoost;
@@ -219,22 +223,24 @@ export default function BodyPulseOverlay({
           trailFrames.forEach((trail, i) => {
             const age = i + 1;
             const fade = 1 - i / TRAIL_LENGTH;
-            const mode = modeRef.current;
-            const modeDrift = mode === "echo" ? 1.9 : mode === "rift" ? 1.35 : 1;
+            const modes = modesRef.current;
+            const hasMode = (mode: DistortionMode) => modes.includes(mode);
+            const modeDrift =
+              1 + (hasMode("echo") ? 0.9 : 0) + (hasMode("rift") ? 0.35 : 0);
             const lagX = -trail.vx * scale * age * 3.8 * modeDrift;
             const lagY =
               -trail.vy * scale * age * 3.8 * modeDrift -
-              age * (0.8 + trail.drive * 2.8) * (mode === "pulse" ? 0.7 : 1);
+              age * (0.8 + trail.drive * 2.8) * (hasMode("pulse") ? 0.7 : 1);
             const sway =
               Math.sin((frameCount - i * 4) * (0.045 + trail.tone.high * 0.12)) *
               age *
               trail.drive *
               (1.0 + trail.tone.mid) *
-              (mode === "rift" ? 2.2 : 1);
+              (hasMode("rift") ? 2.2 : 1);
 
             ctx.globalAlpha = fade * fade * (0.16 + trail.drive * 0.34) * trailBoost;
             ctx.filter =
-              mode === "shatter"
+              hasMode("shatter")
                 ? `blur(${1.2 + age * 0.5}px) contrast(${1.4 + trail.tone.high})`
                 : `blur(${3 + age * 1.2 + trail.drive * 8 * Math.max(0.5, intensity)}px)`;
             ctx.drawImage(

@@ -16,7 +16,7 @@ type CameraDistortionProps = {
   maskRef?: MutableRefObject<Float32Array | null>;
   maskSizeRef?: MaskSizeRef;
   enabled: boolean;
-  mode: DistortionMode;
+  modes: DistortionMode[];
   intensity: number;
   baseColor: string;
 };
@@ -56,6 +56,8 @@ const fragmentShader = `
   uniform float uIntensity;
   uniform vec3 uTone;
   uniform vec3 uBaseColor;
+  uniform vec4 uModeWeights;
+  uniform float uPulseWeight;
   uniform int uMode;
 
   varying vec2 vUv;
@@ -214,8 +216,29 @@ const fragmentShader = `
     effected = mix(effected, effected * (0.7 + palette * 1.25), clamp(body * drive * 0.58 + room * drive * 0.22, 0.0, 1.0));
     vec3 color = mix(background, effected, projectionMix);
 
+    float auraW = uModeWeights.x;
+    float echoW = uModeWeights.y;
+    float riftW = uModeWeights.z;
+    float shatterW = uModeWeights.w;
+    float pulseW = uPulseWeight;
+
+    vec2 slow = vec2(sin(uTime * 0.4 + uv.y * 5.0), cos(uTime * 0.3 + uv.x * 4.0)) * drive * 0.018;
+    color = mix(color, sampleVideo(uv - slow) * (0.68 + palette * 0.72), echoW * drive * (0.16 + body * 0.2));
+
+    vec2 center = uv - 0.5;
+    float radius = length(center);
+    float ripple = sin(radius * 42.0 - uTime * 7.0);
+    vec2 riftUv = uv + normalize(center + vec2(0.001)) * ripple * drive * 0.028 * (0.4 + body);
+    color = mix(color, sampleVideo(riftUv) * (0.72 + palette * 0.85), riftW * drive * (0.18 + room * 0.16));
+
+    float shard = step(0.88 - drive * 0.18, hash(floor(uv * vec2(28.0, 18.0)) + floor(uTime * 18.0)));
+    color = mix(color, color.bgr + palette * 0.35, shatterW * shard * drive * (0.16 + uTone.z * 0.35));
+
+    float flash = smoothstep(0.52, 1.0, sin(uTime * (12.0 + drive * 22.0)) * 0.5 + 0.5);
+    color += palette * pulseW * flash * drive * (0.08 + room * 0.18 + body * 0.2);
+
     vec3 pulse = mix(palette, vec3(1.0, 0.9, 0.18), sin(uTime * (8.0 + uTone.z * 18.0)) * 0.5 + 0.5);
-    color += pulse * body * drive * 0.34;
+    color += pulse * body * drive * (0.22 + auraW * 0.12);
     color += pulse * maskEdge * (0.35 + drive * 1.35);
     color += palette * room * drive * 0.08;
 
@@ -231,22 +254,22 @@ export default function CameraDistortion({
   maskRef,
   maskSizeRef,
   enabled,
-  mode,
+  modes,
   intensity,
   baseColor,
 }: CameraDistortionProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const enabledRef = useRef(enabled);
-  const modeRef = useRef(mode);
+  const modesRef = useRef(modes);
   const intensityRef = useRef(intensity);
   const baseColorRef = useRef(baseColor);
 
   useEffect(() => {
     enabledRef.current = enabled;
-    modeRef.current = mode;
+    modesRef.current = modes;
     intensityRef.current = intensity;
     baseColorRef.current = baseColor;
-  }, [baseColor, enabled, intensity, mode]);
+  }, [baseColor, enabled, intensity, modes]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -304,7 +327,9 @@ export default function CameraDistortion({
       uIntensity: { value: intensityRef.current },
       uTone: { value: new THREE.Vector3(0, 0, 0) },
       uBaseColor: { value: new THREE.Vector3(1, 0.48, 0.09) },
-      uMode: { value: MODE_INDEX[modeRef.current] },
+      uModeWeights: { value: new THREE.Vector4(1, 0, 0, 0) },
+      uPulseWeight: { value: 0 },
+      uMode: { value: MODE_INDEX[modesRef.current[0] ?? "aura"] },
     };
 
     const material = new THREE.ShaderMaterial({
@@ -398,7 +423,16 @@ export default function CameraDistortion({
         : 1;
       uniforms.uBaseColor.value.set(...hexToRgb(baseColorRef.current));
       uniforms.uEnabled.value = enabledRef.current ? 1 : 0;
-      uniforms.uMode.value = MODE_INDEX[modeRef.current];
+      const activeModes: DistortionMode[] =
+        modesRef.current.length > 0 ? modesRef.current : ["aura"];
+      uniforms.uMode.value = MODE_INDEX[activeModes[0] ?? "aura"];
+      uniforms.uModeWeights.value.set(
+        activeModes.includes("aura") ? 1 : 0,
+        activeModes.includes("echo") ? 1 : 0,
+        activeModes.includes("rift") ? 1 : 0,
+        activeModes.includes("shatter") ? 1 : 0,
+      );
+      uniforms.uPulseWeight.value = activeModes.includes("pulse") ? 1 : 0;
 
       renderer.render(scene, camera);
     };

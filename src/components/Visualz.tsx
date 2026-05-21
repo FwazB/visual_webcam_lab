@@ -35,7 +35,7 @@ const BACKGROUND_LABELS: Record<BackgroundEffect, string> = {
 export default function Visualz() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [webcamReady, setWebcamReady] = useState(false);
-  const [mode, setMode] = useState<DistortionMode>("aura");
+  const [activeModes, setActiveModes] = useState<DistortionMode[]>(["aura"]);
   const [intensityPercent, setIntensityPercent] = useState(25);
   const [baseColor, setBaseColor] = useState("#18c8ff");
   const [backgroundEffect, setBackgroundEffect] =
@@ -108,6 +108,18 @@ export default function Visualz() {
 
   const displayedMeterLevel = isListening ? meterLevel : 0;
   const scaledIntensity = Math.pow(intensityPercent / 60, 1.85) * 0.72;
+  const activeModeLabel = activeModes.map((mode) => MODE_LABELS[mode]).join(" + ");
+
+  const toggleMode = (projectionMode: DistortionMode) => {
+    setActiveModes((current) => {
+      if (current.includes(projectionMode)) {
+        const next = current.filter((mode) => mode !== projectionMode);
+        return next.length > 0 ? next : ["aura"];
+      }
+
+      return [projectionMode, ...current];
+    });
+  };
 
   return (
     <div className="fixed inset-0 overflow-hidden bg-black text-white">
@@ -127,7 +139,7 @@ export default function Visualz() {
         maskRef={maskRef}
         maskSizeRef={maskSizeRef}
         enabled={isListening}
-        mode={mode}
+        modes={activeModes}
         intensity={scaledIntensity}
         baseColor={baseColor}
       />
@@ -139,7 +151,7 @@ export default function Visualz() {
         toneRef={toneRef}
         maskRef={maskRef}
         maskSizeRef={maskSizeRef}
-        mode={mode}
+        modes={activeModes}
         intensity={scaledIntensity}
         baseColor={baseColor}
         backgroundEffect={backgroundEffect}
@@ -156,7 +168,7 @@ export default function Visualz() {
                 : !maskReady
                   ? "Finding body..."
               : isListening
-                ? `${MODE_LABELS[mode]} projection active`
+                ? `${activeModeLabel} projection active`
                 : "Start audio control and play"}
           </p>
         </div>
@@ -190,9 +202,9 @@ export default function Visualz() {
               {PROJECTION_MODES.map((projectionMode) => (
                 <button
                   key={projectionMode}
-                  onClick={() => setMode(projectionMode)}
+                  onClick={() => toggleMode(projectionMode)}
                   className={`rounded px-2.5 py-2 text-[10px] font-mono uppercase transition active:scale-95 ${
-                    mode === projectionMode
+                    activeModes.includes(projectionMode)
                       ? "bg-white text-black"
                       : "bg-white/10 text-zinc-300 hover:bg-white/20"
                   }`}
