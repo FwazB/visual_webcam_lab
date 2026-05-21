@@ -41,6 +41,8 @@ type HandEmitter = {
   activity: number;
 };
 
+type EffectEmitter = HandEmitter;
+
 const HAND_LANDMARKS = {
   thumbTip: 4,
   indexTip: 8,
@@ -193,6 +195,7 @@ export default function BodyPulseOverlay({
               : { x: 0, y: 0 };
           const tracked = trackingRef.current;
           const handEmitters = getHandEmitters(poseDataRef.current, canvas.width, canvas.height);
+          const headEmitter = getHeadEmitter(tracked, canvas.width, canvas.height);
           const trackedCenterX = tracked.cx * canvas.width;
           const trackedCenterY = tracked.cy * canvas.height;
           const trackingWeight = Math.min(1, tracked.presence * 1.25);
@@ -249,6 +252,7 @@ export default function BodyPulseOverlay({
             objectScale: 0.75 + tracked.area * 2.4,
             velocity: Math.hypot(tracked.vx, tracked.vy),
             handEmitters,
+            headEmitter,
           });
 
           trailFrames.forEach((trail, i) => {
@@ -339,6 +343,7 @@ function drawBackgroundSequence({
   objectScale,
   velocity,
   handEmitters,
+  headEmitter,
 }: {
   ctx: CanvasRenderingContext2D;
   effect: BackgroundEffect;
@@ -355,6 +360,7 @@ function drawBackgroundSequence({
   objectScale: number;
   velocity: number;
   handEmitters: HandEmitter[];
+  headEmitter: EffectEmitter;
 }) {
   if (effect === "off" || intensity <= 0.01) return;
 
@@ -372,6 +378,7 @@ function drawBackgroundSequence({
     handEmitters.length > 0
       ? handEmitters
       : [{ x: centerX, y: centerY, activity: Math.max(0.35, drive) }];
+  const orbitEmitters = [headEmitter];
 
   ctx.save();
   ctx.lineWidth = Math.max(1, 1 + drive * 3);
@@ -381,8 +388,8 @@ function drawBackgroundSequence({
   if (effect === "orbits") {
     const count = 6;
     const radius = (72 + phase * 18 + drive * 140) * objectScale;
-    emitters.forEach((emitter, emitterIndex) => {
-      const emitterRadius = radius * (0.55 + emitter.activity * 0.65);
+    orbitEmitters.forEach((emitter, emitterIndex) => {
+      const emitterRadius = radius * (0.36 + emitter.activity * 0.42);
       for (let i = 0; i < count; i++) {
         const angle =
           (Math.PI * 2 * i) / count +
@@ -390,7 +397,7 @@ function drawBackgroundSequence({
           frameCount * 0.012 +
           emitterIndex * 0.8;
         const x = emitter.x + Math.cos(angle) * emitterRadius * (1.1 + tone.high * 0.5);
-        const y = emitter.y + Math.sin(angle) * emitterRadius * (0.72 + tone.depth * 0.45);
+        const y = emitter.y + Math.sin(angle) * emitterRadius * (0.5 + tone.depth * 0.3);
         const size = 8 + ((phase + i) % 4) * 6 + drive * 30 * emitter.activity;
         ctx.beginPath();
         ctx.arc(x, y, size, 0, Math.PI * 2);
@@ -465,4 +472,28 @@ function getHandEmitters(
       activity: Math.max(0.35, Math.min(1, spread * 9 + (1 - pose.leftPinch) * 0.25)),
     },
   ];
+}
+
+function getHeadEmitter(
+  tracked: TrackedObject,
+  canvasWidth: number,
+  canvasHeight: number,
+): EffectEmitter {
+  if (tracked.presence < 0.08) {
+    return {
+      x: tracked.cx * canvasWidth,
+      y: tracked.cy * canvasHeight,
+      activity: 0.35,
+    };
+  }
+
+  const headX = ((tracked.minX + tracked.maxX) / 2) * canvasWidth;
+  const bodyHeight = Math.max(0.05, tracked.maxY - tracked.minY);
+  const headY = (tracked.minY + bodyHeight * 0.11) * canvasHeight;
+
+  return {
+    x: headX,
+    y: headY,
+    activity: Math.max(0.45, Math.min(1, tracked.presence + tracked.area * 1.8)),
+  };
 }
