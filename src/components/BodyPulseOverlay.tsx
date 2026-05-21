@@ -11,6 +11,15 @@ type BodyPulseOverlayProps = {
 };
 
 const MAX_DPR = 1.5;
+const TRAIL_LENGTH = 9;
+const TRAIL_SAMPLE_RATE = 3;
+
+type TrailFrame = {
+  canvas: HTMLCanvasElement;
+  vx: number;
+  vy: number;
+  drive: number;
+};
 
 export default function BodyPulseOverlay({
   enabled,
@@ -32,7 +41,10 @@ export default function BodyPulseOverlay({
     if (!canvas || !ctx) return;
 
     let rafId = 0;
+    let frameCount = 0;
     let imageData: ImageData | null = null;
+    let previousCentroid: { x: number; y: number } | null = null;
+    const trailFrames: TrailFrame[] = [];
     const maskCanvas = document.createElement("canvas");
     const maskCtx = maskCanvas.getContext("2d");
 
@@ -65,6 +77,9 @@ export default function BodyPulseOverlay({
         const idleAlpha = 36;
         const activeAlpha = 190;
         const edgeBoost = enabledRef.current ? 70 + drive * 150 : 40;
+        let bodyWeight = 0;
+        let centroidX = 0;
+        let centroidY = 0;
 
         for (let y = 0; y < height; y++) {
           for (let x = 0; x < width; x++) {
@@ -78,6 +93,12 @@ export default function BodyPulseOverlay({
             const body = Math.max(0, Math.min(1, (value - 0.38) / 0.38));
             const alpha = Math.min(255, body * (idleAlpha + drive * activeAlpha) + edge * edgeBoost);
             const idx = i * 4;
+
+            if (body > 0.2) {
+              bodyWeight += body;
+              centroidX += x * body;
+              centroidY += y * body;
+            }
 
             imageData.data[idx] = 255;
             imageData.data[idx + 1] = Math.round(122 + drive * 120);
@@ -97,9 +118,54 @@ export default function BodyPulseOverlay({
           const drawHeight = height * scale;
           const dx = (canvas.width - drawWidth) / 2;
           const dy = (canvas.height - drawHeight) / 2;
+          const centroid =
+            bodyWeight > 0
+              ? { x: centroidX / bodyWeight, y: centroidY / bodyWeight }
+              : previousCentroid;
+          const velocity =
+            centroid && previousCentroid
+              ? {
+                  x: centroid.x - previousCentroid.x,
+                  y: centroid.y - previousCentroid.y,
+                }
+              : { x: 0, y: 0 };
+
+          if (centroid) previousCentroid = centroid;
+
+          if (frameCount % TRAIL_SAMPLE_RATE === 0) {
+            const snapshot = document.createElement("canvas");
+            snapshot.width = width;
+            snapshot.height = height;
+            snapshot.getContext("2d")?.drawImage(maskCanvas, 0, 0);
+            trailFrames.unshift({
+              canvas: snapshot,
+              vx: velocity.x,
+              vy: velocity.y,
+              drive,
+            });
+            if (trailFrames.length > TRAIL_LENGTH) trailFrames.pop();
+          }
 
           ctx.save();
           ctx.globalCompositeOperation = "screen";
+          trailFrames.forEach((trail, i) => {
+            const age = i + 1;
+            const fade = 1 - i / TRAIL_LENGTH;
+            const lagX = -trail.vx * scale * age * 3.8;
+            const lagY = -trail.vy * scale * age * 3.8 - age * (0.8 + trail.drive * 2.8);
+            const sway = Math.sin((frameCount - i * 4) * 0.06) * age * trail.drive * 1.4;
+
+            ctx.globalAlpha = fade * fade * (0.16 + trail.drive * 0.34);
+            ctx.filter = `blur(${3 + age * 1.2 + trail.drive * 8}px)`;
+            ctx.drawImage(
+              trail.canvas,
+              dx + lagX + sway,
+              dy + lagY,
+              drawWidth,
+              drawHeight,
+            );
+          });
+          ctx.globalAlpha = 1;
           ctx.filter = `blur(${Math.max(0, drive * 8)}px)`;
           ctx.drawImage(maskCanvas, dx, dy, drawWidth, drawHeight);
           ctx.filter = "none";
@@ -108,6 +174,7 @@ export default function BodyPulseOverlay({
         }
       }
 
+      frameCount++;
       rafId = requestAnimationFrame(draw);
     };
 
