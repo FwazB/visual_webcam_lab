@@ -151,6 +151,7 @@ export default function Visualz() {
         modes={activeModes}
         intensity={scaledIntensity}
         baseColor={baseColor}
+        backgroundEffect={backgroundEffect}
       />
 
       <BodyPulseOverlay
