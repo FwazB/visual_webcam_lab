@@ -1,6 +1,7 @@
 "use client";
 
 import { type MutableRefObject, useEffect, useRef } from "react";
+import type { DistortionMode } from "./CameraDistortion";
 import type { ToneProfile } from "@/hooks/useAudioReactiveInput";
 
 type BodyPulseOverlayProps = {
@@ -10,6 +11,7 @@ type BodyPulseOverlayProps = {
   toneRef: MutableRefObject<ToneProfile>;
   maskRef: MutableRefObject<Float32Array | null>;
   maskSizeRef: MutableRefObject<{ width: number; height: number }>;
+  mode: DistortionMode;
 };
 
 const MAX_DPR = 1.5;
@@ -31,13 +33,16 @@ export default function BodyPulseOverlay({
   toneRef,
   maskRef,
   maskSizeRef,
+  mode,
 }: BodyPulseOverlayProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const enabledRef = useRef(enabled);
+  const modeRef = useRef(mode);
 
   useEffect(() => {
     enabledRef.current = enabled;
-  }, [enabled]);
+    modeRef.current = mode;
+  }, [enabled, mode]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -80,10 +85,14 @@ export default function BodyPulseOverlay({
         const tone = enabledRef.current
           ? toneRef.current
           : { low: 0, mid: 0, high: 0, depth: 0 };
+        const mode = modeRef.current;
         const drive = Math.min(1, Math.max(0, level * 2.8 + peak * 1.6));
+        const trailBoost =
+          mode === "echo" ? 1.9 : mode === "rift" ? 1.35 : mode === "pulse" ? 1.1 : 0.85;
+        const edgeModeBoost = mode === "shatter" ? 1.5 : mode === "pulse" ? 1.25 : 1;
         const idleAlpha = 36;
         const activeAlpha = 190;
-        const edgeBoost = enabledRef.current ? 70 + drive * 150 : 40;
+        const edgeBoost = (enabledRef.current ? 70 + drive * 150 : 40) * edgeModeBoost;
         const red = Math.round(190 + tone.depth * 65);
         const green = Math.round(92 + tone.mid * 190 + tone.high * 70);
         const blue = Math.round(18 + tone.high * 220 + (1 - tone.depth) * 35);
@@ -162,16 +171,24 @@ export default function BodyPulseOverlay({
           trailFrames.forEach((trail, i) => {
             const age = i + 1;
             const fade = 1 - i / TRAIL_LENGTH;
-            const lagX = -trail.vx * scale * age * 3.8;
-            const lagY = -trail.vy * scale * age * 3.8 - age * (0.8 + trail.drive * 2.8);
+            const mode = modeRef.current;
+            const modeDrift = mode === "echo" ? 1.9 : mode === "rift" ? 1.35 : 1;
+            const lagX = -trail.vx * scale * age * 3.8 * modeDrift;
+            const lagY =
+              -trail.vy * scale * age * 3.8 * modeDrift -
+              age * (0.8 + trail.drive * 2.8) * (mode === "pulse" ? 0.7 : 1);
             const sway =
               Math.sin((frameCount - i * 4) * (0.045 + trail.tone.high * 0.12)) *
               age *
               trail.drive *
-              (1.0 + trail.tone.mid);
+              (1.0 + trail.tone.mid) *
+              (mode === "rift" ? 2.2 : 1);
 
-            ctx.globalAlpha = fade * fade * (0.16 + trail.drive * 0.34);
-            ctx.filter = `blur(${3 + age * 1.2 + trail.drive * 8}px)`;
+            ctx.globalAlpha = fade * fade * (0.16 + trail.drive * 0.34) * trailBoost;
+            ctx.filter =
+              mode === "shatter"
+                ? `blur(${1.2 + age * 0.5}px) contrast(${1.4 + trail.tone.high})`
+                : `blur(${3 + age * 1.2 + trail.drive * 8}px)`;
             ctx.drawImage(
               trail.canvas,
               dx + lagX + sway,

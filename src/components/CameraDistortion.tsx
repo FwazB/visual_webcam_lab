@@ -4,7 +4,7 @@ import { type MutableRefObject, type RefObject, useEffect, useRef } from "react"
 import * as THREE from "three";
 import type { ToneProfile } from "@/hooks/useAudioReactiveInput";
 
-export type DistortionMode = "clean" | "overdrive" | "fuzz" | "glitch" | "strobe";
+export type DistortionMode = "aura" | "echo" | "rift" | "shatter" | "pulse";
 
 type MaskSizeRef = MutableRefObject<{ width: number; height: number }>;
 
@@ -20,11 +20,11 @@ type CameraDistortionProps = {
 };
 
 const MODE_INDEX: Record<DistortionMode, number> = {
-  clean: 0,
-  overdrive: 1,
-  fuzz: 2,
-  glitch: 3,
-  strobe: 4,
+  aura: 0,
+  echo: 1,
+  rift: 2,
+  shatter: 3,
+  pulse: 4,
 };
 
 const TARGET_FRAME_MS = 1000 / 30;
@@ -106,51 +106,64 @@ const fragmentShader = `
     return normalize(mix(warm, highColor, clamp(highs * 1.7, 0.0, 1.0)) + mids * vec3(0.2, 0.14, 0.02));
   }
 
-  vec3 distort(vec2 uv, float drive, float body) {
+  vec3 project(vec2 uv, float drive, float body, float room, float edge) {
+    vec3 base = sampleVideo(uv);
+    vec3 palette = toneColor();
     vec3 color;
     float depth = clamp(uTone.x, 0.0, 1.0);
     float mids = clamp(uTone.y, 0.0, 1.0);
     float highs = clamp(uTone.z, 0.0, 1.0);
 
-    if (uMode == 1) {
-      float wave = sin((uv.y + uTime * 0.45) * 55.0) * 0.0035 * drive * body;
-      vec2 warped = uv + vec2(wave, 0.0);
+    if (uMode == 0) {
+      float breath = sin(uTime * 1.6 + depth * 4.0) * 0.5 + 0.5;
+      float wave = sin((uv.y + uTime * 0.12) * 18.0 + depth * 5.0) * 0.0025 * drive * (0.45 + body);
+      vec2 warped = uv + vec2(wave, sin((uv.x + uTime * 0.08) * 12.0) * 0.0015 * drive);
       color = sampleVideo(warped);
-      color = saturateColor(color, 1.1 + drive * (1.2 + depth * 1.0) * body);
-      color = pow(color, vec3(max(0.5, 1.0 - drive * 0.4 * body)));
-      color = smoothstep(vec3(0.02), vec3(0.96), color * (1.0 + drive * 0.85 * body));
+      color = mix(color, color * 0.78 + palette * (0.34 + breath * 0.18), room * drive);
+      color += palette * body * (0.18 + drive * 0.5);
+      color += palette * edge * (0.3 + drive * 0.8);
+      color = saturateColor(color, 1.0 + drive * (0.7 + depth * 0.6));
+    } else if (uMode == 1) {
+      float lag = 0.01 + drive * (0.025 + mids * 0.02);
+      vec2 slow = vec2(sin(uTime * 0.35 + uv.y * 4.0), cos(uTime * 0.28 + uv.x * 5.0)) * lag;
+      vec3 echoA = sampleVideo(uv - slow * (0.7 + depth));
+      vec3 echoB = sampleVideo(uv + slow * (0.55 + highs));
+      color = mix(base, echoA * (0.8 + palette * 0.55), clamp(room * 0.65 + body * 0.45, 0.0, 1.0));
+      color = mix(color, echoB * (0.55 + palette * 0.7), drive * (0.18 + body * 0.28));
+      color += palette * edge * (0.25 + drive);
     } else if (uMode == 2) {
-      float grain = hash(floor(uv * uResolution * 0.55) + floor(uTime * 30.0));
-      float wobble = (grain - 0.5) * (0.012 + drive * 0.06) * body;
-      vec2 warped = uv + vec2(wobble, sin(uv.x * 80.0 + uTime * 18.0) * 0.007 * drive * body);
-      vec2 shift = vec2((0.006 + drive * 0.025) * body, 0.0);
-      color.r = sampleVideo(warped + shift).r;
-      color.g = sampleVideo(warped).g;
-      color.b = sampleVideo(warped - shift).b;
-      color = saturateColor(
-        color + (grain - 0.5) * (0.16 + drive * (0.35 + highs * 0.6)) * body,
-        1.2 + drive + mids * 0.8
-      );
-      color = floor(color * (7.0 + 10.0 * (1.0 - drive * body))) / (7.0 + 10.0 * (1.0 - drive * body));
+      vec2 center = uv - 0.5;
+      float radius = length(center);
+      float ripple = sin(radius * (28.0 + depth * 24.0) - uTime * (5.0 + mids * 8.0));
+      float wave = ripple * (0.009 + drive * 0.06) * (0.32 + body * 0.9 + room * 0.35);
+      vec2 warped = uv + normalize(center + vec2(0.001)) * wave;
+      color = sampleVideo(warped);
+      color.r = sampleVideo(warped + vec2(wave * 0.45, 0.0)).r;
+      color.b = sampleVideo(warped - vec2(wave * 0.45, 0.0)).b;
+      color = mix(color, color * (0.75 + palette * 1.25), clamp(body * 0.75 + room * drive * 0.6, 0.0, 1.0));
+      color += palette * abs(ripple) * drive * (0.08 + body * 0.24);
     } else if (uMode == 3) {
-      float slice = floor(uv.y * (18.0 + drive * 42.0));
+      float slice = floor(uv.y * (16.0 + drive * 48.0 + highs * 24.0));
       float sliceNoise = hash(vec2(slice, floor(uTime * 12.0)));
-      float active = step(0.58 - drive * 0.32, sliceNoise) * body;
-      float offset = (sliceNoise - 0.5) * active * (0.035 + drive * 0.14);
+      float active = step(0.64 - drive * 0.42 - highs * 0.18, sliceNoise);
+      float offset = (sliceNoise - 0.5) * active * (0.018 + drive * 0.12) * (0.35 + body + room * 0.45);
       vec2 warped = uv + vec2(offset, 0.0);
-      float block = hash(floor(uv * vec2(24.0, 14.0)) + floor(uTime * 16.0));
-      vec2 shift = vec2(active * (0.012 + drive * 0.04), 0.0);
+      float block = hash(floor(uv * vec2(24.0, 14.0)) + floor(uTime * (12.0 + highs * 26.0)));
+      vec2 shift = vec2(active * (0.006 + drive * 0.04), 0.0);
       color.r = sampleVideo(warped + shift).r;
       color.g = sampleVideo(warped).g;
       color.b = sampleVideo(warped - shift).b;
-      color = mix(color, color.bgr, step(0.88 - drive * 0.18, block) * (0.45 + highs * 0.45) * body);
+      color = mix(color, palette, step(0.82 - drive * 0.2, block) * (0.15 + highs * 0.55));
+      color = mix(color, color.bgr, step(0.88 - drive * 0.18, block) * (0.3 + highs * 0.5));
+      color += palette * edge * (0.22 + highs * 0.9);
     } else {
-      float flash = smoothstep(0.48, 1.0, sin(uTime * (10.0 + drive * 28.0)) * 0.5 + 0.5);
-      float bars = step(0.78 - drive * 0.28, sin((uv.y + uTime * 0.2) * 95.0) * 0.5 + 0.5);
-      vec2 pulseUv = (uv - 0.5) * (1.0 - flash * drive * 0.045 * body) + 0.5;
+      float flash = smoothstep(0.42, 1.0, sin(uTime * (7.0 + drive * 32.0 + highs * 16.0)) * 0.5 + 0.5);
+      float bars = step(0.76 - drive * 0.34, sin((uv.y + uTime * 0.2) * (70.0 + highs * 90.0)) * 0.5 + 0.5);
+      vec2 pulseUv = (uv - 0.5) * (1.0 - flash * drive * (0.025 + body * 0.055)) + 0.5;
       color = sampleVideo(pulseUv);
-      color = mix(color, vec3(1.0) - color, flash * (0.35 + drive * 0.55) * body);
-      color += bars * vec3(0.08 + highs * 0.16, 0.12 + mids * 0.12, 0.16 + highs * 0.4) * (0.4 + drive) * body;
+      color = mix(color, vec3(1.0) - color, flash * drive * (0.16 + body * 0.55 + room * 0.16));
+      color += bars * palette * (0.12 + drive * 0.7) * (0.35 + body + room * 0.5);
+      color += palette * edge * (0.45 + drive * 1.15);
     }
 
     return clamp(color, 0.0, 1.0);
@@ -159,12 +172,12 @@ const fragmentShader = `
   void main() {
     float level = clamp(uLevel, 0.0, 1.0);
     float peak = clamp(uPeak, 0.0, 1.0);
-    float drive = clamp(level * 3.8 + peak * 2.7, 0.0, 1.0);
-    if (uEnabled > 0.5) {
-      drive = max(drive, 0.18);
-    }
+    float active = step(0.5, uEnabled);
+    float drive = clamp(level * 3.8 + peak * 2.7, 0.0, 1.0) * active;
+    drive = max(drive, 0.14 * active);
     vec2 uv = vUv;
     vec3 base = sampleVideo(uv);
+    vec3 palette = toneColor();
     float body = sampleBody(uv);
     float maskEdge = 0.0;
 
@@ -177,7 +190,7 @@ const fragmentShader = `
       maskEdge = smoothstep(0.12, 0.45, abs(mx1 - mx2) + abs(my1 - my2));
     }
 
-    if (uEnabled < 0.5 || uMode == 0) {
+    if (uEnabled < 0.5) {
       vec3 outlined = base;
       if (uHasMask > 0.5) {
         outlined = mix(base * 0.75, base + vec3(0.08, 0.04, 0.02), body * 0.35);
@@ -187,19 +200,19 @@ const fragmentShader = `
       return;
     }
 
-    vec3 effected = distort(uv, drive, body);
-    vec3 background = mix(base * 0.62, saturateColor(base, 0.45), 0.72);
-    float bodyMix = clamp(body * (0.78 + drive * 0.45) + drive * 0.16, 0.0, 1.0);
-    vec3 palette = toneColor();
-    effected = mix(effected, effected * (0.75 + palette * 1.2), body * drive * 0.55);
-    vec3 color = mix(background, effected, bodyMix);
+    float grid = sin((uv.x + uTime * 0.025) * 46.0) * sin((uv.y - uTime * 0.018) * 32.0);
+    float room = clamp(0.18 + drive * 0.42 + uTone.z * 0.16 + smoothstep(0.72, 1.0, grid) * 0.12, 0.0, 1.0);
+    vec3 effected = project(uv, drive, body, room, maskEdge);
+    vec3 background = mix(base * 0.72, base * (0.52 + palette * 0.7), room * drive * 0.78);
+    background += palette * smoothstep(0.78, 1.0, grid) * drive * 0.12;
+    float projectionMix = clamp(room * drive * 0.48 + body * (0.74 + drive * 0.46), 0.0, 1.0);
+    effected = mix(effected, effected * (0.7 + palette * 1.25), clamp(body * drive * 0.58 + room * drive * 0.22, 0.0, 1.0));
+    vec3 color = mix(background, effected, projectionMix);
 
     vec3 pulse = mix(palette, vec3(1.0, 0.9, 0.18), sin(uTime * (8.0 + uTone.z * 18.0)) * 0.5 + 0.5);
     color += pulse * body * drive * 0.34;
     color += pulse * maskEdge * (0.35 + drive * 1.35);
-    if (uHasMask < 0.5) {
-      color = mix(color, vec3(color.r + drive * 0.18, color.g + drive * 0.06, color.b), 0.45);
-    }
+    color += palette * room * drive * 0.08;
 
     gl_FragColor = vec4(clamp(color, 0.0, 1.0), 1.0);
   }

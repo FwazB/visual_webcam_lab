@@ -7,18 +7,26 @@ import CameraDistortion, { type DistortionMode } from "./CameraDistortion";
 import { useAudioReactiveInput } from "@/hooks/useAudioReactiveInput";
 import { useBodySegmentation } from "@/hooks/useBodySegmentation";
 
-const DISTORTION_MODES: DistortionMode[] = [
-  "clean",
-  "overdrive",
-  "fuzz",
-  "glitch",
-  "strobe",
+const PROJECTION_MODES: DistortionMode[] = [
+  "aura",
+  "echo",
+  "rift",
+  "shatter",
+  "pulse",
 ];
+
+const MODE_LABELS: Record<DistortionMode, string> = {
+  aura: "Aura",
+  echo: "Echo",
+  rift: "Rift",
+  shatter: "Shatter",
+  pulse: "Pulse",
+};
 
 export default function Visualz() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [webcamReady, setWebcamReady] = useState(false);
-  const [mode, setMode] = useState<DistortionMode>("overdrive");
+  const [mode, setMode] = useState<DistortionMode>("aura");
   const [meterLevel, setMeterLevel] = useState(0);
   const [maskReady, setMaskReady] = useState(false);
   const {
@@ -115,6 +123,7 @@ export default function Visualz() {
         toneRef={toneRef}
         maskRef={maskRef}
         maskSizeRef={maskSizeRef}
+        mode={mode}
       />
 
       <div className="absolute inset-x-0 top-0 z-10 flex items-start justify-between gap-3 p-3 sm:p-4">
@@ -128,8 +137,8 @@ export default function Visualz() {
                 : !maskReady
                   ? "Finding body..."
               : isListening
-                ? "Body-reactive distortion active"
-                : "Start audio input and strum"}
+                ? `${MODE_LABELS[mode]} projection active`
+                : "Start audio control and play"}
           </p>
         </div>
 
@@ -152,24 +161,24 @@ export default function Visualz() {
                   : "bg-yellow-400 text-black hover:bg-yellow-300"
               }`}
             >
-              {isListening ? "Stop audio" : "Start audio"}
+              {isListening ? "Stop control" : "Start control"}
             </button>
             <span className="rounded bg-white/10 px-2.5 py-2 text-[10px] font-mono uppercase text-zinc-300">
-              {maskReady ? "body on" : "body scan"}
+              {maskReady ? "room map" : "body scan"}
             </span>
 
             <div className="flex flex-wrap gap-1">
-              {DISTORTION_MODES.map((distortionMode) => (
+              {PROJECTION_MODES.map((projectionMode) => (
                 <button
-                  key={distortionMode}
-                  onClick={() => setMode(distortionMode)}
+                  key={projectionMode}
+                  onClick={() => setMode(projectionMode)}
                   className={`rounded px-2.5 py-2 text-[10px] font-mono uppercase transition active:scale-95 ${
-                    mode === distortionMode
+                    mode === projectionMode
                       ? "bg-white text-black"
                       : "bg-white/10 text-zinc-300 hover:bg-white/20"
                   }`}
                 >
-                  {distortionMode}
+                  {MODE_LABELS[projectionMode]}
                 </button>
               ))}
             </div>
