@@ -107,8 +107,11 @@ export default function Visualz() {
   }, [isListening, levelRef, maskRef]);
 
   const displayedMeterLevel = isListening ? meterLevel : 0;
-  const scaledIntensity = Math.pow(intensityPercent / 100, 1.35) * 1.45;
+  const baseIntensity = Math.pow(Math.min(intensityPercent, 100) / 100, 1.35) * 1.45;
+  const overdrive = Math.max(0, intensityPercent - 100) / 50;
+  const scaledIntensity = baseIntensity + overdrive * 1.05;
   const activeModeLabel = activeModes.map((mode) => MODE_LABELS[mode]).join(" + ");
+  const isOverdrive = intensityPercent > 100;
 
   const toggleMode = (projectionMode: DistortionMode) => {
     setActiveModes((current) => {
@@ -220,17 +223,17 @@ export default function Visualz() {
               <div className="flex items-center justify-between gap-3 text-[10px] font-mono uppercase text-zinc-400">
                 <span>Intensity</span>
                 <span className="tabular-nums text-zinc-300">
-                  {intensityPercent}%
+                  {intensityPercent}%{isOverdrive ? " OD" : ""}
                 </span>
               </div>
               <input
                 type="range"
                 min="1"
-                max="100"
+                max="150"
                 step="1"
                 value={intensityPercent}
                 onChange={(event) => setIntensityPercent(Number(event.target.value))}
-                className="w-full accent-white/80"
+                className={`w-full ${isOverdrive ? "accent-red-400" : "accent-white/80"}`}
               />
             </label>
 
