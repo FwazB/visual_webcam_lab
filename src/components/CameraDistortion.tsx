@@ -139,20 +139,39 @@ const fragmentShader = `
   void main() {
     float level = clamp(uLevel, 0.0, 1.0);
     float peak = clamp(uPeak, 0.0, 1.0);
-    float drive = clamp(level * 0.75 + peak * 0.55, 0.0, 1.0);
+    float drive = clamp(level * 2.4 + peak * 1.9, 0.0, 1.0);
     vec2 uv = vUv;
     vec3 base = sampleVideo(uv);
     float body = sampleBody(uv);
+    float maskEdge = 0.0;
+
+    if (uHasMask > 0.5) {
+      vec2 px = 1.5 / max(uResolution, vec2(1.0));
+      float mx1 = sampleBody(uv + vec2(px.x, 0.0));
+      float mx2 = sampleBody(uv - vec2(px.x, 0.0));
+      float my1 = sampleBody(uv + vec2(0.0, px.y));
+      float my2 = sampleBody(uv - vec2(0.0, px.y));
+      maskEdge = smoothstep(0.12, 0.45, abs(mx1 - mx2) + abs(my1 - my2));
+    }
 
     if (uEnabled < 0.5 || uMode == 0) {
-      vec3 outlined = mix(base, base + vec3(0.05, 0.08, 0.1), body * 0.2);
+      vec3 outlined = base;
+      if (uHasMask > 0.5) {
+        outlined = mix(base * 0.75, base + vec3(0.08, 0.04, 0.02), body * 0.35);
+        outlined += vec3(1.0, 0.72, 0.14) * maskEdge * 0.55;
+      }
       gl_FragColor = vec4(clamp(outlined, 0.0, 1.0), 1.0);
       return;
     }
 
     vec3 effected = distort(uv, drive, body);
-    vec3 background = mix(base * 0.72, saturateColor(base, 0.55), 0.65);
-    vec3 color = mix(background, effected, max(body, 0.08));
+    vec3 background = mix(base * 0.62, saturateColor(base, 0.45), 0.72);
+    float bodyMix = clamp(body * (0.78 + drive * 0.45) + drive * 0.16, 0.0, 1.0);
+    vec3 color = mix(background, effected, bodyMix);
+
+    vec3 pulse = mix(vec3(1.0, 0.18, 0.04), vec3(1.0, 0.9, 0.18), sin(uTime * 12.0) * 0.5 + 0.5);
+    color += pulse * body * drive * 0.22;
+    color += pulse * maskEdge * (0.25 + drive * 0.95);
 
     gl_FragColor = vec4(clamp(color, 0.0, 1.0), 1.0);
   }
@@ -303,9 +322,11 @@ export default function CameraDistortion({
       }
       lastFrameTime = time;
 
-      if (video.videoWidth > 0 && video.videoHeight > 0) {
-        uniforms.uVideoResolution.value.set(video.videoWidth, video.videoHeight);
+      if (video.videoWidth <= 0 || video.videoHeight <= 0) {
+        return;
       }
+
+      uniforms.uVideoResolution.value.set(video.videoWidth, video.videoHeight);
 
       updateMaskTexture();
       uniforms.uTime.value = time * 0.001;
