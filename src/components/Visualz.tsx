@@ -7,6 +7,7 @@ import CameraDistortion, { type DistortionMode } from "./CameraDistortion";
 import { useAudioReactiveInput } from "@/hooks/useAudioReactiveInput";
 import { useBodySegmentation } from "@/hooks/useBodySegmentation";
 import { useMaskObjectTracking } from "@/hooks/useMaskObjectTracking";
+import { usePoseTracking } from "@/hooks/usePoseTracking";
 
 const PROJECTION_MODES: DistortionMode[] = [
   "aura",
@@ -60,6 +61,7 @@ export default function Visualz() {
     stop,
   } = useAudioReactiveInput();
   const trackingRef = useMaskObjectTracking(maskRef, maskSizeRef);
+  const { poseDataRef } = usePoseTracking(videoRef);
 
   useEffect(() => {
     let stream: MediaStream | null = null;
@@ -156,6 +158,7 @@ export default function Visualz() {
         levelRef={levelRef}
         peakRef={peakRef}
         toneRef={toneRef}
+        poseDataRef={poseDataRef}
         trackingRef={trackingRef}
         maskRef={maskRef}
         maskSizeRef={maskSizeRef}

@@ -4,6 +4,7 @@ import { type MutableRefObject, useEffect, useRef } from "react";
 import type { DistortionMode } from "./CameraDistortion";
 import type { ToneProfile } from "@/hooks/useAudioReactiveInput";
 import type { TrackedObject } from "@/hooks/useMaskObjectTracking";
+import type { PoseData } from "@/hooks/usePoseTracking";
 
 export type BackgroundEffect = "off" | "orbits" | "grid" | "bursts";
 
@@ -12,6 +13,7 @@ type BodyPulseOverlayProps = {
   levelRef: MutableRefObject<number>;
   peakRef: MutableRefObject<number>;
   toneRef: MutableRefObject<ToneProfile>;
+  poseDataRef: MutableRefObject<PoseData | null>;
   trackingRef: MutableRefObject<TrackedObject>;
   maskRef: MutableRefObject<Float32Array | null>;
   maskSizeRef: MutableRefObject<{ width: number; height: number }>;
@@ -33,11 +35,25 @@ type TrailFrame = {
   tone: ToneProfile;
 };
 
+type HandEmitter = {
+  x: number;
+  y: number;
+  activity: number;
+};
+
+const HAND_LANDMARKS = {
+  thumbTip: 4,
+  indexTip: 8,
+  middleTip: 12,
+  wrist: 0,
+} as const;
+
 export default function BodyPulseOverlay({
   enabled,
   levelRef,
   peakRef,
   toneRef,
+  poseDataRef,
   trackingRef,
   maskRef,
   maskSizeRef,
@@ -176,6 +192,7 @@ export default function BodyPulseOverlay({
                 }
               : { x: 0, y: 0 };
           const tracked = trackingRef.current;
+          const handEmitters = getHandEmitters(poseDataRef.current, canvas.width, canvas.height);
           const trackedCenterX = tracked.cx * canvas.width;
           const trackedCenterY = tracked.cy * canvas.height;
           const trackingWeight = Math.min(1, tracked.presence * 1.25);
@@ -231,6 +248,7 @@ export default function BodyPulseOverlay({
             intensity,
             objectScale: 0.75 + tracked.area * 2.4,
             velocity: Math.hypot(tracked.vx, tracked.vy),
+            handEmitters,
           });
 
           trailFrames.forEach((trail, i) => {
@@ -284,7 +302,7 @@ export default function BodyPulseOverlay({
       cancelAnimationFrame(rafId);
       window.removeEventListener("resize", resize);
     };
-  }, [levelRef, maskRef, maskSizeRef, peakRef, toneRef, trackingRef]);
+  }, [levelRef, maskRef, maskSizeRef, peakRef, poseDataRef, toneRef, trackingRef]);
 
   return (
     <canvas
@@ -320,6 +338,7 @@ function drawBackgroundSequence({
   intensity,
   objectScale,
   velocity,
+  handEmitters,
 }: {
   ctx: CanvasRenderingContext2D;
   effect: BackgroundEffect;
@@ -335,6 +354,7 @@ function drawBackgroundSequence({
   intensity: number;
   objectScale: number;
   velocity: number;
+  handEmitters: HandEmitter[];
 }) {
   if (effect === "off" || intensity <= 0.01) return;
 
@@ -348,6 +368,10 @@ function drawBackgroundSequence({
   const stroke = `rgba(${red}, ${green}, ${blue}, ${alpha})`;
   const fill = `rgba(${red}, ${green}, ${blue}, ${alpha * 0.28})`;
   const phase = beatIndex % 8;
+  const emitters =
+    handEmitters.length > 0
+      ? handEmitters
+      : [{ x: centerX, y: centerY, activity: Math.max(0.35, drive) }];
 
   ctx.save();
   ctx.lineWidth = Math.max(1, 1 + drive * 3);
@@ -357,16 +381,23 @@ function drawBackgroundSequence({
   if (effect === "orbits") {
     const count = 6;
     const radius = (72 + phase * 18 + drive * 140) * objectScale;
-    for (let i = 0; i < count; i++) {
-      const angle = (Math.PI * 2 * i) / count + beatIndex * 0.55 + frameCount * 0.012;
-      const x = centerX + Math.cos(angle) * radius * (1.1 + tone.high * 0.5);
-      const y = centerY + Math.sin(angle) * radius * (0.72 + tone.depth * 0.45);
-      const size = 10 + ((phase + i) % 4) * 7 + drive * 34;
-      ctx.beginPath();
-      ctx.arc(x, y, size, 0, Math.PI * 2);
-      ctx.stroke();
-      if ((phase + i) % 2 === 0) ctx.fill();
-    }
+    emitters.forEach((emitter, emitterIndex) => {
+      const emitterRadius = radius * (0.55 + emitter.activity * 0.65);
+      for (let i = 0; i < count; i++) {
+        const angle =
+          (Math.PI * 2 * i) / count +
+          beatIndex * 0.55 +
+          frameCount * 0.012 +
+          emitterIndex * 0.8;
+        const x = emitter.x + Math.cos(angle) * emitterRadius * (1.1 + tone.high * 0.5);
+        const y = emitter.y + Math.sin(angle) * emitterRadius * (0.72 + tone.depth * 0.45);
+        const size = 8 + ((phase + i) % 4) * 6 + drive * 30 * emitter.activity;
+        ctx.beginPath();
+        ctx.arc(x, y, size, 0, Math.PI * 2);
+        ctx.stroke();
+        if ((phase + i + emitterIndex) % 2 === 0) ctx.fill();
+      }
+    });
   } else if (effect === "grid") {
     const spacing = Math.max(24, (42 + phase * 4) / Math.max(0.75, objectScale * 0.72));
     const offset = (frameCount * (0.6 + drive * 2.4) + beatIndex * spacing * 0.25) % spacing;
@@ -384,19 +415,54 @@ function drawBackgroundSequence({
     }
   } else {
     const rays = 10;
-    for (let i = 0; i < rays; i++) {
-      const step = (phase + i) % rays;
-      const angle = (Math.PI * 2 * step) / rays + frameCount * 0.006;
-      const inner = 45 + drive * 40;
-      const outer =
-        Math.max(width, height) *
-        (0.28 + objectScale * 0.12 + ((i + phase) % 5) * 0.08);
-      ctx.beginPath();
-      ctx.moveTo(centerX + Math.cos(angle) * inner, centerY + Math.sin(angle) * inner);
-      ctx.lineTo(centerX + Math.cos(angle) * outer, centerY + Math.sin(angle) * outer);
-      ctx.stroke();
-    }
+    emitters.forEach((emitter, emitterIndex) => {
+      for (let i = 0; i < rays; i++) {
+        const step = (phase + i + emitterIndex * 2) % rays;
+        const angle = (Math.PI * 2 * step) / rays + frameCount * 0.006;
+        const inner = 24 + drive * 38 * emitter.activity;
+        const outer =
+          Math.max(width, height) *
+          (0.22 + objectScale * 0.1 + ((i + phase) % 5) * 0.07 + emitter.activity * 0.16);
+        ctx.beginPath();
+        ctx.moveTo(emitter.x + Math.cos(angle) * inner, emitter.y + Math.sin(angle) * inner);
+        ctx.lineTo(emitter.x + Math.cos(angle) * outer, emitter.y + Math.sin(angle) * outer);
+        ctx.stroke();
+      }
+    });
   }
 
   ctx.restore();
+}
+
+function getHandEmitters(
+  pose: PoseData | null,
+  canvasWidth: number,
+  canvasHeight: number,
+): HandEmitter[] {
+  if (!pose?.handsVisible || pose.landmarks.length === 0) return [];
+
+  const wrist = pose.landmarks[HAND_LANDMARKS.wrist];
+  const index = pose.landmarks[HAND_LANDMARKS.indexTip];
+  const middle = pose.landmarks[HAND_LANDMARKS.middleTip];
+  const thumb = pose.landmarks[HAND_LANDMARKS.thumbTip];
+  if (!wrist || !index) return [];
+
+  const fingertips = [index, middle, thumb].filter(Boolean);
+  const x =
+    fingertips.reduce((sum, landmark) => sum + (1 - landmark.x) * canvasWidth, 0) /
+    fingertips.length;
+  const y =
+    fingertips.reduce((sum, landmark) => sum + landmark.y * canvasHeight, 0) /
+    fingertips.length;
+  const spread = middle
+    ? Math.hypot(index.x - middle.x, index.y - middle.y)
+    : Math.hypot(index.x - wrist.x, index.y - wrist.y);
+
+  return [
+    {
+      x,
+      y,
+      activity: Math.max(0.35, Math.min(1, spread * 9 + (1 - pose.leftPinch) * 0.25)),
+    },
+  ];
 }
