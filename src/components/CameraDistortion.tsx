@@ -139,7 +139,10 @@ const fragmentShader = `
   void main() {
     float level = clamp(uLevel, 0.0, 1.0);
     float peak = clamp(uPeak, 0.0, 1.0);
-    float drive = clamp(level * 2.4 + peak * 1.9, 0.0, 1.0);
+    float drive = clamp(level * 3.8 + peak * 2.7, 0.0, 1.0);
+    if (uEnabled > 0.5) {
+      drive = max(drive, 0.18);
+    }
     vec2 uv = vUv;
     vec3 base = sampleVideo(uv);
     float body = sampleBody(uv);
@@ -170,8 +173,11 @@ const fragmentShader = `
     vec3 color = mix(background, effected, bodyMix);
 
     vec3 pulse = mix(vec3(1.0, 0.18, 0.04), vec3(1.0, 0.9, 0.18), sin(uTime * 12.0) * 0.5 + 0.5);
-    color += pulse * body * drive * 0.22;
-    color += pulse * maskEdge * (0.25 + drive * 0.95);
+    color += pulse * body * drive * 0.34;
+    color += pulse * maskEdge * (0.35 + drive * 1.35);
+    if (uHasMask < 0.5) {
+      color = mix(color, vec3(color.r + drive * 0.18, color.g + drive * 0.06, color.b), 0.45);
+    }
 
     gl_FragColor = vec4(clamp(color, 0.0, 1.0), 1.0);
   }
@@ -366,7 +372,7 @@ export default function CameraDistortion({
     <div
       ref={containerRef}
       aria-hidden="true"
-      className="absolute inset-0 h-full w-full overflow-hidden pointer-events-none"
+      className="absolute inset-0 z-[1] h-full w-full overflow-hidden pointer-events-none"
     />
   );
 }

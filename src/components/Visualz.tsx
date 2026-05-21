@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
+import BodyPulseOverlay from "./BodyPulseOverlay";
 import CameraDistortion, { type DistortionMode } from "./CameraDistortion";
 import { useAudioReactiveInput } from "@/hooks/useAudioReactiveInput";
 import { useBodySegmentation } from "@/hooks/useBodySegmentation";
@@ -19,6 +20,7 @@ export default function Visualz() {
   const [webcamReady, setWebcamReady] = useState(false);
   const [mode, setMode] = useState<DistortionMode>("overdrive");
   const [meterLevel, setMeterLevel] = useState(0);
+  const [maskReady, setMaskReady] = useState(false);
   const {
     isLoading: bodyMaskLoading,
     maskRef,
@@ -71,19 +73,16 @@ export default function Visualz() {
   }, [bodyMaskLoading, startSegmentation, webcamReady]);
 
   useEffect(() => {
-    if (!isListening) {
-      return;
-    }
-
     let rafId = 0;
     const tick = () => {
-      setMeterLevel(levelRef.current);
+      setMeterLevel(isListening ? levelRef.current : 0);
+      setMaskReady(Boolean(maskRef.current));
       rafId = requestAnimationFrame(tick);
     };
 
     rafId = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(rafId);
-  }, [isListening, levelRef]);
+  }, [isListening, levelRef, maskRef]);
 
   const displayedMeterLevel = isListening ? meterLevel : 0;
 
@@ -94,7 +93,7 @@ export default function Visualz() {
         autoPlay
         playsInline
         muted
-        className="absolute inset-0 h-full w-full object-cover -scale-x-100 opacity-80 pointer-events-none"
+        className="absolute inset-0 z-0 h-full w-full object-cover -scale-x-100 opacity-80 pointer-events-none"
       />
 
       <CameraDistortion
@@ -107,6 +106,14 @@ export default function Visualz() {
         mode={mode}
       />
 
+      <BodyPulseOverlay
+        enabled={isListening}
+        levelRef={levelRef}
+        peakRef={peakRef}
+        maskRef={maskRef}
+        maskSizeRef={maskSizeRef}
+      />
+
       <div className="absolute inset-x-0 top-0 z-10 flex items-start justify-between gap-3 p-3 sm:p-4">
         <div className="min-w-0">
           <h1 className="text-lg sm:text-xl font-bold tracking-tight">visualz</h1>
@@ -115,6 +122,8 @@ export default function Visualz() {
               ? "Starting camera..."
               : bodyMaskLoading
                 ? "Loading body mask..."
+                : !maskReady
+                  ? "Finding body..."
               : isListening
                 ? "Body-reactive distortion active"
                 : "Start audio input and strum"}
@@ -143,7 +152,7 @@ export default function Visualz() {
               {isListening ? "Stop audio" : "Start audio"}
             </button>
             <span className="rounded bg-white/10 px-2.5 py-2 text-[10px] font-mono uppercase text-zinc-300">
-              body mask
+              {maskReady ? "body on" : "body scan"}
             </span>
 
             <div className="flex flex-wrap gap-1">
