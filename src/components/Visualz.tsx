@@ -107,7 +107,7 @@ export default function Visualz() {
   }, [isListening, levelRef, maskRef]);
 
   const displayedMeterLevel = isListening ? meterLevel : 0;
-  const scaledIntensity = Math.pow(intensityPercent / 100, 1.85) * 0.72;
+  const scaledIntensity = Math.pow(intensityPercent / 100, 1.35) * 1.45;
   const activeModeLabel = activeModes.map((mode) => MODE_LABELS[mode]).join(" + ");
 
   const toggleMode = (projectionMode: DistortionMode) => {
