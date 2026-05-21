@@ -107,7 +107,7 @@ export default function Visualz() {
   }, [isListening, levelRef, maskRef]);
 
   const displayedMeterLevel = isListening ? meterLevel : 0;
-  const scaledIntensity = Math.pow(intensityPercent / 60, 1.85) * 0.72;
+  const scaledIntensity = Math.pow(intensityPercent / 100, 1.85) * 0.72;
   const activeModeLabel = activeModes.map((mode) => MODE_LABELS[mode]).join(" + ");
 
   const toggleMode = (projectionMode: DistortionMode) => {
@@ -225,8 +225,8 @@ export default function Visualz() {
               </div>
               <input
                 type="range"
-                min="0"
-                max="60"
+                min="1"
+                max="100"
                 step="1"
                 value={intensityPercent}
                 onChange={(event) => setIntensityPercent(Number(event.target.value))}
