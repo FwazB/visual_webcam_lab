@@ -12,6 +12,8 @@ type BodyPulseOverlayProps = {
   maskRef: MutableRefObject<Float32Array | null>;
   maskSizeRef: MutableRefObject<{ width: number; height: number }>;
   mode: DistortionMode;
+  intensity: number;
+  baseColor: string;
 };
 
 const MAX_DPR = 1.5;
@@ -34,15 +36,21 @@ export default function BodyPulseOverlay({
   maskRef,
   maskSizeRef,
   mode,
+  intensity,
+  baseColor,
 }: BodyPulseOverlayProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const enabledRef = useRef(enabled);
   const modeRef = useRef(mode);
+  const intensityRef = useRef(intensity);
+  const baseColorRef = useRef(baseColor);
 
   useEffect(() => {
     enabledRef.current = enabled;
     modeRef.current = mode;
-  }, [enabled, mode]);
+    intensityRef.current = intensity;
+    baseColorRef.current = baseColor;
+  }, [baseColor, enabled, intensity, mode]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -86,16 +94,18 @@ export default function BodyPulseOverlay({
           ? toneRef.current
           : { low: 0, mid: 0, high: 0, depth: 0 };
         const mode = modeRef.current;
-        const drive = Math.min(1, Math.max(0, level * 2.8 + peak * 1.6));
+        const intensity = Math.max(0, Math.min(2.5, intensityRef.current));
+        const drive = Math.min(1, Math.max(0, (level * 2.8 + peak * 1.6) * intensity));
         const trailBoost =
           mode === "echo" ? 1.9 : mode === "rift" ? 1.35 : mode === "pulse" ? 1.1 : 0.85;
         const edgeModeBoost = mode === "shatter" ? 1.5 : mode === "pulse" ? 1.25 : 1;
         const idleAlpha = 36;
         const activeAlpha = 190;
         const edgeBoost = (enabledRef.current ? 70 + drive * 150 : 40) * edgeModeBoost;
-        const red = Math.round(190 + tone.depth * 65);
-        const green = Math.round(92 + tone.mid * 190 + tone.high * 70);
-        const blue = Math.round(18 + tone.high * 220 + (1 - tone.depth) * 35);
+        const [baseRed, baseGreen, baseBlue] = hexToRgb(baseColorRef.current);
+        const red = Math.round(baseRed * (160 + tone.depth * 95) + tone.mid * 26);
+        const green = Math.round(baseGreen * (150 + tone.mid * 105) + tone.high * 70);
+        const blue = Math.round(baseBlue * (150 + tone.high * 105) + (1 - tone.depth) * 28);
         let bodyWeight = 0;
         let centroidX = 0;
         let centroidY = 0;
@@ -188,7 +198,7 @@ export default function BodyPulseOverlay({
             ctx.filter =
               mode === "shatter"
                 ? `blur(${1.2 + age * 0.5}px) contrast(${1.4 + trail.tone.high})`
-                : `blur(${3 + age * 1.2 + trail.drive * 8}px)`;
+                : `blur(${3 + age * 1.2 + trail.drive * 8 * Math.max(0.5, intensity)}px)`;
             ctx.drawImage(
               trail.canvas,
               dx + lagX + sway,
@@ -198,7 +208,7 @@ export default function BodyPulseOverlay({
             );
           });
           ctx.globalAlpha = 1;
-          ctx.filter = `blur(${Math.max(0, drive * 8)}px)`;
+          ctx.filter = `blur(${Math.max(0, drive * 8 * Math.max(0.5, intensity))}px)`;
           ctx.drawImage(maskCanvas, dx, dy, drawWidth, drawHeight);
           ctx.filter = "none";
           ctx.drawImage(maskCanvas, dx, dy, drawWidth, drawHeight);
@@ -226,4 +236,10 @@ export default function BodyPulseOverlay({
       className="absolute inset-0 z-[2] h-full w-full -scale-x-100 pointer-events-none mix-blend-screen"
     />
   );
+}
+
+function hexToRgb(hex: string): [number, number, number] {
+  const normalized = /^#[0-9a-fA-F]{6}$/.test(hex) ? hex.slice(1) : "ff7a18";
+  const value = Number.parseInt(normalized, 16);
+  return [(value >> 16) & 255, (value >> 8) & 255, value & 255];
 }

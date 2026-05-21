@@ -27,6 +27,8 @@ export default function Visualz() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [webcamReady, setWebcamReady] = useState(false);
   const [mode, setMode] = useState<DistortionMode>("aura");
+  const [intensity, setIntensity] = useState(1);
+  const [baseColor, setBaseColor] = useState("#ff7a18");
   const [meterLevel, setMeterLevel] = useState(0);
   const [maskReady, setMaskReady] = useState(false);
   const {
@@ -114,6 +116,8 @@ export default function Visualz() {
         maskSizeRef={maskSizeRef}
         enabled={isListening}
         mode={mode}
+        intensity={intensity}
+        baseColor={baseColor}
       />
 
       <BodyPulseOverlay
@@ -124,6 +128,8 @@ export default function Visualz() {
         maskRef={maskRef}
         maskSizeRef={maskSizeRef}
         mode={mode}
+        intensity={intensity}
+        baseColor={baseColor}
       />
 
       <div className="absolute inset-x-0 top-0 z-10 flex items-start justify-between gap-3 p-3 sm:p-4">
@@ -182,6 +188,37 @@ export default function Visualz() {
                 </button>
               ))}
             </div>
+          </div>
+
+          <div className="mt-3 grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
+            <label className="grid gap-1">
+              <div className="flex items-center justify-between gap-3 text-[10px] font-mono uppercase text-zinc-400">
+                <span>Intensity</span>
+                <span className="tabular-nums text-zinc-300">
+                  {Math.round(intensity * 100)}%
+                </span>
+              </div>
+              <input
+                type="range"
+                min="0.25"
+                max="2"
+                step="0.05"
+                value={intensity}
+                onChange={(event) => setIntensity(Number(event.target.value))}
+                className="w-full accent-white/80"
+              />
+            </label>
+
+            <label className="flex items-center gap-2 text-[10px] font-mono uppercase text-zinc-400">
+              <span>Color</span>
+              <input
+                type="color"
+                value={baseColor}
+                onChange={(event) => setBaseColor(event.target.value)}
+                className="h-8 w-12 cursor-pointer rounded border border-white/20 bg-transparent p-0.5"
+                aria-label="Projection color"
+              />
+            </label>
           </div>
 
           <div className="mt-3 h-2 overflow-hidden rounded-full bg-white/10">

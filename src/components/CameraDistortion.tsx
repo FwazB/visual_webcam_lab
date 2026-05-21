@@ -17,6 +17,8 @@ type CameraDistortionProps = {
   maskSizeRef?: MaskSizeRef;
   enabled: boolean;
   mode: DistortionMode;
+  intensity: number;
+  baseColor: string;
 };
 
 const MODE_INDEX: Record<DistortionMode, number> = {
@@ -51,7 +53,9 @@ const fragmentShader = `
   uniform float uPeak;
   uniform float uEnabled;
   uniform float uHasMask;
+  uniform float uIntensity;
   uniform vec3 uTone;
+  uniform vec3 uBaseColor;
   uniform int uMode;
 
   varying vec2 vUv;
@@ -99,11 +103,11 @@ const fragmentShader = `
     float depth = clamp(uTone.x, 0.0, 1.0);
     float mids = clamp(uTone.y, 0.0, 1.0);
     float highs = clamp(uTone.z, 0.0, 1.0);
-    vec3 lowColor = vec3(1.0, 0.12, 0.03);
-    vec3 midColor = vec3(1.0, 0.78, 0.08);
-    vec3 highColor = vec3(0.1, 0.82, 1.0);
+    vec3 lowColor = mix(uBaseColor, vec3(1.0, 0.08, 0.02), 0.42 + depth * 0.26);
+    vec3 midColor = mix(uBaseColor, vec3(1.0, 0.78, 0.08), 0.3 + mids * 0.28);
+    vec3 highColor = mix(uBaseColor, vec3(0.1, 0.82, 1.0), 0.45 + highs * 0.32);
     vec3 warm = mix(midColor, lowColor, depth);
-    return normalize(mix(warm, highColor, clamp(highs * 1.7, 0.0, 1.0)) + mids * vec3(0.2, 0.14, 0.02));
+    return clamp(mix(warm, highColor, clamp(highs * 1.45, 0.0, 1.0)) + mids * uBaseColor * 0.18, 0.0, 1.0);
   }
 
   vec3 project(vec2 uv, float drive, float body, float room, float edge) {
@@ -173,8 +177,9 @@ const fragmentShader = `
     float level = clamp(uLevel, 0.0, 1.0);
     float peak = clamp(uPeak, 0.0, 1.0);
     float active = step(0.5, uEnabled);
-    float drive = clamp(level * 3.8 + peak * 2.7, 0.0, 1.0) * active;
-    drive = max(drive, 0.14 * active);
+    float intensity = clamp(uIntensity, 0.0, 2.5);
+    float drive = clamp((level * 3.8 + peak * 2.7) * intensity, 0.0, 1.0) * active;
+    drive = max(drive, 0.14 * active * min(intensity, 1.0));
     vec2 uv = vUv;
     vec3 base = sampleVideo(uv);
     vec3 palette = toneColor();
@@ -201,7 +206,7 @@ const fragmentShader = `
     }
 
     float grid = sin((uv.x + uTime * 0.025) * 46.0) * sin((uv.y - uTime * 0.018) * 32.0);
-    float room = clamp(0.18 + drive * 0.42 + uTone.z * 0.16 + smoothstep(0.72, 1.0, grid) * 0.12, 0.0, 1.0);
+    float room = clamp(0.12 + drive * 0.52 + uTone.z * 0.16 + smoothstep(0.72, 1.0, grid) * 0.12 * intensity, 0.0, 1.0);
     vec3 effected = project(uv, drive, body, room, maskEdge);
     vec3 background = mix(base * 0.72, base * (0.52 + palette * 0.7), room * drive * 0.78);
     background += palette * smoothstep(0.78, 1.0, grid) * drive * 0.12;
@@ -227,15 +232,21 @@ export default function CameraDistortion({
   maskSizeRef,
   enabled,
   mode,
+  intensity,
+  baseColor,
 }: CameraDistortionProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const enabledRef = useRef(enabled);
   const modeRef = useRef(mode);
+  const intensityRef = useRef(intensity);
+  const baseColorRef = useRef(baseColor);
 
   useEffect(() => {
     enabledRef.current = enabled;
     modeRef.current = mode;
-  }, [enabled, mode]);
+    intensityRef.current = intensity;
+    baseColorRef.current = baseColor;
+  }, [baseColor, enabled, intensity, mode]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -290,7 +301,9 @@ export default function CameraDistortion({
       uPeak: { value: 0 },
       uEnabled: { value: enabledRef.current ? 1 : 0 },
       uHasMask: { value: 0 },
+      uIntensity: { value: intensityRef.current },
       uTone: { value: new THREE.Vector3(0, 0, 0) },
+      uBaseColor: { value: new THREE.Vector3(1, 0.48, 0.09) },
       uMode: { value: MODE_INDEX[modeRef.current] },
     };
 
@@ -380,6 +393,10 @@ export default function CameraDistortion({
         Number.isFinite(toneRef.current.mid) ? toneRef.current.mid : 0,
         Number.isFinite(toneRef.current.high) ? toneRef.current.high : 0,
       );
+      uniforms.uIntensity.value = Number.isFinite(intensityRef.current)
+        ? intensityRef.current
+        : 1;
+      uniforms.uBaseColor.value.set(...hexToRgb(baseColorRef.current));
       uniforms.uEnabled.value = enabledRef.current ? 1 : 0;
       uniforms.uMode.value = MODE_INDEX[modeRef.current];
 
@@ -417,4 +434,14 @@ export default function CameraDistortion({
       className="absolute inset-0 z-[1] h-full w-full overflow-hidden pointer-events-none"
     />
   );
+}
+
+function hexToRgb(hex: string): [number, number, number] {
+  const normalized = /^#[0-9a-fA-F]{6}$/.test(hex) ? hex.slice(1) : "ff7a18";
+  const value = Number.parseInt(normalized, 16);
+  return [
+    ((value >> 16) & 255) / 255,
+    ((value >> 8) & 255) / 255,
+    (value & 255) / 255,
+  ];
 }
