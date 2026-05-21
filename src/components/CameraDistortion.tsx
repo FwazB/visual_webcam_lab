@@ -3,6 +3,7 @@
 import { type MutableRefObject, type RefObject, useEffect, useRef } from "react";
 import * as THREE from "three";
 import type { ToneProfile } from "@/hooks/useAudioReactiveInput";
+import type { TrackedObject } from "@/hooks/useMaskObjectTracking";
 
 export type DistortionMode = "aura" | "echo" | "rift" | "shatter" | "pulse";
 
@@ -13,6 +14,7 @@ type CameraDistortionProps = {
   levelRef: MutableRefObject<number>;
   peakRef: MutableRefObject<number>;
   toneRef: MutableRefObject<ToneProfile>;
+  trackingRef: MutableRefObject<TrackedObject>;
   maskRef?: MutableRefObject<Float32Array | null>;
   maskSizeRef?: MaskSizeRef;
   enabled: boolean;
@@ -56,6 +58,9 @@ const fragmentShader = `
   uniform float uIntensity;
   uniform vec3 uTone;
   uniform vec3 uBaseColor;
+  uniform vec4 uObject;
+  uniform vec4 uObjectBox;
+  uniform float uObjectPresence;
   uniform vec4 uModeWeights;
   uniform float uPulseWeight;
   uniform int uMode;
@@ -138,7 +143,7 @@ const fragmentShader = `
       color = mix(color, echoB * (0.55 + palette * 0.7), drive * (0.18 + body * 0.28));
       color += palette * edge * (0.25 + drive);
     } else if (uMode == 2) {
-      vec2 center = uv - 0.5;
+      vec2 center = uv - mix(vec2(0.5), uObject.xy, clamp(uObjectPresence * 0.85, 0.0, 1.0));
       float radius = length(center);
       float ripple = sin(radius * (28.0 + depth * 24.0) - uTime * (5.0 + mids * 8.0));
       float wave = ripple * (0.009 + drive * 0.06) * (0.32 + body * 0.9 + room * 0.35);
@@ -207,8 +212,25 @@ const fragmentShader = `
       return;
     }
 
-    float grid = sin((uv.x + uTime * 0.025) * 46.0) * sin((uv.y - uTime * 0.018) * 32.0);
-    float room = clamp(0.05 + drive * 0.52 + uTone.z * 0.1 + smoothstep(0.72, 1.0, grid) * 0.1 * intensity, 0.0, 1.0);
+    float objectDist = distance(uv, uObject.xy);
+    float objectHalo = smoothstep(0.74, 0.04, objectDist) * uObjectPresence;
+    float boxEdge =
+      max(max(uObjectBox.x - uv.x, uv.x - uObjectBox.z), max(uObjectBox.y - uv.y, uv.y - uObjectBox.w));
+    float objectBox = smoothstep(0.08, -0.015, boxEdge) * uObjectPresence;
+    float objectMotion = clamp(length(uObject.zw) * 42.0, 0.0, 1.0);
+    vec2 trackedFlow = uObject.zw * (1.4 + body * 3.2 + objectHalo * 1.6);
+    float grid = sin((uv.x + uTime * 0.025 - trackedFlow.x) * 46.0) *
+      sin((uv.y - uTime * 0.018 - trackedFlow.y) * 32.0);
+    float room = clamp(
+      0.05 +
+        drive * 0.52 +
+        uTone.z * 0.1 +
+        objectHalo * (0.16 + objectMotion * 0.22) +
+        objectBox * 0.08 +
+        smoothstep(0.72, 1.0, grid) * 0.1 * intensity,
+      0.0,
+      1.0
+    );
     vec3 effected = project(uv, drive, body, room, maskEdge);
     vec3 background = mix(base * 0.72, base * (0.52 + palette * 0.7), room * drive * 0.78);
     background += palette * smoothstep(0.78, 1.0, grid) * drive * 0.12;
@@ -222,10 +244,12 @@ const fragmentShader = `
     float shatterW = uModeWeights.w;
     float pulseW = uPulseWeight;
 
-    vec2 slow = vec2(sin(uTime * 0.4 + uv.y * 5.0), cos(uTime * 0.3 + uv.x * 4.0)) * drive * 0.018;
+    vec2 slow =
+      vec2(sin(uTime * 0.4 + uv.y * 5.0), cos(uTime * 0.3 + uv.x * 4.0)) * drive * 0.018 +
+      trackedFlow * drive * 0.28;
     color = mix(color, sampleVideo(uv - slow) * (0.68 + palette * 0.72), echoW * drive * (0.16 + body * 0.2));
 
-    vec2 center = uv - 0.5;
+    vec2 center = uv - mix(vec2(0.5), uObject.xy, clamp(uObjectPresence * 0.9, 0.0, 1.0));
     float radius = length(center);
     float ripple = sin(radius * 42.0 - uTime * 7.0);
     vec2 riftUv = uv + normalize(center + vec2(0.001)) * ripple * drive * 0.028 * (0.4 + body);
@@ -241,6 +265,7 @@ const fragmentShader = `
     color += pulse * body * drive * (0.22 + auraW * 0.12);
     color += pulse * maskEdge * (0.35 + drive * 1.35);
     color += palette * room * drive * 0.08;
+    color += palette * objectHalo * drive * (0.1 + objectMotion * 0.22);
 
     gl_FragColor = vec4(clamp(color, 0.0, 1.0), 1.0);
   }
@@ -251,6 +276,7 @@ export default function CameraDistortion({
   levelRef,
   peakRef,
   toneRef,
+  trackingRef,
   maskRef,
   maskSizeRef,
   enabled,
@@ -327,6 +353,9 @@ export default function CameraDistortion({
       uIntensity: { value: intensityRef.current },
       uTone: { value: new THREE.Vector3(0, 0, 0) },
       uBaseColor: { value: new THREE.Vector3(1, 0.48, 0.09) },
+      uObject: { value: new THREE.Vector4(0.5, 0.5, 0, 0) },
+      uObjectBox: { value: new THREE.Vector4(0.35, 0.2, 0.65, 0.85) },
+      uObjectPresence: { value: 0 },
       uModeWeights: { value: new THREE.Vector4(1, 0, 0, 0) },
       uPulseWeight: { value: 0 },
       uMode: { value: MODE_INDEX[modesRef.current[0] ?? "aura"] },
@@ -422,6 +451,10 @@ export default function CameraDistortion({
         ? intensityRef.current
         : 1;
       uniforms.uBaseColor.value.set(...hexToRgb(baseColorRef.current));
+      const object = trackingRef.current;
+      uniforms.uObject.value.set(object.cx, object.cy, object.vx, object.vy);
+      uniforms.uObjectBox.value.set(object.minX, object.minY, object.maxX, object.maxY);
+      uniforms.uObjectPresence.value = object.presence;
       uniforms.uEnabled.value = enabledRef.current ? 1 : 0;
       const activeModes: DistortionMode[] =
         modesRef.current.length > 0 ? modesRef.current : ["aura"];
@@ -459,7 +492,7 @@ export default function CameraDistortion({
       renderer.dispose();
       renderer.domElement.remove();
     };
-  }, [levelRef, maskRef, maskSizeRef, peakRef, toneRef, videoRef]);
+  }, [levelRef, maskRef, maskSizeRef, peakRef, toneRef, trackingRef, videoRef]);
 
   return (
     <div

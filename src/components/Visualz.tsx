@@ -6,6 +6,7 @@ import BodyPulseOverlay, { type BackgroundEffect } from "./BodyPulseOverlay";
 import CameraDistortion, { type DistortionMode } from "./CameraDistortion";
 import { useAudioReactiveInput } from "@/hooks/useAudioReactiveInput";
 import { useBodySegmentation } from "@/hooks/useBodySegmentation";
+import { useMaskObjectTracking } from "@/hooks/useMaskObjectTracking";
 
 const PROJECTION_MODES: DistortionMode[] = [
   "aura",
@@ -40,6 +41,7 @@ export default function Visualz() {
   const [baseColor, setBaseColor] = useState("#18c8ff");
   const [backgroundEffect, setBackgroundEffect] =
     useState<BackgroundEffect>("orbits");
+  const [controlsOpen, setControlsOpen] = useState(false);
   const [meterLevel, setMeterLevel] = useState(0);
   const [maskReady, setMaskReady] = useState(false);
   const {
@@ -57,6 +59,7 @@ export default function Visualz() {
     start,
     stop,
   } = useAudioReactiveInput();
+  const trackingRef = useMaskObjectTracking(maskRef, maskSizeRef);
 
   useEffect(() => {
     let stream: MediaStream | null = null;
@@ -139,6 +142,7 @@ export default function Visualz() {
         levelRef={levelRef}
         peakRef={peakRef}
         toneRef={toneRef}
+        trackingRef={trackingRef}
         maskRef={maskRef}
         maskSizeRef={maskSizeRef}
         enabled={isListening}
@@ -152,6 +156,7 @@ export default function Visualz() {
         levelRef={levelRef}
         peakRef={peakRef}
         toneRef={toneRef}
+        trackingRef={trackingRef}
         maskRef={maskRef}
         maskSizeRef={maskSizeRef}
         modes={activeModes}
@@ -184,12 +189,12 @@ export default function Visualz() {
         </Link>
       </div>
 
-      <div className="absolute bottom-3 left-3 right-3 z-10 flex flex-col gap-2 sm:right-auto sm:max-w-2xl">
-        <div className="rounded-lg border border-white/10 bg-black/65 p-3 backdrop-blur-sm">
-          <div className="flex flex-wrap items-center gap-2">
+      <div className="absolute inset-x-0 bottom-0 z-10 flex flex-col gap-2 sm:bottom-3 sm:left-3 sm:right-auto sm:max-w-2xl">
+        <div className="max-h-[54svh] overflow-y-auto rounded-t-xl border border-white/10 bg-black/70 p-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] backdrop-blur-sm sm:max-h-[70vh] sm:rounded-lg sm:pb-3">
+          <div className="flex items-center gap-2">
             <button
               onClick={isListening ? stop : start}
-              className={`rounded px-3 py-2 text-[11px] font-mono font-semibold uppercase tracking-wide transition active:scale-95 ${
+              className={`min-h-10 rounded px-3 py-2 text-[11px] font-mono font-semibold uppercase tracking-wide transition active:scale-95 ${
                 isListening
                   ? "bg-red-500/20 text-red-200 hover:bg-red-500/30"
                   : "bg-yellow-400 text-black hover:bg-yellow-300"
@@ -200,13 +205,21 @@ export default function Visualz() {
             <span className="rounded bg-white/10 px-2.5 py-2 text-[10px] font-mono uppercase text-zinc-300">
               {maskReady ? "room map" : "body scan"}
             </span>
+            <button
+              onClick={() => setControlsOpen((open) => !open)}
+              className="ml-auto min-h-10 rounded bg-white/10 px-3 py-2 text-[10px] font-mono uppercase text-zinc-300 transition active:scale-95 sm:hidden"
+            >
+              {controlsOpen ? "Hide" : "Controls"}
+            </button>
+          </div>
 
-            <div className="flex flex-wrap gap-1">
+          <div className={`${controlsOpen ? "grid" : "hidden"} mt-3 gap-3 sm:grid`}>
+            <div className="flex max-w-full gap-1 overflow-x-auto pb-1 sm:flex-wrap sm:overflow-visible sm:pb-0">
               {PROJECTION_MODES.map((projectionMode) => (
                 <button
                   key={projectionMode}
                   onClick={() => toggleMode(projectionMode)}
-                  className={`rounded px-2.5 py-2 text-[10px] font-mono uppercase transition active:scale-95 ${
+                  className={`min-h-10 flex-shrink-0 rounded px-2.5 py-2 text-[10px] font-mono uppercase transition active:scale-95 ${
                     activeModes.includes(projectionMode)
                       ? "bg-white text-black"
                       : "bg-white/10 text-zinc-300 hover:bg-white/20"
@@ -216,9 +229,8 @@ export default function Visualz() {
                 </button>
               ))}
             </div>
-          </div>
 
-          <div className="mt-3 grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
+          <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
             <label className="grid gap-1">
               <div className="flex items-center justify-between gap-3 text-[10px] font-mono uppercase text-zinc-400">
                 <span>Intensity</span>
@@ -249,16 +261,16 @@ export default function Visualz() {
             </label>
           </div>
 
-          <div className="mt-3 grid gap-1.5">
+          <div className="grid gap-1.5">
             <div className="text-[10px] font-mono uppercase text-zinc-400">
               Background sequence
             </div>
-            <div className="flex flex-wrap gap-1">
+            <div className="flex max-w-full gap-1 overflow-x-auto pb-1 sm:flex-wrap sm:overflow-visible sm:pb-0">
               {BACKGROUND_EFFECTS.map((effect) => (
                 <button
                   key={effect}
                   onClick={() => setBackgroundEffect(effect)}
-                  className={`rounded px-2.5 py-1.5 text-[10px] font-mono uppercase transition active:scale-95 ${
+                  className={`min-h-9 flex-shrink-0 rounded px-2.5 py-1.5 text-[10px] font-mono uppercase transition active:scale-95 ${
                     backgroundEffect === effect
                       ? "bg-white text-black"
                       : "bg-white/10 text-zinc-300 hover:bg-white/20"
@@ -268,6 +280,7 @@ export default function Visualz() {
                 </button>
               ))}
             </div>
+          </div>
           </div>
 
           <div className="mt-3 h-2 overflow-hidden rounded-full bg-white/10">

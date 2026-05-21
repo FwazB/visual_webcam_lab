@@ -3,6 +3,7 @@
 import { type MutableRefObject, useEffect, useRef } from "react";
 import type { DistortionMode } from "./CameraDistortion";
 import type { ToneProfile } from "@/hooks/useAudioReactiveInput";
+import type { TrackedObject } from "@/hooks/useMaskObjectTracking";
 
 export type BackgroundEffect = "off" | "orbits" | "grid" | "bursts";
 
@@ -11,6 +12,7 @@ type BodyPulseOverlayProps = {
   levelRef: MutableRefObject<number>;
   peakRef: MutableRefObject<number>;
   toneRef: MutableRefObject<ToneProfile>;
+  trackingRef: MutableRefObject<TrackedObject>;
   maskRef: MutableRefObject<Float32Array | null>;
   maskSizeRef: MutableRefObject<{ width: number; height: number }>;
   modes: DistortionMode[];
@@ -36,6 +38,7 @@ export default function BodyPulseOverlay({
   levelRef,
   peakRef,
   toneRef,
+  trackingRef,
   maskRef,
   maskSizeRef,
   modes,
@@ -172,8 +175,16 @@ export default function BodyPulseOverlay({
                   y: centroid.y - previousCentroid.y,
                 }
               : { x: 0, y: 0 };
-          const centerX = centroid ? dx + centroid.x * scale : canvas.width / 2;
-          const centerY = centroid ? dy + centroid.y * scale : canvas.height / 2;
+          const tracked = trackingRef.current;
+          const trackedCenterX = tracked.cx * canvas.width;
+          const trackedCenterY = tracked.cy * canvas.height;
+          const trackingWeight = Math.min(1, tracked.presence * 1.25);
+          const centerX = centroid
+            ? trackedCenterX * trackingWeight + (dx + centroid.x * scale) * (1 - trackingWeight)
+            : trackedCenterX;
+          const centerY = centroid
+            ? trackedCenterY * trackingWeight + (dy + centroid.y * scale) * (1 - trackingWeight)
+            : trackedCenterY;
 
           if (centroid) previousCentroid = centroid;
           if (
@@ -218,6 +229,8 @@ export default function BodyPulseOverlay({
             tone,
             color: [baseRed, baseGreen, baseBlue],
             intensity,
+            objectScale: 0.75 + tracked.area * 2.4,
+            velocity: Math.hypot(tracked.vx, tracked.vy),
           });
 
           trailFrames.forEach((trail, i) => {
@@ -271,7 +284,7 @@ export default function BodyPulseOverlay({
       cancelAnimationFrame(rafId);
       window.removeEventListener("resize", resize);
     };
-  }, [levelRef, maskRef, maskSizeRef, peakRef, toneRef]);
+  }, [levelRef, maskRef, maskSizeRef, peakRef, toneRef, trackingRef]);
 
   return (
     <canvas
@@ -305,6 +318,8 @@ function drawBackgroundSequence({
   tone,
   color,
   intensity,
+  objectScale,
+  velocity,
 }: {
   ctx: CanvasRenderingContext2D;
   effect: BackgroundEffect;
@@ -318,10 +333,15 @@ function drawBackgroundSequence({
   tone: ToneProfile;
   color: [number, number, number];
   intensity: number;
+  objectScale: number;
+  velocity: number;
 }) {
   if (effect === "off" || intensity <= 0.01) return;
 
-  const alpha = Math.min(0.85, (0.08 + drive * 0.55) * Math.max(0.15, intensity));
+  const alpha = Math.min(
+    0.85,
+    (0.08 + drive * 0.55 + velocity * 5.5) * Math.max(0.15, intensity),
+  );
   const red = Math.round(Math.min(255, color[0] * 225 + tone.depth * 30));
   const green = Math.round(Math.min(255, color[1] * 225 + tone.mid * 55));
   const blue = Math.round(Math.min(255, color[2] * 225 + tone.high * 70));
@@ -336,7 +356,7 @@ function drawBackgroundSequence({
 
   if (effect === "orbits") {
     const count = 6;
-    const radius = 90 + phase * 18 + drive * 140;
+    const radius = (72 + phase * 18 + drive * 140) * objectScale;
     for (let i = 0; i < count; i++) {
       const angle = (Math.PI * 2 * i) / count + beatIndex * 0.55 + frameCount * 0.012;
       const x = centerX + Math.cos(angle) * radius * (1.1 + tone.high * 0.5);
@@ -348,7 +368,7 @@ function drawBackgroundSequence({
       if ((phase + i) % 2 === 0) ctx.fill();
     }
   } else if (effect === "grid") {
-    const spacing = 42 + phase * 4;
+    const spacing = Math.max(24, (42 + phase * 4) / Math.max(0.75, objectScale * 0.72));
     const offset = (frameCount * (0.6 + drive * 2.4) + beatIndex * spacing * 0.25) % spacing;
     for (let x = -spacing; x < width + spacing; x += spacing) {
       ctx.beginPath();
@@ -368,7 +388,9 @@ function drawBackgroundSequence({
       const step = (phase + i) % rays;
       const angle = (Math.PI * 2 * step) / rays + frameCount * 0.006;
       const inner = 45 + drive * 40;
-      const outer = Math.max(width, height) * (0.35 + ((i + phase) % 5) * 0.08);
+      const outer =
+        Math.max(width, height) *
+        (0.28 + objectScale * 0.12 + ((i + phase) % 5) * 0.08);
       ctx.beginPath();
       ctx.moveTo(centerX + Math.cos(angle) * inner, centerY + Math.sin(angle) * inner);
       ctx.lineTo(centerX + Math.cos(angle) * outer, centerY + Math.sin(angle) * outer);
