@@ -1,85 +1,98 @@
-# body.synth — User Guide
+# Visual Webcam Lab Guide
 
-## What is this?
+## What This App Does
 
-body.synth is a browser-based app that lets you control music playback with your body. It uses your webcam to track your pose in real-time, then maps your movements to audio effects.
+This project contains several webcam-based visual tools:
 
-Right now, the only active control is **playback speed via a thumb-to-index pinch gesture**.
+- `/bass` helps practice bass fretboard shapes with MediaPipe hand tracking.
+- `/visualz` turns a live performance into projection-mapping style visuals.
+- `/ascii` is a body-mask ASCII webcam experiment.
+- `/` keeps the older body.synth audio-file prototype.
 
-## How to use it
+The current creative focus is `/visualz`.
 
-### 1. Start the app
+## Using `/visualz`
+
+### 1. Open The Page
+
+Use the deployed Vercel URL or run locally:
 
 ```bash
-cd body-synth
 npm run dev
 ```
 
-Open the URL shown in your terminal (usually `http://localhost:3000`).
+Then open:
 
-### 2. Allow webcam access
+```text
+http://localhost:3000/visualz
+```
 
-Your browser will ask for camera permission. Grant it — the app needs your webcam to track your body. The video stays local and is never uploaded anywhere.
+### 2. Camera
 
-### 3. Load a track
+Allow camera access. The app uses:
 
-Either:
-- **Drag and drop** an MP3 file onto the page, or
-- Click the **"Load MP3"** button in the top-right corner and select a file
+- webcam video as the base visual feed
+- MediaPipe body segmentation for the projection surface
+- MediaPipe hand tracking for hand-origin effects
 
-### 4. Hit Play
+### 3. Audio Control
 
-Once the track is loaded, a green **"Play"** button appears. Click it to start playback.
+Click `Start control` and allow audio input.
 
-### 5. Control speed with a pinch gesture
+The audio input is only a control signal. It does not replace your amp effects. Use either:
 
-Stand so the camera can see your upper body and at least one hand. The app tracks the distance between your **thumb and index finger**:
+- laptop mic listening to your amp, or
+- your amp/interface as the browser audio input
 
-- **Pinch thumb + index together** → song slows down (down to 0.5x)
-- **Spread thumb + index apart** → song speeds up (up to 2x)
-- Both hands are tracked and averaged together
+### 4. Projection Modes
 
-You'll see a speed bar in the bottom-left corner showing the current playback rate in real-time.
+Projection modes can be stacked:
 
-### 6. Stop
+- `Aura` - body/room glow and tone-colored silhouette.
+- `Echo` - delayed trail behavior and smear.
+- `Rift` - object-centered displacement waves.
+- `Shatter` - attack-driven fragments/noise.
+- `Pulse` - beat/strum flashes and strobes.
 
-Click the red **"Stop"** button to pause playback.
+### 5. Background Sequence
 
-## What you see on screen
+Background sequences add room-scale visuals:
 
-- **Webcam feed** — your live camera view as the background
-- **Green finger markers** — dots on your thumb and index finger tips, with lines showing the pinch distance
-- **Floating particles** — audio-reactive Three.js visuals that appear during playback
-- **Speed bar** — bottom-left panel showing current playback speed
-- **Track name** — top-right, shows which file is loaded
+- `Off` - no extra sequence layer.
+- `Orbits` - orbit effects around the tracked head.
+- `Grid` - shader warp across the whole room/video feed.
+- `Bursts` - rays emitted from tracked hands/fingertips.
 
-## Tech stack
+### 6. Intensity And Color
 
-| Layer | Technology | Role |
-|-------|-----------|------|
-| Framework | Next.js | App shell, deployment via Vercel |
-| Pose tracking | MediaPipe Pose | 33 body landmarks from webcam in real-time |
-| Audio | Tone.js | Load MP3, apply real-time effects (speed, filter, reverb, etc.) |
-| Visuals | Three.js (React Three Fiber) | Audio-reactive particle system over the webcam feed |
+- `Intensity` runs from `1-100`, with overdrive above `100`.
+- `Color` sets the base projection color.
+- Bass tone still modulates color around the selected base color.
 
-## Tips
+## Using `/bass`
 
-- **Lighting matters** — MediaPipe works best with decent lighting and a clean background. It'll still work in low light, just less accurately.
-- **Stand back a bit** — the camera needs to see at least your torso and both hands. About 4-6 feet from the camera is ideal.
-- **Smooth movements** — the speed control responds in real-time with slight smoothing, so gradual movements give you finer control.
-- **Any audio file works** — despite the button saying "MP3", it accepts any browser-supported audio format (MP3, WAV, OGG, AAC, etc.).
+Open:
 
-## Future controls (built but currently disabled)
+```text
+http://localhost:3000/bass
+```
 
-The codebase has additional body-to-audio mappings ready to be activated:
+Allow camera access and hold the bass in frame. The app uses MediaPipe hand landmarks to infer finger positions and compare them against selected key/shape targets.
 
-| Movement | Audio Effect |
-|----------|-------------|
-| Left hand height | Lowpass filter cutoff (100-8000 Hz) |
-| Right hand height | Reverb wet/dry mix |
-| Arm spread | Delay wet/dry mix |
-| Movement speed | Distortion amount |
-| Body lean | Stereo pan (left/right) |
-| Crouch level | *(was previously speed, now replaced by finger control)* |
+## Verification
 
-These can be re-enabled in `src/hooks/useAudioEngine.ts` by uncommenting the relevant lines in the `updateFromPose` function.
+Before pushing changes, run:
+
+```bash
+npm run lint
+npm run build
+npm audit
+```
+
+Useful stale-code checks:
+
+```bash
+npm ls --depth=0
+npm audit
+npm run lint
+```
