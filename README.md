@@ -9,6 +9,12 @@ Browser-based webcam visual experiments built with Next.js, MediaPipe, Three.js,
 - `/bass` - bass fretboard learning view with MediaPipe hand tracking.
 - `/visualz` - live projection-mapping style visual instrument for guitar/bass performance.
 
+## Apple Native Direction
+
+The next product direction is a native iPhone/iPad teaching app for bass and regular guitar, using ARKit for spatial fretboard overlays and Create ML later for instrument/fretboard recognition.
+
+Roadmap: [docs/apple-native-roadmap.md](docs/apple-native-roadmap.md)
+
 ## Visualz
 
 `/visualz` is a visual experience, not an audio effects processor. Your amp owns the sound. The browser uses camera, hand/body tracking, and audio input only as control signals.
