@@ -1,32 +1,65 @@
-# Apple Native Bass And Guitar Teacher Roadmap
+# Apple Native Guitar And Bass Teacher Roadmap
 
 ## Goal
 
-Build a native Apple app that teaches bass guitar and regular guitar with spatial overlays, real-time feedback, and instrument-aware lessons.
+Build native Apple apps that teach regular guitar and bass guitar with spatial overlays, real-time feedback, and instrument-aware lessons.
 
 The current web app is the prototype layer:
 
 - `/bass` validates fretboard lesson logic and MediaPipe hand tracking.
 - `/visualz` validates performance visuals, body segmentation, hand emitters, and audio-as-control.
 
-The Apple app should become the serious learning product.
+The Apple apps should become the serious learning product.
 
-## Test Device
+Start with regular guitar and bass together. They share the same core fretboard engine, but differ in tuning, string count, lesson content, and ergonomics.
 
-Initial hardware target:
+## Target Platforms
 
-- iPhone 11 Pro
+### iPhone And iPad
+
+Primary live teaching target:
+
+- iPhone 11 Pro initial test device
 - Apple Developer account
-- Physical bass guitar first
-- Regular guitar support after the fretboard model generalizes
+- rear-camera ARKit lessons
+- guitar and bass modes from the first MVP
+- physical instrument in camera view
 
-The iPhone 11 Pro is a good first test device for rear-camera ARKit work. Build the MVP around iPhone/iPad AR first, then consider visionOS later.
+The iPhone 11 Pro is a good first test device for rear-camera ARKit work. Build the first spatial MVP around iPhone/iPad AR.
+
+### Mac
+
+Mac should be a first-class companion app, not just a later port.
+
+Best Mac roles:
+
+- lesson library and practice planner
+- larger-screen fretboard explorer
+- chord/scale/note trainer
+- progress review
+- video lesson playback beside an interactive fretboard
+- optional webcam-based practice mode where ARKit is unavailable
+
+Mac can share most non-camera logic with iPhone/iPad:
+
+- instrument models
+- fretboard math
+- note/chord/scale engine
+- lesson data
+- scoring rules
+- user progress
+
+Mac should not block the AR MVP. Build shared Swift models first, then provide iOS/iPadOS and macOS front ends.
+
+### visionOS Later
+
+Consider visionOS after the iPhone/iPad MVP proves the interaction model.
 
 ## Framework Roles
 
 ### ARKit
 
-Use ARKit for the live spatial lesson:
+Use ARKit for the live iPhone/iPad spatial lesson:
 
 - camera AR session
 - world tracking
@@ -36,6 +69,8 @@ Use ARKit for the live spatial lesson:
 - lesson UI in camera space
 
 Official docs: https://developer.apple.com/documentation/arkit
+
+ARKit is not the Mac teaching foundation. Mac should use a native SwiftUI/AppKit-style interface with optional webcam assistance, while iPhone/iPad own the instrument-in-space experience.
 
 ### Vision
 
@@ -65,7 +100,7 @@ Do not block the MVP on custom ML. Start with manual or semi-automatic calibrati
 Primary user flow:
 
 1. User opens the app.
-2. User selects `Bass` or `Guitar`.
+2. User selects `Guitar` or `Bass`.
 3. Camera starts in AR mode.
 4. User aligns a fretboard guide over the real neck.
 5. App anchors fret/string positions.
@@ -74,6 +109,11 @@ Primary user flow:
 8. App gives simple feedback: correct, close, wrong, out of frame.
 
 Keep MVP feedback visual first. Audio note detection can come later.
+
+MVP 1 should support both:
+
+- regular guitar: 6 strings, standard tuning, beginner chords and scale shapes
+- bass guitar: 4 strings, standard tuning, notes, roots/fifths/octaves, scale shapes
 
 ## Core Technical Pieces
 
@@ -89,17 +129,19 @@ Represent each instrument as:
 - note map
 - playable lesson shapes
 
+Guitar defaults:
+
+- 6 strings
+- E A D G B E tuning
+- 20-24 frets
+
 Bass defaults:
 
 - 4 strings
 - E A D G tuning
 - 20-24 frets
 
-Guitar defaults:
-
-- 6 strings
-- E A D G B E tuning
-- 20-24 frets
+Treat both as data-driven instrument profiles, not separate apps.
 
 ### Calibration
 
@@ -127,6 +169,12 @@ Share concepts with the web `/bass` route:
 - traffic-light feedback
 
 Native app should eventually move this into Swift models, but the current TypeScript logic is useful as product reference.
+
+Create one shared lesson engine that can power:
+
+- iPhone/iPad AR overlays
+- Mac fretboard trainer
+- future visionOS spatial lessons
 
 ### Feedback
 
@@ -160,15 +208,30 @@ Labeling targets:
 
 ## Suggested Milestones
 
-### Milestone 1: Native Shell
+### Milestone 1: Shared Apple Project
 
 - Xcode project
+- shared Swift package/module for instrument and lesson models
+- guitar and bass instrument profiles
+- iOS/iPadOS target
+- macOS target
+- iPhone 11 Pro build and dev install
+
+### Milestone 2: iPhone/iPad AR Shell
+
 - camera permission
 - ARKit session
 - simple overlay plane/markers
-- iPhone 11 Pro build and TestFlight/dev install
+- guitar/bass mode selector
 
-### Milestone 2: Manual Fretboard Calibration
+### Milestone 3: Mac Companion Shell
+
+- desktop fretboard view
+- instrument selector
+- scale/chord/note browser
+- lesson list
+
+### Milestone 4: Manual Fretboard Calibration
 
 - bass/guitar mode
 - fretboard guide
@@ -176,7 +239,7 @@ Labeling targets:
 - derived fret/string grid
 - save calibration
 
-### Milestone 3: Lessons
+### Milestone 5: Lessons
 
 - note finder
 - major/minor scale shapes
@@ -184,13 +247,13 @@ Labeling targets:
 - guitar chord/scale basics
 - traffic-light feedback
 
-### Milestone 4: Tracking Feedback
+### Milestone 6: Tracking Feedback
 
 - hand/finger position approximation
 - visual correctness scoring
 - audio pitch detection experiment
 
-### Milestone 5: Create ML
+### Milestone 7: Create ML
 
 - collect dataset from real sessions
 - train instrument/fretboard detector
@@ -202,7 +265,8 @@ Keep this repository clean as the product lab:
 
 - current web prototype remains in Next.js
 - native Apple work can start in a new top-level folder or a new repo
-- if added here, use `ios/` for the Xcode project
+- if added here, use `apple/` for shared Apple-native work
+- use `apple/GuitarTeacher/` or similar for the Xcode project
 - do not mix generated Xcode build artifacts into Git
 
-Before starting native code, add an iOS-focused `.gitignore` section if the Xcode project lives in this repo.
+Before starting native code, add an Apple/Xcode-focused `.gitignore` section if the Xcode project lives in this repo.
