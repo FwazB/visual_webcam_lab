@@ -11,7 +11,7 @@ Browser-based webcam visual experiments built with Next.js, MediaPipe, Three.js,
 
 ## Apple Native Direction
 
-The next product direction is native Apple teaching apps for regular guitar and bass. iPhone/iPad own the ARKit spatial fretboard overlays; Mac becomes the larger-screen lesson planner, fretboard explorer, and practice companion. Create ML comes later for instrument/fretboard recognition once the manual AR teaching flow works.
+The next product direction is native Apple teaching apps for regular guitar and bass. iPhone/iPad own the ARKit spatial fretboard overlays; Mac becomes the larger-screen lesson planner, fretboard explorer, tab reader, and practice companion. Create ML comes later for instrument/fretboard recognition once the manual AR teaching flow works.
 
 Roadmap: [docs/apple-native-roadmap.md](docs/apple-native-roadmap.md)
 

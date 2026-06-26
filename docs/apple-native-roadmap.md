@@ -104,7 +104,7 @@ Primary user flow:
 3. Camera starts in AR mode.
 4. User aligns a fretboard guide over the real neck.
 5. App anchors fret/string positions.
-6. User chooses a lesson: notes, scale shape, chord shape, or riff.
+6. User chooses a lesson: notes, scale shape, chord shape, riff, or tab.
 7. App projects target positions onto the real instrument.
 8. App gives simple feedback: correct, close, wrong, out of frame.
 
@@ -112,8 +112,8 @@ Keep MVP feedback visual first. Audio note detection can come later.
 
 MVP 1 should support both:
 
-- regular guitar: 6 strings, standard tuning, beginner chords and scale shapes
-- bass guitar: 4 strings, standard tuning, notes, roots/fifths/octaves, scale shapes
+- regular guitar: 6 strings, standard tuning, beginner chords, scale shapes, and 6-line tabs
+- bass guitar: 4 strings, standard tuning, notes, roots/fifths/octaves, scale shapes, and 4-line bass tabs
 
 ## Core Technical Pieces
 
@@ -175,6 +175,57 @@ Create one shared lesson engine that can power:
 - iPhone/iPad AR overlays
 - Mac fretboard trainer
 - future visionOS spatial lessons
+
+### Tab Reader And Trainer
+
+Tabs should be a first-class lesson source for both guitar and bass.
+
+Beginner users should not have to understand tab notation before using the app. The app should parse the tab and translate it into visual targets on the real instrument.
+
+Support from the first tab MVP:
+
+- 6-line regular guitar ASCII tabs
+- 4-line bass guitar ASCII tabs
+- per-instrument tuning profiles
+- fret numbers mapped to string/fret targets
+- simple left-to-right playback order
+- stacked fret numbers as simultaneous notes/chords
+- rests/gaps as timing spacing
+
+Internal event model:
+
+- instrument profile: guitar or bass
+- string index
+- fret number
+- beat/order index
+- duration estimate
+- optional chord label
+- optional technique marker
+
+Early visual behavior:
+
+- show the next target string/fret on the real neck
+- animate the upcoming tab sequence left to right
+- turn targets green/yellow/red based on hand position
+- optionally confirm played pitch with microphone/audio input later
+
+Later parser support:
+
+- slides
+- hammer-ons and pull-offs
+- bends
+- muted notes
+- palm mute markers
+- repeat bars
+- imported Guitar Pro or MusicXML if needed
+
+Mac-specific tab workflow:
+
+- paste or import a tab
+- clean up spacing
+- choose guitar or bass profile
+- preview the tab on a large fretboard
+- send the lesson to iPhone/iPad AR practice
 
 ### Feedback
 
@@ -245,6 +296,8 @@ Labeling targets:
 - major/minor scale shapes
 - bass root/fifth/octave lessons
 - guitar chord/scale basics
+- guitar tab reader and trainer
+- bass tab reader and trainer
 - traffic-light feedback
 
 ### Milestone 6: Tracking Feedback
