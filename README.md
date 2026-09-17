@@ -101,7 +101,7 @@ Two TouchDesigner projects keep local visuals and projector setup separate:
 
 | Project | Purpose |
 | --- | --- |
-| [Fuzz](touchdesigner/fuzz/fuzz.toe) | Local camera/audio visuals, local preview, and optional guitar-trainer pairing |
+| [Fuzz](touchdesigner/fuzz/fuzz.toe) | Local pitch-colored camera visuals, local preview, and optional guitar-trainer pairing |
 | [Projection Mapping](touchdesigner/projection_mapping/projection_mapping.toe) | Projector surface alignment and display output; optionally receives Fuzz's local image |
 
 Fuzz runs the trainer's local control server on the Mac; no cloud relay is involved.
@@ -135,6 +135,8 @@ page blocks loopback, use the localhost app. No browser security flags are neede
   engine state. TouchDesigner also analyzes its selected audio input locally.
   See [touchdesigner/fuzz/README.md](touchdesigner/fuzz/README.md) for device
   selection, rebuilding, and safe export instructions.
+  The pitch you play chooses its color: E is yellow, A is green, and other
+  notes follow the [circle-of-fifths palette](docs/pitch-colors.svg).
 - For a projector, open the separate
   [Projection Mapping project](touchdesigner/projection_mapping/projection_mapping.toe).
   Fuzz's `local_texture` sender publishes `OUT` as `body-synth-fuzz` on the same

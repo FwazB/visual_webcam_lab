@@ -102,7 +102,28 @@ re-expanded and checked for blank pairing storage, removed audio caches and
 camera IDs; the mapper contains no Fuzz processing or credential storage.
 The original audit hashes above identify the pre-split artifacts.
 
-Current split artifacts (SHA-256):
+Split artifacts at `cce5e5e` (SHA-256):
 
 - `fuzz`: 8266 bytes, `88df7811b99e67301ece30b37dc0c84bff5af48eedc35c33674adee9689bed0e`.
 - `projection_mapping`: 4250 bytes, `7ea8a76006772d80c1511248d82fd63f816f1f963c357a03f4bf21e4a01cd329`.
+
+## Follow-up: local pitch colors
+
+Fuzz now analyzes its existing audio input locally to choose a note color.
+No new dependencies, listeners, remote processing, or protocol commands were
+added. The detector uses TouchDesigner's bundled NumPy and keeps at most 4096
+audio samples in module memory; it does not put audio history in saved storage.
+The local note/Hz viewer is excluded from the shared visual output.
+
+All 40 Python tests pass, including silence, stale/disabled capture, channel
+and device changes, and the existing bridge security tests. Native 1280×720
+checks confirmed E2/yellow, A2/green, silence release, and preserved controls.
+The final file reopened with audio active, fresh pairing, and no operator
+errors. A fresh dependency audit again reports zero known vulnerabilities.
+The 32-operator export was expanded and inspected: every `.ts` cache was removed,
+`PITCH.script` contains only neutral diagnostics, pairing storage is blank,
+and embedded source matches the repository. No test sources or machine-specific
+device identifiers remain.
+
+Current `fuzz.toe`: 12898 bytes, SHA-256
+`7f8ad43c920267ab63e163909c89ccfe3878c548ad7e895ae1785158e5b47ca8`.

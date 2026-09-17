@@ -21,7 +21,7 @@ chords  authenticated bridge on ws://127.0.0.1:9980/body-synth receives
         Standalone audio drives the network even without a web connection.
 
 Mappings: ONSET pushes the displacement, AUDIO_LEVEL keeps the feedback
-trail alive, CHORD shifts the hue.
+trail alive, detected pitch colors the camera using a circle-of-fifths palette.
 """
 
 from pathlib import Path
@@ -64,13 +64,26 @@ root = op(ROOT_PATH)
 if root is None:
     raise RuntimeError("Create /project1 before running the fuzz builder.")
 callback_source = (FUZZ_DIRECTORY / "bridge_callbacks.py").read_text()
+pitch_source = (FUZZ_DIRECTORY / "pitch_color.py").read_text()
+pitch_callback_source = (FUZZ_DIRECTORY / "pitch_callbacks.py").read_text()
 base = ensure(root, "baseCOMP", BASE_NAME)
+page = next((p for p in base.customPages if p.name == "Pitch Color"), None)
+if page is None:
+    page = base.appendCustomPage("Pitch Color")
+if getattr(base.par, "Tint", None) is None:
+    tint = page.appendFloat("Tint", label="Pitch color amount")[0]
+    tint.default = tint.val = 1.0
+    tint.min = tint.normMin = 0.0
+    tint.max = tint.normMax = 1.0
+    tint.clampMin = tint.clampMax = True
 
 # ---------------------------------------------------------------- video ----
 camera = ensure(base, "videodeviceinTOP", "camera_in")
 feedback = ensure(base, "feedbackTOP", "feedback")
 mix = ensure(base, "compositeTOP", "mix")
 hue = ensure(base, "hsvadjustTOP", "hue")
+pitch_swatch = ensure(base, "constantTOP", "pitch_swatch")
+pitch_tint = ensure(base, "compositeTOP", "pitch_tint")
 dim = ensure(base, "levelTOP", "dim")
 noise = ensure(base, "noiseTOP", "warp_noise")
 warp = ensure(base, "displaceTOP", "warp")
@@ -79,13 +92,15 @@ blackout = ensure(base, "levelTOP", "output_level")
 visual_out = ensure(base, "nullTOP", "OUT")
 component_out = ensure(base, "outTOP", "out1")
 
-connect(camera, feedback)          # first frame seeds the loop
-connect(feedback, hue)
-connect(hue, dim)
+connect(camera, hue)
+connect(hue, pitch_tint, 0)
+connect(pitch_swatch, pitch_tint, 1)
+connect(pitch_tint, feedback)       # first frame seeds the loop
+connect(feedback, dim)
 connect(dim, warp, 0)
 connect(noise, warp, 1)
 connect(warp, mix, 0)  # faded trail over the new, opaque camera image
-connect(camera, mix, 1)
+connect(pitch_tint, mix, 1)
 connect(mix, tail)
 connect(tail, blackout)
 connect(blackout, visual_out)
@@ -96,6 +111,15 @@ if not camera.par.device.eval() and camera.par.device.menuNames:
 
 setpar(feedback, "top", "tail")     # close the loop
 setpar(mix, "operand", "over")
+setpar(pitch_tint, "operand", "multiply")
+setpar(pitch_tint, "outputresolution", "custom")
+setpar(pitch_tint, "resolutionw", 1280)
+setpar(pitch_tint, "resolutionh", 720)
+setpar(pitch_tint, "outputaspect", "resolution")
+setpar(pitch_swatch, "outputresolution", "custom")
+setpar(pitch_swatch, "resolutionw", 1)
+setpar(pitch_swatch, "resolutionh", 1)
+setpar(pitch_swatch, "alpha", 1.0)
 setpar(noise, "type", "sparse")
 setpar(noise, "period", 1.6)
 setpar(noise, "amp", 1.0)
@@ -138,6 +162,28 @@ setpar(onset, "decay", 0.25)
 setpar(onset, "sustain", 0.0)
 setpar(onset, "release", 0.2)
 
+# ---------------------------------------------------------- local pitch ----
+pitch_module = ensure(base, "textDAT", "pitch_color")
+pitch_module.text = pitch_source
+pitch_callbacks = ensure(base, "textDAT", "pitch_callbacks")
+pitch_callbacks.text = pitch_callback_source
+new_pitch = base.op("PITCH") is None
+pitch = ensure(base, "scriptCHOP", "PITCH")
+generated_callbacks = pitch.par.callbacks.eval() if new_pitch else None
+setpar(pitch, "callbacks", "pitch_callbacks")
+if generated_callbacks is not None and generated_callbacks != pitch_callbacks:
+    generated_callbacks.destroy()
+setpar(pitch, "timeslice", False)
+connect(audio, pitch)
+# A local diagnostic viewer; it is not composited into the shared image.
+pitch_monitor = ensure(base, "textTOP", "pitch_monitor")
+setpar(pitch_monitor, "outputresolution", "custom")
+setpar(pitch_monitor, "resolutionw", 480)
+setpar(pitch_monitor, "resolutionh", 96)
+setpar(pitch_monitor, "font", "Verdana")
+setpar(pitch_monitor, "fontsizex", 22)
+setexpr(pitch_monitor, "text", "mod.pitch_callbacks.label(op('PITCH'))")
+
 # --------------------------------------------------------------- chords ----
 chord = ensure(base, "constantCHOP", "CHORD")
 setpar(chord, "name0", "chord")
@@ -175,6 +221,7 @@ setpar(bridge, "callbacks", "bridge_callbacks")
 bridge.store("fuzzClients", {})
 startup = ensure(base, "executeDAT", "startup")
 startup.text = '''def onStart():
+    me.parent().op("pitch_callbacks").module.reset()
     bridge = me.parent().op("bridge")
     me.parent().op("bridge_callbacks").module.start_bridge(bridge)
 '''
@@ -185,12 +232,15 @@ setpar(startup, "framestart", False)
 setpar(startup, "frameend", False)
 
 # ------------------------------------------------------------- mappings ----
-# Onsets push the warp; level keeps the trail alive; chord shifts the hue.
+# Pitch controls color; onsets and authenticated hits still push the warp.
 setexpr(warp, "displaceweightx", "op('CONTROLS')['amount'] * (0.02 + min(max(op('ONSET')[0], 0), 1) * 0.36 + mod.bridge_callbacks.hit_level(op('bridge')) * 0.2)")
 setexpr(warp, "displaceweighty", "op('CONTROLS')['amount'] * (0.02 + min(max(op('ONSET')[0], 0), 1) * 0.36 + mod.bridge_callbacks.hit_level(op('bridge')) * 0.2)")
 setexpr(dim, "opacity", "min(0.98, op('CONTROLS')['feedback'] * (0.9 + min(max(op('AUDIO_LEVEL')[0], 0.0), 1.0) * 0.1))")
-setexpr(hue, "hueoffset", "op('CHORD')['chord'] * 40.0 + op('ONSET')[0] * 15.0")
-setexpr(hue, "saturationmult", "1.0 + min(max(op('AUDIO_LEVEL')[0], 0), 1) * 0.5")
+setpar(hue, "hueoffset", 0.0)
+setexpr(hue, "saturationmult", "1.0 - op('PITCH')['amount'] * parent().par.Tint")
+for component, channel in zip("rgb", "rgb"):
+    setexpr(pitch_swatch, "color" + component,
+            "1.0 - op('PITCH')['amount'] * parent().par.Tint + op('PITCH')['{}'] * parent().par.Tint".format(channel))
 setexpr(blackout, "brightness1", "1.0 - op('CONTROLS')['blackout']")
 
 # ---------------------------------------------------------- local output ----
@@ -220,10 +270,11 @@ setpar(shared_out, "active", True)
 
 # --------------------------------------------------------------- layout ----
 rows = [
-    ([camera, feedback, hue, dim, warp, mix, tail, blackout, visual_out, component_out], 200),
-    ([noise], 40),
+    ([camera, hue, pitch_tint, feedback, dim, warp, mix, tail, blackout, visual_out, component_out], 200),
+    ([pitch_swatch, noise], 40),
     ([audio, rms, gain, smooth, audio_out], -140),
     ([slope, onset, onset_out], -300),
+    ([pitch_module, pitch_callbacks, pitch, pitch_monitor], -620),
     ([chord, controls, bridge, callbacks, startup, preview, shared_out], -460),
 ]
 for nodes, y in rows:

@@ -56,6 +56,26 @@ controls remain on the pedal/Spark app. They do not start the trainer's transpor
 or follow its adjustable tempo. The same applies to the pedal's MIDI and
 expression-pedal connections: this release does not implement them.
 
+## Standalone Fuzz pitch colors
+
+Open [Fuzz](../touchdesigner/fuzz/fuzz.toe) in TouchDesigner and select the
+USB-connected Spark in `audio_in` → Device. This path is entirely local:
+
+```text
+guitar -> Spark USB audio -> Fuzz audio_in -> pitch detector -> camera tint
+```
+
+No browser, song selection, or trainer pairing is required. Play clean,
+isolated notes; stop delay, reverb and the hardware looper while checking
+tracking. Open `pitch_monitor` to see note/Hz and inspect `PITCH` for confidence.
+The [note-color legend](pitch-colors.svg) follows the circle of fifths, with E
+yellow and A green; octaves share a color. Use **Pitch Color → Pitch color
+amount** to blend the tint, which holds briefly then fades after silence.
+
+TouchDesigner's audio device selection is separate from **Connect guitar** in
+the browser. Verify the actual USB signal as above: selecting Spark does not
+guarantee a dry guitar-only channel or exclude its effects and looper.
+
 ## First hardware check
 
 - Confirm the exact input label, negotiated channel count, and sample rate.
