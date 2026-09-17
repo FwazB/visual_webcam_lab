@@ -11,6 +11,7 @@ import {
 } from "./protocol";
 
 export const TOUCHDESIGNER_URL = "ws://127.0.0.1:9980/body-synth";
+export const CONNECTION_TIMEOUT_MS = 60_000;
 export const HANDSHAKE_TIMEOUT_MS = 5_000;
 export const HEARTBEAT_INTERVAL_MS = 5_000;
 export const HEARTBEAT_TIMEOUT_MS = 15_000;
@@ -51,7 +52,7 @@ export class TouchDesignerClient {
   private snapshot = INITIAL_SNAPSHOT;
   private socket: BridgeSocket | null = null;
   private listeners = new Set<() => void>();
-  private handshakeTimer: Timer | null = null;
+  private connectionTimer: Timer | null = null;
   private heartbeatTimer: Timer | null = null;
   private pendingPing: number | null = null;
   private lastPongAt = 0;
@@ -91,13 +92,18 @@ export class TouchDesignerClient {
       return;
     }
     this.socket = socket;
-    this.handshakeTimer = this.schedule(() => {
-      this.fail("TouchDesigner did not finish pairing. Check the code and bridge, then reconnect.");
-    }, HANDSHAKE_TIMEOUT_MS);
+    // The browser may wait for local-network permission before opening.
+    this.connectionTimer = this.schedule(() => {
+      this.fail("The local connection timed out. Allow local network access in the browser, check TouchDesigner, then reconnect.");
+    }, CONNECTION_TIMEOUT_MS);
     socket.onopen = () => {
       if (this.socket !== socket) return;
       // Release the closure containing the code after the one pairing message.
       socket.onopen = null;
+      if (this.connectionTimer !== null) this.cancel(this.connectionTimer);
+      this.connectionTimer = this.schedule(() => {
+        this.fail("TouchDesigner did not finish pairing. Check the code and bridge, then reconnect.");
+      }, HANDSHAKE_TIMEOUT_MS);
       this.update({ ...this.snapshot, status: "handshaking" });
       this.send({
         type: "hello",
@@ -200,8 +206,8 @@ export class TouchDesignerClient {
       }
       if (this.snapshot.state && message.state.revision <= this.snapshot.state.revision) return;
       const firstState = this.snapshot.status !== "ready";
-      if (this.handshakeTimer !== null) this.cancel(this.handshakeTimer);
-      this.handshakeTimer = null;
+      if (this.connectionTimer !== null) this.cancel(this.connectionTimer);
+      this.connectionTimer = null;
       this.update({ ...this.snapshot, status: "ready", state: message.state, error: null });
       if (firstState) {
         this.lastPongAt = this.now();
@@ -248,9 +254,9 @@ export class TouchDesignerClient {
   };
 
   private closeSocket(): void {
-    if (this.handshakeTimer !== null) this.cancel(this.handshakeTimer);
+    if (this.connectionTimer !== null) this.cancel(this.connectionTimer);
     if (this.heartbeatTimer !== null) this.cancel(this.heartbeatTimer);
-    this.handshakeTimer = null;
+    this.connectionTimer = null;
     this.heartbeatTimer = null;
     this.pendingPing = null;
     const socket = this.socket;

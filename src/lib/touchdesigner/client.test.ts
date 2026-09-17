@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  CONNECTION_TIMEOUT_MS,
   HANDSHAKE_TIMEOUT_MS,
   HEARTBEAT_INTERVAL_MS,
   HEARTBEAT_TIMEOUT_MS,
@@ -163,9 +164,9 @@ test("default timers preserve the browser global receiver through pairing and di
     socket.receive(welcome);
     socket.receive(snapshot);
     assert.equal(client.getSnapshot().status, "ready");
-    assert.equal(scheduled, 2, "schedules the handshake and heartbeat");
+    assert.equal(scheduled, 3, "schedules socket opening, handshake and heartbeat");
     client.disconnect();
-    assert.equal(cancelled, 2, "cancels the handshake and heartbeat");
+    assert.equal(cancelled, 3, "cancels socket opening, handshake and heartbeat");
     assert.equal(activeTimers.size, 0);
     assert.equal(socket.closed, true);
   } finally {
@@ -176,16 +177,50 @@ test("default timers preserve the browser global receiver through pairing and di
   }
 });
 
-test("handshake timeout covers unopened sockets and incomplete pairing", () => {
+test("socket opening allows time for local-network permission and expires without retry", () => {
+  const { client, sockets, timers, advance } = setup();
+  client.connect(PAIRING_CODE);
+  advance(HANDSHAKE_TIMEOUT_MS * 2);
+  assert.equal(client.getSnapshot().status, "connecting");
+  assert.equal(sockets[0].messages.length, 0);
+  advance(CONNECTION_TIMEOUT_MS - HANDSHAKE_TIMEOUT_MS * 2 - 1);
+  assert.equal(client.getSnapshot().status, "connecting");
+  advance(1);
+  assert.equal(client.getSnapshot().status, "error");
+  assert.match(client.getSnapshot().error!, /Allow local network access/);
+  assert.equal(sockets[0].closed, true);
+  assert.equal(timers.size, 0);
+  advance(CONNECTION_TIMEOUT_MS);
+  assert.equal(sockets.length, 1);
+});
+
+test("late socket opening starts a fresh five-second handshake deadline", () => {
+  const { client, sockets, timers, advance } = setup();
+  client.connect(PAIRING_CODE);
+  advance(CONNECTION_TIMEOUT_MS - 1_000);
+  sockets[0].open();
+  sockets[0].receive(welcome);
+  advance(HANDSHAKE_TIMEOUT_MS - 1);
+  assert.equal(client.getSnapshot().status, "handshaking");
+  advance(1);
+  assert.equal(client.getSnapshot().status, "error");
+  assert.match(client.getSnapshot().error!, /did not finish pairing/);
+  assert.equal(sockets[0].closed, true);
+  assert.equal(timers.size, 0);
+  advance(CONNECTION_TIMEOUT_MS);
+  assert.equal(sockets.length, 1);
+});
+
+test("disconnect cancels both socket-opening and handshake deadlines", () => {
   for (const opened of [false, true]) {
     const { client, sockets, timers, advance } = setup();
     client.connect(PAIRING_CODE);
-    if (opened) { sockets[0].open(); sockets[0].receive(welcome); }
-    advance(HANDSHAKE_TIMEOUT_MS);
-    assert.equal(client.getSnapshot().status, "error");
-    assert.equal(sockets[0].closed, true);
+    if (opened) sockets[0].open();
+    client.disconnect();
     assert.equal(timers.size, 0);
-    advance(60_000);
+    advance(CONNECTION_TIMEOUT_MS + HANDSHAKE_TIMEOUT_MS);
+    assert.equal(client.getSnapshot().status, "disconnected");
+    assert.equal(sockets[0].closed, true);
     assert.equal(sockets.length, 1);
   }
 });
