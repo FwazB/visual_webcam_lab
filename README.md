@@ -106,24 +106,26 @@ chord scoring                    transport, visual controls       projection out
 ```
 
 Use **TouchDesigner visuals** in the trainer and enter the pairing code printed
-by the build script. Connection is explicit and the code is kept only in memory.
+in TouchDesigner (instructions below). Connection is explicit and the code is kept only in memory.
 The paired bridge requires TouchDesigner **2025.33070 or newer** for explicit
 localhost binding; older builds can run the standalone visual network only.
 Browser local-network rules vary: allow local access if requested; if the hosted
 page blocks loopback, use the localhost app. No browser security flags are needed.
 
-- `touchdesigner/fuzz/`: chord-driven video distortion and projection. Run
-  the build script from the Textport, then save `fuzz.toe` privately (the
-  generated project contains its pairing code and is ignored by Git):
+- Open [touchdesigner/fuzz/fuzz.toe](touchdesigner/fuzz/fuzz.toe) in TouchDesigner.
+  Press **F1** to show the camera-based Fuzz output; **Esc** returns to the editor.
+  No build step or MCP is needed. The project generates a fresh pairing code
+  each time it opens. In **Dialogs → Textport and DATs**, run:
 
   ```python
-  exec(open('/Users/fb/dev/visualarts/body-synth/touchdesigner/fuzz/fuzz_build.py').read())
+  print(op('/project1/fuzz').fetch('pairingCode'))
   ```
 
-  The trainer sends chord changes and note hits to the paired bridge. Warp,
-  trails, and blackout controls use acknowledged engine state. TouchDesigner
-  can also analyze its selected audio input independently.
-  See [touchdesigner/fuzz/README.md](touchdesigner/fuzz/README.md).
+  Paste that code into the trainer's TouchDesigner panel. The trainer sends
+  chord changes and note hits; warp, trails, and blackout use acknowledged
+  engine state. TouchDesigner also analyzes its selected audio input locally.
+  See [touchdesigner/fuzz/README.md](touchdesigner/fuzz/README.md) for device
+  selection, rebuilding, and safe export instructions.
 - Direction: [docs/touchdesigner-backend-redesign.md](docs/touchdesigner-backend-redesign.md)
   moves real-time media work into TouchDesigner with the web app as the
   control surface; message types live in `src/lib/touchdesigner/protocol.ts`.
@@ -172,4 +174,5 @@ npm run smoke -- http://127.0.0.1:3000
 Security headers (including a report-only Content-Security-Policy) are set
 in `next.config.ts`. Once the browser console shows no CSP reports in
 production, rename the header to `Content-Security-Policy` to enforce it.
+Audit scope, fixes, and remaining limitations: [docs/security-audit.md](docs/security-audit.md).
 Commits carry no AI attribution trailers (see `AGENTS.md`).

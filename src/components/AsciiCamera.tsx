@@ -59,6 +59,7 @@ export default function AsciiCamera() {
   // Start webcam — use lower resolution on mobile
   useEffect(() => {
     let stream: MediaStream | null = null;
+    let cancelled = false;
     const isMobile = window.innerWidth < 768;
 
     async function initCamera() {
@@ -71,6 +72,10 @@ export default function AsciiCamera() {
           },
           audio: false,
         });
+        if (cancelled) {
+          stream.getTracks().forEach((track) => track.stop());
+          return;
+        }
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
           videoRef.current.onloadeddata = () => setWebcamReady(true);
@@ -83,6 +88,7 @@ export default function AsciiCamera() {
     initCamera();
 
     return () => {
+      cancelled = true;
       stream?.getTracks().forEach((t) => t.stop());
     };
   }, []);

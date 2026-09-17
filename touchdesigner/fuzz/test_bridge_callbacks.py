@@ -32,6 +32,7 @@ class Parameters:
 class Storage:
     def __init__(self):
         self.storage = {}
+        self.startup = {}
 
     def fetch(self, key, default=None, storeDefault=False):
         if storeDefault and key not in self.storage:
@@ -40,6 +41,9 @@ class Storage:
 
     def store(self, key, value):
         self.storage[key] = value
+
+    def storeStartupValue(self, key, value):
+        self.startup[key] = value
 
 
 class Parent(Storage):
@@ -57,6 +61,9 @@ class Server(Storage):
         super().__init__()
         self.base = Parent()
         self.sent, self.closed = [], []
+        self.par = Parameters()
+        self.par.localaddress = Parameter("127.0.0.1")
+        self.par.active = Parameter(False)
 
     def parent(self):
         return self.base
@@ -187,6 +194,57 @@ class BridgeTests(unittest.TestCase):
         self.assertFalse(bridge._state(self.server)["running"])
         self.assertEqual(self.server.base.op("CHORD").par.value1.eval(), 0)
         self.assertEqual(bridge._state(self.server)["parameters"]["visual.fuzz.amount"], 0.7)
+
+    def test_export_clears_only_known_runtime_values_and_stops_listener(self):
+        self.pair()
+        self.server.base.store("unrelatedUserSetting", "preserve")
+        self.send({"type": "transport.set", "playing": True})
+        self.send({"type": "event", "name": "note.hit", "payload": {"chordTone": True, "strength": 1}})
+        self.send({"type": "parameter.set", "parameter": "visual.fuzz.amount", "value": 0.7})
+        bridge.prepare_for_export(self.server)
+        self.assertIsNone(self.server.base.fetch("pairingCode"))
+        self.assertIsNone(self.server.base.startup["pairingCode"])
+        self.assertEqual(self.server.startup["fuzzClients"], {})
+        self.assertEqual(bridge._clients(self.server), {})
+        self.assertEqual(self.server.base.fetch("lastHitAt"), -1000)
+        self.assertEqual(self.server.base.op("CHORD").par.value1.eval(), 0)
+        self.assertFalse(self.server.par.active.eval())
+        self.assertEqual(bridge._state(self.server)["revision"], 0)
+        self.assertIsNone(bridge._state(self.server)["sessionId"])
+        self.assertFalse(bridge._state(self.server)["running"])
+        self.assertEqual(bridge._state(self.server)["parameters"]["visual.fuzz.amount"], 0.7)
+        self.assertEqual(self.server.base.fetch("unrelatedUserSetting"), "preserve")
+
+    def test_open_generates_runtime_code_and_saves_only_blank_startup_value(self):
+        bridge.prepare_for_export(self.server)
+        with patch.object(bridge.secrets, "token_urlsafe", return_value="new-runtime-code") as generate:
+            bridge.start_bridge(self.server)
+            generate.assert_called_once_with(24)
+        self.assertEqual(self.server.base.fetch("pairingCode"), "new-runtime-code")
+        self.assertIsNone(self.server.base.startup["pairingCode"])
+        self.assertTrue(self.server.par.active.eval())
+        with patch.object(bridge.secrets, "token_urlsafe") as generate:
+            bridge.onServerStart(self.server)
+            generate.assert_not_called()
+
+    def test_unsupported_build_cannot_start_listener(self):
+        del self.server.par.localaddress
+        self.server.base.store("pairingCode", None)
+        with self.assertRaisesRegex(RuntimeError, "2025.33070"):
+            bridge.start_bridge(self.server)
+        self.assertFalse(self.server.par.active.eval())
+        self.assertIsNone(self.server.base.fetch("pairingCode"))
+
+    def test_start_binds_loopback_and_native_start_rejects_public_bind(self):
+        self.server.par.localaddress = "0.0.0.0"
+        bridge.start_bridge(self.server)
+        self.assertEqual(self.server.par.localaddress.eval(), "127.0.0.1")
+        self.assertTrue(self.server.par.active.eval())
+        self.server.par.localaddress = "0.0.0.0"
+        with self.assertRaisesRegex(RuntimeError, "127.0.0.1"):
+            bridge.onServerStart(self.server)
+        self.assertFalse(self.server.par.active.eval())
+        self.assertEqual(bridge._clients(self.server), {})
 
 
 if __name__ == "__main__":

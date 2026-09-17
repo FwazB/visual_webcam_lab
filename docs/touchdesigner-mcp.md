@@ -22,10 +22,15 @@ the server on every interface.
    under the project: `/project1/mcp_webserver_base`. It starts a Web Server
    DAT on port 9981. Set that DAT's **Local Address** to `127.0.0.1` and
    restart it before using the MCP; verify it is not listening on `*`.
-3. Claude Code picks up `.mcp.json` at the repo root, which runs
-   `npx touchdesigner-mcp-server` (the package is a pinned dev dependency, so the lockfile checks its integrity). Approve the project MCP server
-   when Claude Code asks on first use. If TouchDesigner is not on the default
-   host/port, add `--host` / `--port` to the `args` in `.mcp.json`.
+3. Run `npm ci` from the repo root to install the lockfile's exact packages and
+   verify their integrity. The MCP server is pinned to version `2.0.0`.
+4. Start Claude Code from the repo root so it loads `.mcp.json`. The launcher
+   runs `node ./node_modules/touchdesigner-mcp-server/dist/cli.js`, using only
+   the installed local package. If it is missing, startup fails instead of
+   downloading a replacement; run `npm ci` before trying again. Approve the
+   project MCP server when Claude Code asks on first use. If TouchDesigner is
+   not on the default host/port, append `--host` / `--port` to the `args` in
+   `.mcp.json` after the CLI path.
 
 ## Working session
 

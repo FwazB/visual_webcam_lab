@@ -28,6 +28,7 @@ export default function BodySynth() {
   // Start webcam — lower resolution on mobile for performance
   useEffect(() => {
     let stream: MediaStream | null = null;
+    let cancelled = false;
 
     async function startCamera() {
       try {
@@ -40,6 +41,10 @@ export default function BodySynth() {
           },
           audio: false,
         });
+        if (cancelled) {
+          stream.getTracks().forEach((track) => track.stop());
+          return;
+        }
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
           videoRef.current.onloadeddata = () => setWebcamReady(true);
@@ -51,6 +56,7 @@ export default function BodySynth() {
     startCamera();
 
     return () => {
+      cancelled = true;
       stream?.getTracks().forEach((t) => t.stop());
     };
   }, []);

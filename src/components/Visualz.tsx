@@ -65,6 +65,7 @@ export default function Visualz() {
 
   useEffect(() => {
     let stream: MediaStream | null = null;
+    let cancelled = false;
     const isMobile = typeof window !== "undefined" && window.innerWidth < 768;
 
     async function startCamera() {
@@ -77,6 +78,10 @@ export default function Visualz() {
           },
           audio: false,
         });
+        if (cancelled) {
+          stream.getTracks().forEach((track) => track.stop());
+          return;
+        }
 
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
@@ -89,6 +94,7 @@ export default function Visualz() {
 
     startCamera();
     return () => {
+      cancelled = true;
       stream?.getTracks().forEach((track) => track.stop());
     };
   }, []);

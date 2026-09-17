@@ -7,6 +7,7 @@ execution, file access, or operator-path commands in its wire protocol.
 import hmac
 import json
 import math
+import secrets
 import time
 
 PROTOCOL_VERSION = 1
@@ -116,10 +117,55 @@ def onServerStop(webServerDAT):
     _state(webServerDAT)["running"] = False
 
 
+def _require_loopback(server):
+    address = getattr(server.par, "localaddress", None)
+    if address is None or address.eval() != "127.0.0.1":
+        server.par.active = False
+        onServerStop(server)
+        raise RuntimeError("The fuzz bridge requires a 127.0.0.1 binding (TouchDesigner 2025.33070+).")
+
+
+def _mark_runtime_storage(server):
+    # TouchDesigner substitutes these values when saving/loading storage.
+    # The export preparation below also clears the live values before saving.
+    server.parent().storeStartupValue("pairingCode", None)
+    server.parent().storeStartupValue("lastHitAt", -1000.0)
+    server.storeStartupValue("fuzzClients", {})
+
+
 def onServerStart(webServerDAT):
-    # A saved project must never restore authenticated socket identities or
-    # a stale hit from its previous process.
+    _require_loopback(webServerDAT)
+    _mark_runtime_storage(webServerDAT)
     onServerStop(webServerDAT)
+    code = webServerDAT.parent().fetch("pairingCode", None)
+    if not isinstance(code, str) or not code.isascii() or not 8 <= len(code) <= 128:
+        webServerDAT.parent().store("pairingCode", secrets.token_urlsafe(24))
+
+
+def start_bridge(server):
+    """Start only after binding is checked, including when opening a .toe."""
+    server.par.active = False
+    address = getattr(server.par, "localaddress", None)
+    if address is None:
+        _require_loopback(server)
+    address.val = "127.0.0.1"
+    onServerStart(server)
+    server.par.active = True
+
+
+def prepare_for_export(server):
+    """Sanitize only fuzz runtime state, leaving the listener off for saving.
+
+    The embedded startup DAT calls start_bridge() when the exported project
+    opens. No pairing code is needed or generated during this preparation.
+    """
+    server.par.active = False
+    onServerStop(server)
+    _mark_runtime_storage(server)
+    server.parent().store("pairingCode", None)
+    state = _state(server)
+    state.update(revision=0, running=False, sessionId=None)
+    server.parent().op("CHORD").par.value0 = 0.0
 
 
 def onWebSocketReceiveText(webServerDAT, client, data):

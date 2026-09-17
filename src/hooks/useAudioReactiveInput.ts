@@ -54,8 +54,10 @@ export function useAudioReactiveInput(): AudioReactiveInput {
   const levelRef = useRef(0);
   const peakRef = useRef(0);
   const toneRef = useRef<ToneProfile>({ ...SILENT_TONE });
+  const startAttemptRef = useRef(0);
 
   const stop = useCallback(() => {
+    startAttemptRef.current++;
     cancelAnimationFrame(rafRef.current);
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
@@ -72,6 +74,7 @@ export function useAudioReactiveInput(): AudioReactiveInput {
 
   const start = useCallback(async () => {
     if (streamRef.current) return;
+    const attempt = ++startAttemptRef.current;
 
     try {
       setError(null);
@@ -83,6 +86,11 @@ export function useAudioReactiveInput(): AudioReactiveInput {
         },
         video: false,
       });
+      if (attempt !== startAttemptRef.current) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
+      streamRef.current = stream;
 
       const AudioContextCtor =
         window.AudioContext ||
@@ -92,6 +100,7 @@ export function useAudioReactiveInput(): AudioReactiveInput {
         throw new Error("Web Audio is not supported in this browser");
       }
       const audioCtx = new AudioContextCtor();
+      audioCtxRef.current = audioCtx;
       const analyser = audioCtx.createAnalyser();
       analyser.fftSize = 1024;
       analyser.smoothingTimeConstant = 0.35;
@@ -101,8 +110,6 @@ export function useAudioReactiveInput(): AudioReactiveInput {
 
       const samples = new Uint8Array(analyser.fftSize);
       const frequencies = new Uint8Array(analyser.frequencyBinCount);
-      streamRef.current = stream;
-      audioCtxRef.current = audioCtx;
       setIsListening(true);
 
       const read = () => {
@@ -151,6 +158,7 @@ export function useAudioReactiveInput(): AudioReactiveInput {
 
       read();
     } catch (err) {
+      if (attempt !== startAttemptRef.current) return;
       setError(err instanceof Error ? err.message : "Could not start audio input");
       stop();
     }

@@ -1,8 +1,8 @@
 {
   "mcpServers": {
     "touchdesigner": {
-      "command": "npx",
-      "args": ["touchdesigner-mcp-server"]
+      "command": "node",
+      "args": ["./node_modules/touchdesigner-mcp-server/dist/cli.js"]
     }
   }
 }

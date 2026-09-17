@@ -4,8 +4,8 @@ Run from the TouchDesigner Textport with:
 
     exec(open('/Users/fb/dev/visualarts/body-synth/touchdesigner/fuzz/fuzz_build.py').read())
 
-Save working projects privately outside the repository: .toe files include
-the generated pairing code. The bridge requires TouchDesigner 2025.33070+.
+Before sharing a .toe, call bridge_callbacks.prepare_for_export(bridge).
+The bridge requires TouchDesigner 2025.33070+.
 
 Non-destructive: creates or updates operators only inside /project1/fuzz.
 
@@ -23,7 +23,6 @@ Mappings: ONSET pushes the displacement, AUDIO_LEVEL keeps the feedback
 trail alive, CHORD shifts the hue.
 """
 
-import secrets
 from pathlib import Path
 
 ROOT_PATH = "/project1"
@@ -65,8 +64,6 @@ if root is None:
     raise RuntimeError("Create /project1 before running the fuzz builder.")
 callback_source = (FUZZ_DIRECTORY / "bridge_callbacks.py").read_text()
 base = ensure(root, "baseCOMP", BASE_NAME)
-if not base.fetch("pairingCode", ""):
-    base.store("pairingCode", secrets.token_urlsafe(24))
 
 # ---------------------------------------------------------------- video ----
 camera = ensure(base, "videodeviceinTOP", "camera_in")
@@ -175,6 +172,16 @@ callbacks = ensure(base, "textDAT", "bridge_callbacks")
 callbacks.text = callback_source
 setpar(bridge, "callbacks", "bridge_callbacks")
 bridge.store("fuzzClients", {})
+startup = ensure(base, "executeDAT", "startup")
+startup.text = '''def onStart():
+    bridge = me.parent().op("bridge")
+    me.parent().op("bridge_callbacks").module.start_bridge(bridge)
+'''
+setpar(startup, "active", FUZZ_BRIDGE_ENABLED)
+setpar(startup, "start", True)
+setpar(startup, "create", False)
+setpar(startup, "framestart", False)
+setpar(startup, "frameend", False)
 
 # ------------------------------------------------------------- mappings ----
 # Onsets push the warp; level keeps the trail alive; chord shifts the hue.
@@ -200,7 +207,7 @@ rows = [
     ([noise], 40),
     ([audio, rms, gain, smooth, audio_out], -140),
     ([slope, onset, onset_out], -300),
-    ([chord, controls, bridge, callbacks, projector], -460),
+    ([chord, controls, bridge, callbacks, startup, projector], -460),
 ]
 for nodes, y in rows:
     for index, node in enumerate(nodes):
@@ -215,7 +222,8 @@ base.nodeX = 700
 base.nodeY = 100
 base.viewer = True
 
-setpar(bridge, "active", FUZZ_BRIDGE_ENABLED)
+if FUZZ_BRIDGE_ENABLED:
+    callbacks.module.start_bridge(bridge)
 print("fuzz ready at {}/{}".format(ROOT_PATH, BASE_NAME))
 print("Visual output:", visual_out.path, "errors:", visual_out.errors())
 print("Audio level:", audio_out.path, "errors:", audio_out.errors())
@@ -223,6 +231,6 @@ print("Onset:", onset_out.path, "errors:", onset_out.errors())
 if FUZZ_BRIDGE_ENABLED:
     print("Bridge: ws://127.0.0.1:{}/body-synth  errors: {}".format(BRIDGE_PORT, bridge.errors()))
     print("Pairing code (private; paste into the web app):", base.fetch("pairingCode"))
-    print("Do not commit a saved .toe containing this pairing code.")
+    print("Pairing code changes when the project is reopened. Sanitize shared exports with prepare_for_export().")
 else:
     print("Bridge disabled; standalone audio visuals only.")
