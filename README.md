@@ -27,17 +27,27 @@ npm run dev
 Open <http://localhost:3000/guitar>, allow the camera, sit facing the laptop
 with the guitar held normally (right-handed: left hand frets).
 
-## Spark / guitar input
+## Spark PEDAL / guitar input
 
-1. Plug the Spark into the Mac over USB-C and power it on. Use a clean,
-   low-gain preset with delay and reverb off.
+1. Plug the guitar into Spark PEDAL's instrument input, then connect the
+   powered pedal to the Mac with a USB-C **data** cable. Use a clean,
+   low-gain preset with delay, reverb, modulation, and the pedal looper off.
 2. Click **Connect guitar**. The Spark is picked automatically and its name
    shows in the green pill; otherwise choose it from the list. Allow the
    microphone permission.
-3. Chrome on macOS: set the microphone mode to **Standard** (not Voice
+3. On macOS: set the microphone mode to **Standard** (not Voice
    Isolation) in Control Center.
 
 Without audio the trainer falls back to vision-only shape matching.
+The detector listens to one pitch at a time: **pick chord notes separately**
+for accuracy/streak scoring. Full strums and layered loops are not polyphonic
+chord recognition. Monitor your guitar through the pedal's headphones or
+line outputs; the browser does not echo the live guitar back to the output.
+The browser's click/backing uses the computer's selected output.
+
+The integration uses USB audio, not pedal footswitch or MIDI control. See
+[the Spark PEDAL signal path and test guide](docs/spark-pedal.md) for the
+hardware controls, input selection, and the limits still requiring a device test.
 
 ## Trainer modes
 
@@ -48,8 +58,9 @@ the target, green on the right pitch, red flash on a wrong note.
 **Song**: a chord loop plays with a click and optional backing (kick, hats,
 synth bass on the chord root) while every note you play is scored against
 the current chord. Shows accuracy, streak, and wrong notes. The current
-chord's voicing is drawn on the real neck and on the fretboard panel, with
-finger numbers.
+chord's voicing and finger numbers are drawn over your actual neck in the
+live camera image. An optional **Fretboard reference** opens a separate diagram;
+it stays collapsed by default so the camera view remains central.
 
 First chart: **YUKON** (Justin Bieber), G minor, C9sus4 → Dm7 → Gm, voiced
 around the 3rd to 7th frets. Tempo defaults to 96 BPM and bars-per-chord to
@@ -62,8 +73,8 @@ fret wires glint helps detection.
 
 Debug tools: append `?debug=1` (neck overlay details, audio panel with
 levels, note log, thresholds and test tones, clip loader, pause, swap hands
-for left-handed players). `?synthetic=1&debug=1` renders a synthetic neck
-instead of the camera.
+for left-handed players). `?synthetic=1&debug=1` renders a labelled synthetic
+test neck instead of the camera; **Use my camera** returns to the live image.
 
 More detail in [GUIDE.md](GUIDE.md).
 
@@ -86,27 +97,33 @@ More detail in [GUIDE.md](GUIDE.md).
 
 ## TouchDesigner
 
-Everything runs on the Mac; no server is involved.
+TouchDesigner runs a local control server on the Mac; no cloud relay is involved.
 
 ```
-browser (Vercel or localhost)  ── ws://127.0.0.1:9980 ──►  TouchDesigner
-camera, hands, Spark pitch,        JSON: chord, hit,          video distortion,
-chord scoring                      pitch, onset               projection output
+browser (Vercel or localhost) ── ws://127.0.0.1:9980/body-synth ──► TouchDesigner
+camera, hands, Spark pitch,       paired JSON: chord, hit,         video distortion,
+chord scoring                    transport, visual controls       projection output
 ```
 
-Chrome treats loopback as a secure origin, so the hosted site can open that
-socket directly.
+Use **TouchDesigner visuals** in the trainer and enter the pairing code printed
+by the build script. Connection is explicit and the code is kept only in memory.
+The paired bridge requires TouchDesigner **2025.33070 or newer** for explicit
+localhost binding; older builds can run the standalone visual network only.
+Browser local-network rules vary: allow local access if requested; if the hosted
+page blocks loopback, use the localhost app. No browser security flags are needed.
 
 - `touchdesigner/fuzz/`: chord-driven video distortion and projection. Run
-  the build script from the Textport, then save `fuzz.toe`:
+  the build script from the Textport, then save `fuzz.toe` privately (the
+  generated project contains its pairing code and is ignored by Git):
 
   ```python
   exec(open('/Users/fb/dev/visualarts/body-synth/touchdesigner/fuzz/fuzz_build.py').read())
   ```
 
-  The audio path (Spark into TouchDesigner) works on its own; the chord
-  bridge from the web app is defined in the network but the app does not
-  send to it yet. See [touchdesigner/fuzz/README.md](touchdesigner/fuzz/README.md).
+  The trainer sends chord changes and note hits to the paired bridge. Warp,
+  trails, and blackout controls use acknowledged engine state. TouchDesigner
+  can also analyze its selected audio input independently.
+  See [touchdesigner/fuzz/README.md](touchdesigner/fuzz/README.md).
 - Direction: [docs/touchdesigner-backend-redesign.md](docs/touchdesigner-backend-redesign.md)
   moves real-time media work into TouchDesigner with the web app as the
   control surface; message types live in `src/lib/touchdesigner/protocol.ts`.
@@ -132,17 +149,24 @@ Native Apple teaching app direction: [docs/apple-native-roadmap.md](docs/apple-n
 
 Verified: the neck detector, pitch detector, note tracker, and song scoring
 on synthetic data in Node; lint, build, and `npm audit` clean; security
-headers checked on a dev server.
+headers checked on the local production server. Brave successfully paired
+with TouchDesigner, changed visual controls, and drove its chord channel
+through the YUKON loop. This does not establish real-guitar tracking accuracy.
 
-Not yet verified: anything with a real guitar or the Spark, and the
-TouchDesigner `fuzz` network has not been run inside TouchDesigner yet.
+Hardware verification is still required for the real guitar/Spark input and
+projector alignment. The fuzz network has now been built and cooked inside
+TouchDesigner at 1280×720; use the paired-bridge requirements above.
 
 ## Verification
 
 ```bash
 npm run lint
+npm test
+npm run test:fuzz
 npm run build
 npm audit
+# With a local server running, or pass the production URL:
+npm run smoke -- http://127.0.0.1:3000
 ```
 
 Security headers (including a report-only Content-Security-Policy) are set

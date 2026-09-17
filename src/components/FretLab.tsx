@@ -1,7 +1,7 @@
 "use client";
 
 // Fretboard trainer: webcam + hand tracking + automatic neck detection.
-// Targets are drawn on the real neck and on a static fretboard panel.
+// Targets are drawn on the real neck; a fretboard reference is optional.
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
@@ -22,6 +22,8 @@ import { KEYS, SHAPES, resolveShape, type MatchState } from "@/lib/bass/shapes";
 import { SONGS, withBarsPerChord } from "@/lib/lesson/songs";
 import { chartPositionAt, SongScorer, voicingFor, type SongScoreSummary } from "@/lib/lesson/songPlayer";
 import { useSongTransport } from "@/hooks/useSongTransport";
+import { useTouchDesigner } from "@/hooks/useTouchDesigner";
+import TouchDesignerPanel from "@/components/TouchDesignerPanel";
 import { midiAt } from "@/lib/instrument/profile";
 import { midiToName, pitchClassOf } from "@/lib/instrument/pitch";
 import type { HandDetection } from "@/hooks/usePoseTracking";
@@ -70,6 +72,8 @@ export default function FretLab({ profile }: FretLabProps) {
   const fretboardCanvasRef = useRef<HTMLCanvasElement>(null);
   const fretboardContainerRef = useRef<HTMLDivElement>(null);
   const [webcamReady, setWebcamReady] = useState(false);
+  const [cameraError, setCameraError] = useState<string | null>(null);
+  const [transportError, setTransportError] = useState<string | null>(null);
   const [shapeId, setShapeId] = useState(SHAPES[0].id);
   const [keyName, setKeyName] = useState<(typeof KEYS)[number]>("A");
   const [matchState, setMatchState] = useState<MatchState>("red");
@@ -94,7 +98,7 @@ export default function FretLab({ profile }: FretLabProps) {
   const songCoveredRef = useRef<Set<number> | null>(null);
 
   const syntheticHandsRef = useRef<HandDetection[] | null>(null);
-  const { poseDataRef, isLoading: handsLoading } = usePoseTracking(videoRef);
+  const { poseDataRef, isLoading: handsLoading, error: handsError } = usePoseTracking(videoRef);
   const neck = useNeckDetector(videoRef, {
     profile,
     getHands: () => syntheticHandsRef.current ?? poseDataRef.current?.hands ?? [],
@@ -105,6 +109,19 @@ export default function FretLab({ profile }: FretLabProps) {
   const fingerPositionsRef = useRef<Partial<Record<FingerName, NeckPosition>>>({});
   const pitch = useGuitarPitch(profile);
   const transport = useSongTransport(chart, pitch.context);
+  const touchDesigner = useTouchDesigner();
+  const { sendChord, sendNoteHit, setPlaying: setVisualPlaying } = touchDesigner;
+  const activeSongChordId = songChord.current;
+  useEffect(() => {
+    if (touchDesigner.status !== "ready") return;
+    setVisualPlaying(mode === "song" && transport.playing);
+  }, [touchDesigner.status, mode, transport.playing, setVisualPlaying]);
+  useEffect(() => {
+    if (touchDesigner.status !== "ready" || mode !== "song") return;
+    if (activeSongChordId === "c9sus4" || activeSongChordId === "dm7" || activeSongChordId === "gm") {
+      sendChord(activeSongChordId);
+    }
+  }, [touchDesigner.status, mode, activeSongChordId, sendChord]);
   if (!scorerRef.current) scorerRef.current = new SongScorer(chart, profile);
   useEffect(() => {
     scorerRef.current?.reset(chart);
@@ -186,7 +203,10 @@ export default function FretLab({ profile }: FretLabProps) {
   function startSong() {
     scorerRef.current?.reset(chart);
     setSongSummary(null);
-    transport.start().catch((err) => console.error("transport error", err));
+    lastSongNoteRef.current = null;
+    songCoveredRef.current = null;
+    setTransportError(null);
+    transport.start().catch(() => setTransportError("Audio could not start. Reconnect the guitar, then press Play again."));
   }
 
   // Note events → fusion → neck relabel → lesson scoring.
@@ -204,15 +224,20 @@ export default function FretLab({ profile }: FretLabProps) {
       let ok = false;
       if (modeRef.current === "song" && transportRef.current.playing) {
         const scorer = scorerRef.current!;
-        const pos = chartPositionAt(chartRef.current, transportRef.current.beatsAt(evt.t));
+        const noteBeat = transportRef.current.beatsAt(evt.t);
+        // Count-in notes must not score against the first chord.
+        if (noteBeat < 0) return;
+        const pos = chartPositionAt(chartRef.current, noteBeat);
         const res = scorer.onNote(evt, pos);
         lastSongNoteRef.current = { chordTone: res.chordTone, at: performance.now() };
         ok = res.chordTone;
       } else {
-        const target = step.currentTarget;
         const res = step.onNote(evt, out);
-        ok = res.hit && (!target || !out.lastConfirmed || (target.s === out.lastConfirmed.s && target.f === out.lastConfirmed.f));
+        // The step machine owns pitch/position acceptance. An unverified
+        // fingering candidate must not veto a correct audio-only note.
+        ok = res.hit;
       }
+      sendNoteHit(ok, evt.strength);
       if (out.lastConfirmed) {
         pulseRef.current = { s: out.lastConfirmed.s, f: out.lastConfirmed.f, ok, at: performance.now() };
       }
@@ -222,7 +247,7 @@ export default function FretLab({ profile }: FretLabProps) {
       offNote();
       offNoteOff();
     };
-  }, [pitch, neck]);
+  }, [pitch, neck, sendNoteHit]);
 
   useEffect(() => {
     setDebug(new URLSearchParams(window.location.search).get("debug") === "1");
@@ -231,6 +256,7 @@ export default function FretLab({ profile }: FretLabProps) {
   // Webcam (or a test clip via ?src=/path.webm).
   useEffect(() => {
     let stream: MediaStream | null = null;
+    let cancelled = false;
     const video = videoRef.current;
     if (!video) return;
     const params = new URLSearchParams(window.location.search);
@@ -245,7 +271,8 @@ export default function FretLab({ profile }: FretLabProps) {
       const img = ctx.createImageData(scene.frame.width, scene.frame.height);
       img.data.set(scene.frame.data);
       ctx.putImageData(img, 0, 0);
-      video.srcObject = canvas.captureStream(5);
+      stream = canvas.captureStream(5);
+      video.srcObject = stream;
       video.onloadeddata = () => setWebcamReady(true);
       if (scene.hand) {
         const pts = scene.hand.points;
@@ -258,14 +285,21 @@ export default function FretLab({ profile }: FretLabProps) {
         ];
       }
       setSourceLabel("synthetic");
-      return;
+      return () => {
+        stream?.getTracks().forEach((track) => track.stop());
+        video.srcObject = null;
+      };
     }
     if (src) {
       video.src = src;
       video.loop = true;
       video.onloadeddata = () => setWebcamReady(true);
       setSourceLabel(src);
-      return;
+      return () => {
+        video.pause();
+        video.removeAttribute("src");
+        video.load();
+      };
     }
     async function start() {
       try {
@@ -273,16 +307,23 @@ export default function FretLab({ profile }: FretLabProps) {
           video: { width: 960, height: 540, facingMode: "user" },
           audio: false,
         });
+        if (cancelled) {
+          stream.getTracks().forEach((track) => track.stop());
+          return;
+        }
         if (video) {
           video.srcObject = stream;
           video.onloadeddata = () => setWebcamReady(true);
         }
       } catch (err) {
-        console.error("Camera error:", err);
+        if (!cancelled) setCameraError(err instanceof Error && err.name === "NotAllowedError"
+          ? "Camera permission is blocked. Allow it in site settings for neck tracking; audio practice still works."
+          : "Camera unavailable. Audio practice and the fretboard still work.");
       }
     }
     start();
     return () => {
+      cancelled = true;
       stream?.getTracks().forEach((t) => t.stop());
     };
   }, [profile]);
@@ -333,7 +374,7 @@ export default function FretLab({ profile }: FretLabProps) {
       const model = state.model;
       const usable = !!model && model.confidence >= 0.2 && state.status !== "lost" && state.status !== "searching";
 
-      const pose = poseDataRef.current;
+      const pose = video && video.readyState >= 2 ? poseDataRef.current : null;
       const hand = pose ? selectFrettingHand(pose.hands, frameW, frameH, model, swapHands) : null;
       const positions: Partial<Record<FingerName, NeckPosition>> = {};
       const fingertips: Array<{ name: string; p: { x: number; y: number }; label: string | null; color: string }> = [];
@@ -622,11 +663,6 @@ export default function FretLab({ profile }: FretLabProps) {
         return;
       }
       lastFrameMs = t;
-      const video = videoRef.current;
-      if (!video || video.readyState < 2) {
-        rafId = requestAnimationFrame(tick);
-        return;
-      }
       const wDims = sizeCanvas(webcamCanvasRef.current, webcamContainerRef.current);
       if (wDims) {
         const ctx = webcamCanvasRef.current!.getContext("2d");
@@ -652,7 +688,7 @@ export default function FretLab({ profile }: FretLabProps) {
   }, [poseDataRef, neck, profile, debug, swapHands, pitch.context, audioRunning]);
 
   const neckStatus = neck.status;
-  const status = !webcamReady
+  const status = cameraError ? "Audio practice · camera unavailable" : handsError ? "Hand tracking unavailable · audio practice available" : !webcamReady
     ? "Starting video..."
     : handsLoading
       ? "Loading hand tracking..."
@@ -667,7 +703,7 @@ export default function FretLab({ profile }: FretLabProps) {
   const locked = neckStatus === "locked";
 
   return (
-    <div className="fixed inset-0 bg-black text-white overflow-hidden flex flex-col">
+    <div className="fixed inset-0 bg-black text-white overflow-y-auto flex flex-col">
       <div className="relative z-10 p-3 sm:p-4 flex items-start justify-between flex-shrink-0 gap-3">
         <div className="min-w-0">
           <h1 className="text-lg sm:text-xl font-bold tracking-tight">{profile.name.toLowerCase()}.lab</h1>
@@ -733,7 +769,18 @@ export default function FretLab({ profile }: FretLabProps) {
         </Link>
       </div>
 
-      <div ref={webcamContainerRef} className="relative flex-1 min-h-0">
+      {sourceLabel === "synthetic" && (
+        <div role="status" className="flex flex-wrap items-center justify-between gap-2 bg-amber-300/10 px-4 py-2 text-xs text-amber-200">
+          <span>Synthetic test image · your camera is off</span>
+          <button className="rounded border border-amber-200/30 px-2 py-1 hover:bg-amber-200/10" onClick={() => {
+            const url = new URL(window.location.href);
+            url.searchParams.delete("synthetic");
+            url.searchParams.delete("src");
+            window.location.assign(url.toString());
+          }}>Use my camera</button>
+        </div>
+      )}
+      <div ref={webcamContainerRef} className="relative flex-1 min-h-[240px]">
         <video
           ref={videoRef}
           autoPlay
@@ -760,7 +807,8 @@ export default function FretLab({ profile }: FretLabProps) {
           {neck.driftWarning && (
             <div className="text-[11px] font-mono px-2 py-1 rounded bg-yellow-500/80 text-black">neck moved — unlock?</div>
           )}
-          {(neckStatus === "lost" || neckStatus === "searching") && webcamReady && !handsLoading && (
+          {handsError && <p role="status" className="max-w-xs rounded border border-amber-200/20 bg-black/80 px-2 py-1 text-xs text-amber-200">{handsError}</p>}
+          {(neckStatus === "lost" || neckStatus === "searching") && webcamReady && !handsLoading && !handsError && (
             <div className="text-[11px] font-mono px-2 py-1 rounded bg-black/60 border border-white/10 text-zinc-300">
               show the neck and fretting hand
             </div>
@@ -834,9 +882,13 @@ export default function FretLab({ profile }: FretLabProps) {
       </div>
 
       <div className="bg-zinc-950/95 border-t border-white/10 flex-shrink-0">
-        <div ref={fretboardContainerRef} className="relative h-36 sm:h-44">
-          <canvas ref={fretboardCanvasRef} className="absolute inset-0 w-full h-full" />
-        </div>
+        {cameraError && <p role="status" className="px-3 pt-2 text-xs text-amber-200">{cameraError}</p>}
+        <details className="border-b border-white/5">
+          <summary className="cursor-pointer px-3 py-2 text-xs text-zinc-400 hover:text-white">Fretboard reference</summary>
+          <div ref={fretboardContainerRef} className="relative h-36 sm:h-44">
+            <canvas ref={fretboardCanvasRef} className="absolute inset-0 w-full h-full" />
+          </div>
+        </details>
         <div className="border-t border-white/5 px-3 py-2 space-y-2">
           <div className="flex flex-wrap items-center gap-1.5">
             {(["shapes", "song"] as const).map((m) => (
@@ -922,7 +974,8 @@ export default function FretLab({ profile }: FretLabProps) {
                     <span className="text-white">{songSummary.wrongNotes}</span>
                   </span>
                 )}
-                {!audioRunning && <span className="text-zinc-500">connect the guitar to score notes</span>}
+                <span className="text-zinc-500">{audioRunning ? "pick chord notes one at a time · pedal looper off" : "connect the guitar to score notes"}</span>
+                {transportError && <span role="alert" className="text-red-300">{transportError}</span>}
               </div>
               {currentVoicing && (
                 <div className="text-[11px] font-mono text-zinc-400">
@@ -964,6 +1017,7 @@ export default function FretLab({ profile }: FretLabProps) {
             ))}
           </div>
           )}
+          <TouchDesignerPanel bridge={touchDesigner} />
         </div>
       </div>
     </div>

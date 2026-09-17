@@ -12,6 +12,11 @@
 
 # testing
 /coverage
+__pycache__/
+
+# Paired TouchDesigner projects contain a local control credential.
+/touchdesigner/fuzz/*.toe
+/touchdesigner/fuzz/Backup/
 
 # next.js
 /.next/

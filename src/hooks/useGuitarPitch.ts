@@ -15,6 +15,7 @@ import {
 import { NoteTracker } from "@/lib/audio/noteTracker";
 import type { NoteEvent, NoteOff, PitchFrame, WorkletConfig, WorkletMessage } from "@/lib/audio/pitchTypes";
 import { createTestSignal, type TestSignal } from "@/lib/audio/testSignal";
+import { configureHumFilter } from "@/lib/audio/inputFilter";
 
 export type GuitarPitchStatus = "idle" | "needs-device" | "starting" | "running" | "suspended" | "error";
 
@@ -84,6 +85,7 @@ export function useGuitarPitch(profile: InstrumentProfile): GuitarPitch {
   const perfOffsetRef = useRef(0);
   const inputLatencyRef = useRef(getStoredInputLatencyMs());
   const tuningRef = useRef(tuning);
+  const startAttemptRef = useRef(0);
   useEffect(() => {
     tuningRef.current = tuning;
   });
@@ -94,16 +96,20 @@ export function useGuitarPitch(profile: InstrumentProfile): GuitarPitch {
   );
 
   const stop = useCallback(() => {
+    startAttemptRef.current++;
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
     nodeRef.current?.port.close();
     nodeRef.current?.disconnect();
     nodeRef.current = null;
+    notchRef.current = null;
+    inputNodeRef.current = null;
     const ctx = ctxRef.current;
     if (ctx && ctx.state !== "closed") ctx.close().catch(() => {});
     ctxRef.current = null;
     setContext(null);
     setTest(null);
+    setSettings(null);
     trackerRef.current.reset();
     activeNoteRef.current = null;
     frameRef.current = EMPTY_FRAME;
@@ -127,8 +133,7 @@ export function useGuitarPitch(profile: InstrumentProfile): GuitarPitch {
     };
     node.port.postMessage({ type: "config", profile: cfg });
     trackerRef.current.setOptions({ gateDb: t.gateDb, clarityThreshold: t.clarityThreshold, hopMs: profile.pitch.hopMs });
-    if (notchRef.current) notchRef.current.Q.value = t.notch60 ? 30 : 0.0001;
-    if (notchRef.current) notchRef.current.gain.value = 0;
+    if (notchRef.current) configureHumFilter(notchRef.current, t.notch60);
   }, [profile]);
 
   const setTuning = useCallback(
@@ -145,18 +150,28 @@ export function useGuitarPitch(profile: InstrumentProfile): GuitarPitch {
   );
 
   const startWithDevice = useCallback(
-    async (deviceId: string) => {
+    async (deviceId: string, attempt: number) => {
+      if (attempt !== startAttemptRef.current) return;
       setStatus("starting");
       setError(null);
+      let stream: MediaStream | null = null;
+      let ctx: AudioContext | null = null;
+      const release = () => {
+        stream?.getTracks().forEach((track) => track.stop());
+        if (ctx && ctx.state !== "closed") ctx.close().catch(() => {});
+      };
       try {
-        const stream = await navigator.mediaDevices.getUserMedia(instrumentConstraints(deviceId));
+        stream = await navigator.mediaDevices.getUserMedia(instrumentConstraints(deviceId));
+        if (attempt !== startAttemptRef.current) { release(); return; }
         streamRef.current = stream;
         setSettings(stream.getAudioTracks()[0]?.getSettings() ?? null);
 
-        const ctx = new AudioContext({ latencyHint: "interactive" });
+        ctx = new AudioContext({ latencyHint: "interactive" });
         ctxRef.current = ctx;
         await ctx.audioWorklet.addModule(WORKLET_URL);
+        if (attempt !== startAttemptRef.current) { release(); return; }
         if (ctx.state === "suspended") await ctx.resume().catch(() => {});
+        if (attempt !== startAttemptRef.current) { release(); return; }
 
         const source = ctx.createMediaStreamSource(stream);
         const hpf = ctx.createBiquadFilter();
@@ -164,9 +179,7 @@ export function useGuitarPitch(profile: InstrumentProfile): GuitarPitch {
         hpf.frequency.value = 40;
         hpf.Q.value = 0.707;
         const notch = ctx.createBiquadFilter();
-        notch.type = "notch";
-        notch.frequency.value = 60;
-        notch.Q.value = tuningRef.current.notch60 ? 30 : 0.0001;
+        configureHumFilter(notch, tuningRef.current.notch60);
         const lpf = ctx.createBiquadFilter();
         lpf.type = "lowpass";
         lpf.frequency.value = profile.pitch.lpfHz;
@@ -207,19 +220,26 @@ export function useGuitarPitch(profile: InstrumentProfile): GuitarPitch {
         setTest(createTestSignal(ctx, hpf));
         setStatus(ctx.state === "running" ? "running" : "suspended");
       } catch (err) {
+        release();
+        if (attempt !== startAttemptRef.current) return;
+        stop();
         console.error("guitar input error", err);
         setError(err instanceof Error ? err.message : String(err));
         setStatus("error");
         storeDevice(null);
       }
     },
-    [audioTimeToPerf, profile, sendConfig],
+    [audioTimeToPerf, profile, sendConfig, stop],
   );
 
   const start = useCallback(async () => {
+    stop();
+    const attempt = startAttemptRef.current;
+    setStatus("starting");
     setError(null);
     try {
       const list = await listAudioInputs();
+      if (attempt !== startAttemptRef.current) return;
       setDevices(list);
       const preferred = pickPreferredDevice(list);
       if (!preferred) {
@@ -228,20 +248,21 @@ export function useGuitarPitch(profile: InstrumentProfile): GuitarPitch {
       }
       setSelectedDeviceId(preferred.deviceId);
       storeDevice(preferred);
-      await startWithDevice(preferred.deviceId);
+      await startWithDevice(preferred.deviceId, attempt);
     } catch (err) {
+      if (attempt !== startAttemptRef.current) return;
       setError(err instanceof Error ? err.message : String(err));
       setStatus("error");
     }
-  }, [startWithDevice]);
+  }, [startWithDevice, stop]);
 
   const selectDevice = useCallback(
     (id: string) => {
       const dev = devices.find((d) => d.deviceId === id) ?? null;
       setSelectedDeviceId(id);
       storeDevice(dev);
-      if (ctxRef.current) stop();
-      startWithDevice(id);
+      stop();
+      startWithDevice(id, startAttemptRef.current);
     },
     [devices, startWithDevice, stop],
   );

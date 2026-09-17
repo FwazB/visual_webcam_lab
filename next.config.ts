@@ -11,7 +11,7 @@ import type { NextConfig } from "next";
 const csp = [
   "default-src 'self'",
   "script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://cdn.jsdelivr.net",
-  "connect-src 'self' https://cdn.jsdelivr.net https://storage.googleapis.com",
+  "connect-src 'self' https://cdn.jsdelivr.net https://storage.googleapis.com ws://127.0.0.1:9980",
   "worker-src 'self' blob:",
   "media-src 'self' blob: mediastream:",
   "img-src 'self' data: blob:",

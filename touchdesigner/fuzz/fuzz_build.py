@@ -4,7 +4,8 @@ Run from the TouchDesigner Textport with:
 
     exec(open('/Users/fb/dev/visualarts/body-synth/touchdesigner/fuzz/fuzz_build.py').read())
 
-Then save the project as touchdesigner/fuzz/fuzz.toe from TouchDesigner.
+Save working projects privately outside the repository: .toe files include
+the generated pairing code. The bridge requires TouchDesigner 2025.33070+.
 
 Non-destructive: creates or updates operators only inside /project1/fuzz.
 
@@ -14,20 +15,23 @@ video   camera_in -> feedback loop (composite + hue shift + dim + displace by
         noise) -> OUT -> out1, plus a borderless Window COMP for projection.
 audio   audio_in (the Spark over USB, or the Mac input) -> RMS -> smoothing
         -> AUDIO_LEVEL; slope of RMS -> trigger envelope -> ONSET.
-chords  bridge (Web Server DAT on 127.0.0.1:9980) receives JSON from the
-        body-synth web app (see src/lib/touchdesigner/protocol.ts) and writes
-        CHORD channels: chord index and hit strength. The app side of this
-        bridge is not wired yet; until then the audio path drives everything.
+chords  authenticated bridge on ws://127.0.0.1:9980/body-synth receives
+        song chords, note hits, transport, and three allowlisted controls.
+        Standalone audio drives the network even without a web connection.
 
 Mappings: ONSET pushes the displacement, AUDIO_LEVEL keeps the feedback
 trail alive, CHORD shifts the hue.
 """
 
-import json
+import secrets
+from pathlib import Path
 
 ROOT_PATH = "/project1"
 BASE_NAME = "fuzz"
 BRIDGE_PORT = 9980
+# Override FUZZ_DIRECTORY before exec() when using another checkout.
+FUZZ_DIRECTORY = Path(globals().get("FUZZ_DIRECTORY", "/Users/fb/dev/visualarts/body-synth/touchdesigner/fuzz"))
+FUZZ_BRIDGE_ENABLED = globals().get("FUZZ_BRIDGE_ENABLED", True)
 
 
 def ensure(parent_op, op_type, name):
@@ -42,24 +46,27 @@ def connect(source, target, input_index=0):
 
 
 def setpar(node, name, value):
-    """Set a parameter if it exists; report instead of failing on older builds."""
+    """Required parameters fail clearly instead of creating a partial network."""
     par = getattr(node.par, name, None)
     if par is None:
-        print("skip: {} has no parameter {}".format(node.path, name))
-        return
+        raise RuntimeError("{} has no parameter {}".format(node.path, name))
     par.val = value
 
 
 def setexpr(node, name, expression):
     par = getattr(node.par, name, None)
     if par is None:
-        print("skip: {} has no parameter {}".format(node.path, name))
-        return
+        raise RuntimeError("{} has no parameter {}".format(node.path, name))
     par.expr = expression
 
 
 root = op(ROOT_PATH)
+if root is None:
+    raise RuntimeError("Create /project1 before running the fuzz builder.")
+callback_source = (FUZZ_DIRECTORY / "bridge_callbacks.py").read_text()
 base = ensure(root, "baseCOMP", BASE_NAME)
+if not base.fetch("pairingCode", ""):
+    base.store("pairingCode", secrets.token_urlsafe(24))
 
 # ---------------------------------------------------------------- video ----
 camera = ensure(base, "videodeviceinTOP", "camera_in")
@@ -70,18 +77,20 @@ dim = ensure(base, "levelTOP", "dim")
 noise = ensure(base, "noiseTOP", "warp_noise")
 warp = ensure(base, "displaceTOP", "warp")
 tail = ensure(base, "nullTOP", "tail")
+blackout = ensure(base, "levelTOP", "output_level")
 visual_out = ensure(base, "nullTOP", "OUT")
 component_out = ensure(base, "outTOP", "out1")
 
 connect(camera, feedback)          # first frame seeds the loop
-connect(camera, mix, 0)
-connect(feedback, mix, 1)
-connect(mix, hue)
+connect(feedback, hue)
 connect(hue, dim)
 connect(dim, warp, 0)
 connect(noise, warp, 1)
-connect(warp, tail)
-connect(tail, visual_out)
+connect(warp, mix, 0)  # faded trail over the new, opaque camera image
+connect(camera, mix, 1)
+connect(mix, tail)
+connect(tail, blackout)
+connect(blackout, visual_out)
 connect(visual_out, component_out)
 
 if not camera.par.device.eval() and camera.par.device.menuNames:
@@ -124,7 +133,8 @@ setpar(gain, "torange1", 0.0)
 setpar(gain, "torange2", 1.0)
 setpar(smooth, "width", 0.15)
 setpar(smooth, "widthunit", "seconds")
-setpar(onset, "threshold", 0.6)
+setpar(onset, "threshold", True)
+setpar(onset, "threshup", 0.6)
 setpar(onset, "attack", 0.01)
 setpar(onset, "decay", 0.25)
 setpar(onset, "sustain", 0.0)
@@ -137,84 +147,60 @@ setpar(chord, "value0", 0.0)
 setpar(chord, "name1", "hit")
 setpar(chord, "value1", 0.0)
 
+controls = ensure(base, "constantCHOP", "CONTROLS")
+state = base.fetch("fuzzState", {
+    "revision": 0, "running": False, "sessionId": None,
+    "parameters": {"visual.fuzz.amount": 0.5, "visual.fuzz.feedback": 0.9, "output.blackout": False},
+}, storeDefault=True)
+state["running"] = False
+base.store("lastHitAt", -1000.0)
+for index, (name, parameter) in enumerate([
+    ("amount", "visual.fuzz.amount"),
+    ("feedback", "visual.fuzz.feedback"),
+    ("blackout", "output.blackout"),
+]):
+    setpar(controls, "name" + str(index), name)
+    setpar(controls, "value" + str(index), state["parameters"][parameter])
+
 bridge = ensure(base, "webserverDAT", "bridge")
-callbacks = ensure(base, "textDAT", "bridge_callbacks")
-callbacks.text = '''# Web Server DAT callbacks for the body-synth bridge (protocol v1).
-# Accepts only named messages; never evaluates arbitrary Python.
-import json
-
-CHORD_INDEX = {"c9sus4": 0, "dm7": 1, "gm": 2}
-
-
-def _chord():
-    return op("CHORD")
-
-
-def onHTTPRequest(webServerDAT, request, response):
-    response["statusCode"] = 200
-    response["statusReason"] = "OK"
-    response["data"] = "body-synth fuzz bridge"
-    return response
-
-
-def onWebSocketOpen(webServerDAT, client, uri):
-    webServerDAT.webSocketSendText(client, json.dumps({
-        "type": "welcome", "protocol": 1, "engine": "fuzz",
-    }))
-
-
-def onWebSocketReceiveText(webServerDAT, client, data):
-    try:
-        msg = json.loads(data)
-    except ValueError:
-        return
-    kind = msg.get("type")
-    if kind == "ping":
-        webServerDAT.webSocketSendText(client, json.dumps({"type": "pong"}))
-    elif kind == "event":
-        name = msg.get("name")
-        payload = msg.get("payload") or {}
-        if name == "song.chord":
-            _chord().par.value0 = CHORD_INDEX.get(str(payload.get("chordId")), 0)
-        elif name == "note.hit":
-            _chord().par.value1 = 1.0 if payload.get("chordTone") else 0.0
-    elif kind == "parameter.set":
-        pid = msg.get("id")
-        value = msg.get("value")
-        if pid == "fuzz.hit" and isinstance(value, (int, float)):
-            _chord().par.value1 = max(0.0, min(1.0, float(value)))
-    else:
-        webServerDAT.webSocketSendText(client, json.dumps({
-            "type": "error", "code": "unsupported", "message": str(kind),
-        }))
-'''
+# Stop before modifying bindings. A missing loopback parameter must not expose
+# even an authenticated control server to the LAN.
+setpar(bridge, "active", False)
+if FUZZ_BRIDGE_ENABLED:
+    if getattr(bridge.par, "localaddress", None) is None:
+        raise RuntimeError("The local bridge requires TouchDesigner 2025.33070 or newer. Bridge remains off.")
+    setpar(bridge, "localaddress", "127.0.0.1")
 setpar(bridge, "port", BRIDGE_PORT)
+callbacks = ensure(base, "textDAT", "bridge_callbacks")
+callbacks.text = callback_source
 setpar(bridge, "callbacks", "bridge_callbacks")
-setpar(bridge, "active", True)
+bridge.store("fuzzClients", {})
 
 # ------------------------------------------------------------- mappings ----
 # Onsets push the warp; level keeps the trail alive; chord shifts the hue.
-setexpr(warp, "displaceweightx", "0.01 + op('ONSET')[0] * 0.18 + op('CHORD')['hit'] * 0.1")
-setexpr(warp, "displaceweighty", "0.01 + op('ONSET')[0] * 0.18 + op('CHORD')['hit'] * 0.1")
-setexpr(dim, "opacity", "0.82 + min(max(op('AUDIO_LEVEL')[0], 0.0), 1.0) * 0.16")
+setexpr(warp, "displaceweightx", "op('CONTROLS')['amount'] * (0.02 + min(max(op('ONSET')[0], 0), 1) * 0.36 + mod.bridge_callbacks.hit_level(op('bridge')) * 0.2)")
+setexpr(warp, "displaceweighty", "op('CONTROLS')['amount'] * (0.02 + min(max(op('ONSET')[0], 0), 1) * 0.36 + mod.bridge_callbacks.hit_level(op('bridge')) * 0.2)")
+setexpr(dim, "opacity", "min(0.98, op('CONTROLS')['feedback'] * (0.9 + min(max(op('AUDIO_LEVEL')[0], 0.0), 1.0) * 0.1))")
 setexpr(hue, "hueoffset", "op('CHORD')['chord'] * 40.0 + op('ONSET')[0] * 15.0")
-setexpr(hue, "saturationmult", "1.0 + op('AUDIO_LEVEL')[0] * 0.5")
+setexpr(hue, "saturationmult", "1.0 + min(max(op('AUDIO_LEVEL')[0], 0), 1) * 0.5")
+setexpr(blackout, "brightness1", "1.0 - op('CONTROLS')['blackout']")
 
 # ----------------------------------------------------------- projection ----
 projector = ensure(base, "windowCOMP", "projector")
 setpar(projector, "winop", "OUT")
 setpar(projector, "borders", False)
-setpar(projector, "title", "fuzz projector")
+if getattr(projector.par, "title", None) is not None:
+    setpar(projector, "title", "fuzz projector")
 # Open it from the Window COMP ("Open as Separate Window") on the projector's
 # display. Corner-pin mapping onto surfaces is the next step.
 
 # --------------------------------------------------------------- layout ----
 rows = [
-    ([camera, feedback, mix, hue, dim, warp, tail, visual_out, component_out], 200),
+    ([camera, feedback, hue, dim, warp, mix, tail, blackout, visual_out, component_out], 200),
     ([noise], 40),
     ([audio, rms, gain, smooth, audio_out], -140),
     ([slope, onset, onset_out], -300),
-    ([chord, bridge, callbacks, projector], -460),
+    ([chord, controls, bridge, callbacks, projector], -460),
 ]
 for nodes, y in rows:
     for index, node in enumerate(nodes):
@@ -229,8 +215,14 @@ base.nodeX = 700
 base.nodeY = 100
 base.viewer = True
 
+setpar(bridge, "active", FUZZ_BRIDGE_ENABLED)
 print("fuzz ready at {}/{}".format(ROOT_PATH, BASE_NAME))
 print("Visual output:", visual_out.path, "errors:", visual_out.errors())
 print("Audio level:", audio_out.path, "errors:", audio_out.errors())
 print("Onset:", onset_out.path, "errors:", onset_out.errors())
-print("Bridge: ws://127.0.0.1:{}  errors: {}".format(BRIDGE_PORT, bridge.errors()))
+if FUZZ_BRIDGE_ENABLED:
+    print("Bridge: ws://127.0.0.1:{}/body-synth  errors: {}".format(BRIDGE_PORT, bridge.errors()))
+    print("Pairing code (private; paste into the web app):", base.fetch("pairingCode"))
+    print("Do not commit a saved .toe containing this pairing code.")
+else:
+    print("Bridge disabled; standalone audio visuals only.")

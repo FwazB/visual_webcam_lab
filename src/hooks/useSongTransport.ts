@@ -7,6 +7,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as Tone from "tone";
 import type { SongChart } from "@/lib/lesson/songs";
 import { chartPositionAt } from "@/lib/lesson/songPlayer";
+import { BeatClock } from "@/lib/lesson/beatClock";
 
 export interface SongTransport {
   playing: boolean;
@@ -61,7 +62,8 @@ export function useSongTransport(chart: SongChart, audioContext: AudioContext | 
   const [backing, setBacking] = useState(false);
   const countInBars = 1;
   const beatsRef = useRef(0);
-  const startCtxTimeRef = useRef(0);
+  const clockRef = useRef(new BeatClock());
+  const startAttemptRef = useRef(0);
   const bpmRef = useRef(bpm);
   const chartRef = useRef(chart);
   const flagsRef = useRef({ metronome, backing });
@@ -74,11 +76,9 @@ export function useSongTransport(chart: SongChart, audioContext: AudioContext | 
     flagsRef.current = { metronome, backing };
   });
 
-  const countInBeats = countInBars * chart.beatsPerBar;
-
   const beatsAt = useCallback(
-    (audioTime: number) => (audioTime - startCtxTimeRef.current) * (bpmRef.current / 60) - countInBeats,
-    [countInBeats],
+    (audioTime: number) => clockRef.current.beatsAt(audioTime),
+    [],
   );
 
   const beatsNow = useCallback(() => {
@@ -88,23 +88,48 @@ export function useSongTransport(chart: SongChart, audioContext: AudioContext | 
   }, [beatsAt]);
 
   const stop = useCallback(() => {
-    const transport = Tone.getTransport();
-    transport.stop();
-    transport.cancel(0);
-    if (eventIdRef.current !== null) {
-      transport.clear(eventIdRef.current);
-      eventIdRef.current = null;
+    startAttemptRef.current++;
+    if (contextRef.current) {
+      const transport = Tone.getTransport();
+      transport.stop();
+      transport.cancel(0);
+      if (eventIdRef.current !== null) {
+        transport.clear(eventIdRef.current);
+        eventIdRef.current = null;
+      }
     }
     setPlaying(false);
   }, []);
 
-  const start = useCallback(async () => {
-    // Share the pitch hook's context so NoteEvent.t and the transport agree.
-    if (audioContext && Tone.getContext().rawContext !== audioContext) {
-      Tone.setContext(audioContext);
+  const disposeVoices = useCallback(() => {
+    if (voicesRef.current) {
+      Object.values(voicesRef.current).forEach((voice) => voice.dispose());
       voicesRef.current = null;
     }
+  }, []);
+
+  // Connecting/changing the input creates a new audio clock. Stop the old
+  // song before scoring notes from that clock or closing its voices.
+  useEffect(() => {
+    if (contextRef.current && contextRef.current !== audioContext) {
+      stop();
+      disposeVoices();
+      contextRef.current = null;
+    }
+  }, [audioContext, stop, disposeVoices]);
+
+  const start = useCallback(async () => {
+    stop();
+    const attempt = startAttemptRef.current;
+    // Share the pitch hook's context so NoteEvent.t and the transport agree.
+    if (audioContext && Tone.getContext().rawContext !== audioContext) {
+      disposeVoices();
+      Tone.setContext(audioContext);
+    } else if (!audioContext && Tone.getContext().state === "closed") {
+      Tone.setContext(new Tone.Context());
+    }
     await Tone.start();
+    if (attempt !== startAttemptRef.current) return;
     const ctx = Tone.getContext().rawContext as AudioContext;
     contextRef.current = ctx;
     if (!voicesRef.current) voicesRef.current = buildVoices();
@@ -122,7 +147,7 @@ export function useSongTransport(chart: SongChart, audioContext: AudioContext | 
       const beatFromStart = eighth / 2;
       const isBeat = eighth % 2 === 0;
       const chartBeat = beatFromStart - countIn;
-      const beatInBar = ((Math.round(beatFromStart) % beatsPerBar) + beatsPerBar) % beatsPerBar;
+      const beatInBar = ((Math.floor(beatFromStart) % beatsPerBar) + beatsPerBar) % beatsPerBar;
       const flags = flagsRef.current;
       if (isBeat && (flags.metronome || chartBeat < 0)) {
         if (beatInBar === 0) voices.accent.triggerAttackRelease("C5", 0.03, time, 0.8);
@@ -142,10 +167,11 @@ export function useSongTransport(chart: SongChart, audioContext: AudioContext | 
       eighth++;
     }, "8n", 0);
     const now = ctx.currentTime + 0.1;
-    startCtxTimeRef.current = now;
+    clockRef.current.start(now, bpmRef.current, countIn);
+    beatsRef.current = -countIn;
     transport.start(now);
     setPlaying(true);
-  }, [audioContext]);
+  }, [audioContext, disposeVoices, stop]);
 
   // Keep beatsRef current for render loops.
   useEffect(() => {
@@ -160,17 +186,24 @@ export function useSongTransport(chart: SongChart, audioContext: AudioContext | 
   }, [playing, beatsNow]);
 
   const setBpm = useCallback((v: number) => {
+    if (!Number.isFinite(v)) return;
     const clamped = Math.max(40, Math.min(200, Math.round(v)));
     setBpmState(clamped);
     bpmRef.current = clamped;
     if (playing) {
-      // Restart the clock so beatsAt stays consistent with the transport.
+      // Schedule both clocks at the same safe audio time; retain prior tempo
+      // segments for pitch events delivered after the tempo changed.
       const transport = Tone.getTransport();
-      transport.bpm.value = clamped;
+      const at = Tone.now();
+      clockRef.current.setTempo(at, clamped);
+      transport.bpm.setValueAtTime(clamped, at);
     }
   }, [playing]);
 
-  useEffect(() => () => stop(), [stop]);
+  useEffect(() => () => {
+    stop();
+    disposeVoices();
+  }, [stop, disposeVoices]);
 
   return useMemo<SongTransport>(
     () => ({ playing, bpm, setBpm, countInBars, metronome, backing, setMetronome, setBacking, start, stop, beatsRef, beatsAt, beatsNow }),

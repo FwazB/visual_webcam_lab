@@ -6,7 +6,10 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test": "node --test --require ./tests/register.cjs tests/*.test.cjs src/lib/touchdesigner/*.test.ts",
+    "test:fuzz": "python3 -m unittest discover -s touchdesigner/fuzz -p 'test_*.py'",
+    "smoke": "node scripts/smoke.mjs"
   },
   "dependencies": {
     "@mediapipe/tasks-vision": "^0.10.34",

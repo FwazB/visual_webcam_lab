@@ -52,6 +52,7 @@ const MIDDLE_MCP = 9;
 export function usePoseTracking(videoRef: React.RefObject<HTMLVideoElement | null>) {
   const [poseData, setPoseData] = useState<PoseData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const handLandmarkerRef = useRef<HandLandmarker | null>(null);
   const animFrameRef = useRef<number>(0);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -77,44 +78,60 @@ export function usePoseTracking(videoRef: React.RefObject<HTMLVideoElement | nul
 
   useEffect(() => {
     let cancelled = false;
+    let detector: HandLandmarker | null = null;
+
+    const release = () => {
+      const owned = detector;
+      detector = null;
+      if (handLandmarkerRef.current === owned) handLandmarkerRef.current = null;
+      try {
+        owned?.close();
+      } catch {
+        // A lost GPU context may already have disposed its resources.
+      }
+    };
 
     async function init() {
-      const vision = await FilesetResolver.forVisionTasks(
-        "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.34/wasm"
-      );
-      if (cancelled) return;
+      try {
+        const vision = await FilesetResolver.forVisionTasks(
+          "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.34/wasm"
+        );
+        if (cancelled) return;
 
-      const handLandmarker = await HandLandmarker.createFromOptions(vision, {
-        baseOptions: {
-          modelAssetPath:
-            "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
-          delegate: "GPU",
-        },
-        runningMode: "VIDEO",
-        numHands: 2,
-      });
-      if (cancelled) {
-        handLandmarker.close();
-        return;
+        detector = await HandLandmarker.createFromOptions(vision, {
+          baseOptions: {
+            modelAssetPath:
+              "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
+            delegate: "GPU",
+          },
+          runningMode: "VIDEO",
+          numHands: 2,
+        });
+        if (cancelled) {
+          release();
+          return;
+        }
+
+        handLandmarkerRef.current = detector;
+        setIsLoading(false);
+      } catch {
+        release();
+        if (cancelled) return;
+        setError("Hand tracking could not start. Reload to retry; audio practice still works.");
+        setIsLoading(false);
       }
-
-      handLandmarkerRef.current = handLandmarker;
-      setIsLoading(false);
     }
 
     init();
 
     return () => {
       cancelled = true;
-      if (handLandmarkerRef.current) {
-        handLandmarkerRef.current.close();
-        handLandmarkerRef.current = null;
-      }
+      release();
     };
   }, []);
 
   useEffect(() => {
-    if (isLoading) return;
+    if (isLoading || error) return;
 
     function detect() {
       const video = videoRef.current;
@@ -378,7 +395,7 @@ export function usePoseTracking(videoRef: React.RefObject<HTMLVideoElement | nul
     return () => {
       cancelAnimationFrame(animFrameRef.current);
     };
-  }, [isLoading, videoRef]);
+  }, [isLoading, error, videoRef]);
 
-  return { poseData, poseDataRef, isLoading, setOverlayCanvas };
+  return { poseData, poseDataRef, isLoading, error, setOverlayCanvas };
 }

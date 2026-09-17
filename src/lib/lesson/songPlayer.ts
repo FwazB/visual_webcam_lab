@@ -8,6 +8,8 @@ import type { NoteEvent } from "@/lib/audio/pitchTypes";
 import type { ChordVoicing, SongChart } from "./songs";
 
 export interface ChartPosition {
+  /** Absolute chart beat, negative during the count-in. */
+  absoluteBeat: number;
   sectionIndex: number;
   /** Index into the section loop. */
   barIndex: number;
@@ -50,6 +52,7 @@ export function chartPositionAt(chart: SongChart, beats: number): ChartPosition 
       if (inLoop < bar.beats) {
         const next = sec.loop[(bi + 1) % sec.loop.length];
         return {
+          absoluteBeat: beats,
           sectionIndex: si,
           barIndex: bi,
           chordId: bar.chordId,
@@ -68,6 +71,7 @@ export function chartPositionAt(chart: SongChart, beats: number): ChartPosition 
   const last = chart.sections[chart.sections.length - 1];
   const lastBar = last.loop[last.loop.length - 1];
   return {
+    absoluteBeat: beats,
     sectionIndex: chart.sections.length - 1,
     barIndex: last.loop.length - 1,
     chordId: lastBar.chordId,
@@ -111,6 +115,11 @@ export interface SongScoreSummary {
   current: ChordSlotScore | null;
 }
 
+interface ScoredSlot extends ChordSlotScore {
+  startBeat: number;
+  chordBeats: number;
+}
+
 /**
  * Scores played notes against the chord active at their time. A slot counts
  * as clean when all its chord tones (by pitch class) were played and no wrong
@@ -119,10 +128,11 @@ export interface SongScoreSummary {
 export class SongScorer {
   private chart: SongChart;
   private profile: InstrumentProfile;
-  private slots: ChordSlotScore[] = [];
-  private current: ChordSlotScore | null = null;
-  private streak = 0;
-  private bestStreak = 0;
+  private slots: ScoredSlot[] = [];
+  private current: ScoredSlot | null = null;
+  private pending = new Map<number, ScoredSlot>();
+  private archivedStreak = 0;
+  private archivedBestStreak = 0;
   private pcCache = new Map<string, Set<number>>();
 
   constructor(chart: SongChart, profile: InstrumentProfile) {
@@ -134,8 +144,9 @@ export class SongScorer {
     if (chart) this.chart = chart;
     this.slots = [];
     this.current = null;
-    this.streak = 0;
-    this.bestStreak = 0;
+    this.pending.clear();
+    this.archivedStreak = 0;
+    this.archivedBestStreak = 0;
     this.pcCache.clear();
   }
 
@@ -151,10 +162,26 @@ export class SongScorer {
 
   /** Advance the clock; closes a slot when the chord changes. */
   tick(pos: ChartPosition): void {
-    const cur = this.current;
-    if (cur && cur.loopIndex === pos.loopIndex && cur.barIndex === pos.barIndex) return;
-    if (cur) this.closeSlot(cur);
-    this.current = {
+    if (pos.absoluteBeat < 0 || pos.finished) return;
+    if (!this.current) this.current = this.slotFor(chartPositionAt(this.chart, 0));
+    // Count missed/quiet slots too, and never move backwards for a delayed note.
+    while (this.current.startBeat + this.current.chordBeats <= pos.absoluteBeat) {
+      const next = chartPositionAt(this.chart, this.current.startBeat + this.current.chordBeats);
+      if (next.finished) break;
+      this.closeSlot(this.current);
+      this.current = this.slotFor(next);
+      this.pending.delete(this.current.startBeat);
+    }
+  }
+
+  private slotFor(pos: ChartPosition): ScoredSlot {
+    const startBeat = pos.absoluteBeat - pos.beatInChord;
+    const existing = this.current?.startBeat === startBeat ? this.current
+      : this.slots.find((slot) => slot.startBeat === startBeat) ?? this.pending.get(startBeat);
+    if (existing) return existing;
+    const slot: ScoredSlot = {
+      startBeat,
+      chordBeats: pos.chordBeats,
       chordId: pos.chordId,
       loopIndex: pos.loopIndex,
       barIndex: pos.barIndex,
@@ -163,34 +190,50 @@ export class SongScorer {
       wrongNotes: 0,
       notes: 0,
     };
+    this.pending.set(startBeat, slot);
+    return slot;
   }
 
-  private closeSlot(slot: ChordSlotScore): void {
+  private isClean(slot: ChordSlotScore): boolean {
+    return slot.tonesHit.size >= slot.tonesTotal && slot.wrongNotes === 0 && slot.tonesTotal > 0;
+  }
+
+  private closeSlot(slot: ScoredSlot): void {
     this.slots.push(slot);
-    const clean = slot.tonesHit.size >= slot.tonesTotal && slot.wrongNotes === 0 && slot.tonesTotal > 0;
-    this.streak = clean ? this.streak + 1 : 0;
-    this.bestStreak = Math.max(this.bestStreak, this.streak);
-    if (this.slots.length > 200) this.slots.splice(0, this.slots.length - 200);
+    this.pending.delete(slot.startBeat);
+    if (this.slots.length > 200) {
+      const archived = this.slots.shift()!;
+      this.archivedStreak = this.isClean(archived) ? this.archivedStreak + 1 : 0;
+      this.archivedBestStreak = Math.max(this.archivedBestStreak, this.archivedStreak);
+    }
   }
 
   /** Score a note against the chord active at the note's beat position. */
   onNote(evt: NoteEvent, posAtNote: ChartPosition): { chordTone: boolean } {
+    if (posAtNote.absoluteBeat < 0 || posAtNote.finished) return { chordTone: false };
+    this.tick(posAtNote);
     // Notes played right before a change count for the upcoming chord.
     const early = posAtNote.beatsToChange < 0.25;
-    const chordId = early ? posAtNote.nextChordId : posAtNote.chordId;
-    const pcs = this.pcsFor(chordId);
+    const target = early
+      ? chartPositionAt(this.chart, posAtNote.absoluteBeat + posAtNote.beatsToChange)
+      : posAtNote;
+    const pcs = this.pcsFor(target.chordId);
     const pc = pitchClassOf(evt.midi);
     const chordTone = pcs.has(pc);
-    const slot = this.current;
-    if (slot && slot.chordId === chordId) {
-      slot.notes++;
-      if (chordTone) slot.tonesHit.add(pc);
-      else slot.wrongNotes++;
-    }
+    const slot = this.slotFor(target);
+    slot.notes++;
+    if (chordTone) slot.tonesHit.add(pc);
+    else slot.wrongNotes++;
     return { chordTone };
   }
 
   summary(): SongScoreSummary {
+    let streak = this.archivedStreak;
+    let bestStreak = this.archivedBestStreak;
+    for (const slot of this.slots) {
+      streak = this.isClean(slot) ? streak + 1 : 0;
+      bestStreak = Math.max(bestStreak, streak);
+    }
     const played = this.slots.filter((s) => s.tonesTotal > 0);
     const accuracy = played.length
       ? played.reduce((a, s) => a + Math.min(1, s.tonesHit.size / s.tonesTotal), 0) / played.length
@@ -198,9 +241,9 @@ export class SongScorer {
     return {
       slotsPlayed: played.length,
       accuracy,
-      wrongNotes: this.slots.reduce((a, s) => a + s.wrongNotes, 0),
-      streak: this.streak,
-      bestStreak: this.bestStreak,
+      wrongNotes: this.slots.reduce((a, s) => a + s.wrongNotes, this.current?.wrongNotes ?? 0),
+      streak,
+      bestStreak,
       current: this.current,
     };
   }

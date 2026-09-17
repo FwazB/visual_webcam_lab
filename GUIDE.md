@@ -90,7 +90,8 @@ with the fretting hand (left) on the neck. The app:
 - tracks the hands with MediaPipe and picks the fretting hand by handedness,
 - detects the fret wires along the neck from the video and fits the fret-law
   (frets shrink by 2^(1/12) toward the bridge) to get absolute fret numbers,
-- maps fingertips to (string, fret) on the real neck and on the panel below.
+- maps fingertips to (string, fret) directly over the real neck in your camera
+  image. Open **Fretboard reference** if you also want a separate diagram.
 
 Side lighting that makes the fret wires glint helps. If the fret numbers are
 off, use the buttons over the video: `−1 fret` / `+1 fret`, `Flip nut↔bridge`,
@@ -101,8 +102,13 @@ off, use the buttons over the video: `−1 fret` / `+1 fret`, `Flip nut↔bridge
 Click `Connect guitar`. The Spark is picked automatically when it is plugged
 in over USB-C; otherwise choose an input from the list. Use a clean, low-gain
 preset with delay and reverb off while practising; the pitch detector hears
-the processed amp tone. On macOS set the microphone mode to `Standard` (not
+the pedal's USB audio feed. Keep its looper stopped and pick chord notes one
+at a time for scoring; this is a single-pitch detector. Monitor through the
+pedal's headphones or line outputs. On macOS set the microphone mode to `Standard` (not
 Voice Isolation) in Control Center.
+
+See [Spark PEDAL setup and signal routing](docs/spark-pedal.md). The trainer
+does not control the hardware presets, footswitches, MIDI, or looper.
 
 With audio connected:
 
@@ -118,7 +124,8 @@ Without audio the lesson falls back to the vision-only shape match.
 Append `?debug=1` for the neck overlay details, the audio/fusion panel (levels,
 note log, Δk histogram, thresholds, test tones and a chromatic sweep), a video
 clip loader, pause, and `swap hands` for left-handed players.
-`?synthetic=1&debug=1` renders a synthetic neck instead of the camera.
+`?synthetic=1&debug=1` renders a labelled synthetic test neck instead of the
+camera. Choose **Use my camera** to return to the real image.
 
 ## Verification
 
@@ -126,6 +133,8 @@ Before pushing changes, run:
 
 ```bash
 npm run lint
+npm test
+npm run test:fuzz
 npm run build
 npm audit
 ```

@@ -7,17 +7,21 @@ network. This repo is configured for `8beeeaaat/touchdesigner-mcp`
 community post "Claude Code + MCP_server + Touchdesigner (the easy way)"
 describes.
 
-It is a local development tool. It never ships with the web app and only
-listens on 127.0.0.1.
+It is a local development tool and never ships with the web app. Keep its
+TouchDesigner Web Server DAT bound to 127.0.0.1; a blank Local Address exposes
+the server on every interface.
 
 ## One-time setup
 
-1. Install TouchDesigner (a 2023.11 or newer build). Non-commercial is fine.
+1. Use TouchDesigner **2025.33070 or newer**. Non-commercial is fine. That
+   release added the Web Server DAT's Local Address setting used to restrict
+   control to localhost. See the [release notes](https://derivative.ca/release/202533070/75035).
 2. In the TouchDesigner project you want to drive (for example
    `touchdesigner/BassAuraPhase1.2.toe`, or a fresh project), import the
    `mcp_webserver_base.tox` that ships with the MCP server, placed directly
    under the project: `/project1/mcp_webserver_base`. It starts a Web Server
-   DAT on `http://127.0.0.1:9981`.
+   DAT on port 9981. Set that DAT's **Local Address** to `127.0.0.1` and
+   restart it before using the MCP; verify it is not listening on `*`.
 3. Claude Code picks up `.mcp.json` at the repo root, which runs
    `npx touchdesigner-mcp-server` (the package is a pinned dev dependency, so the lockfile checks its integrity). Approve the project MCP server
    when Claude Code asks on first use. If TouchDesigner is not on the default

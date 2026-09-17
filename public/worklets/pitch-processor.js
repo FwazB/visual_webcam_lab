@@ -1,5 +1,5 @@
 // Pitch/onset AudioWorklet processor.
-// - Per 128-sample block: DC block, RMS envelope, energy onset trigger.
+// - Per 128-sample block: DC block, smoothed RMS envelope, energy onset trigger.
 // - Per hop: McLeod Pitch Method (NSDF) on the last `window` samples.
 // All timestamps are AudioContext seconds taken from `currentTime` in the
 // worklet, so downstream latency never shifts them.
@@ -83,6 +83,7 @@ class PitchProcessor extends (typeof AudioWorkletProcessor === "function" ? Audi
     this.dcPrevX = 0;
     this.dcPrevY = 0;
     this.blockRms = new Float32Array(8);
+    this.blockEnergy = new Float32Array(8);
     this.blockIdx = 0;
     this.lastOnsetT = -1;
     this.port.onmessage = (e) => {
@@ -128,7 +129,12 @@ class PitchProcessor extends (typeof AudioWorkletProcessor === "function" ? Audi
     this.ringPos = (this.ringPos + n) & mask;
     this.samplesSinceHop += n;
 
-    const rms = Math.sqrt(sq / n);
+    // A single block is shorter than a low guitar/bass cycle. Smooth power
+    // before detecting rises so each cycle does not look like another pluck.
+    this.blockEnergy[this.blockIdx] = sq / n;
+    let envelopeEnergy = 0;
+    for (let i = 0; i < 8; i++) envelopeEnergy += this.blockEnergy[i];
+    const rms = Math.sqrt(envelopeEnergy / 8);
     const tBlock = currentTime;
     // Onset: rise over the minimum of the last 8 blocks.
     let minPrev = Infinity;
@@ -136,8 +142,10 @@ class PitchProcessor extends (typeof AudioWorkletProcessor === "function" ? Audi
     this.blockRms[this.blockIdx] = rms;
     this.blockIdx = (this.blockIdx + 1) & 7;
     const c = this.config;
-    if (rms > this.gateLin && minPrev > 0 && minPrev < Infinity) {
-      const riseDb = 20 * Math.log10(rms / minPrev);
+    if (rms > this.gateLin && minPrev < Infinity) {
+      // USB noise gates can produce exact zero. That is a valid quiet baseline,
+      // not a reason to discard the first attack after silence.
+      const riseDb = 20 * Math.log10(rms / Math.max(minPrev, this.gateLin * 0.1));
       if (riseDb >= c.onsetRiseDb && (this.lastOnsetT < 0 || (tBlock - this.lastOnsetT) * 1000 >= c.refractoryMs)) {
         this.lastOnsetT = tBlock;
         this.port.postMessage({ type: "onset", t: tBlock, strength: Math.min(1, (riseDb - 6) / 34), rms });
