@@ -14,8 +14,8 @@ PROTOCOL_VERSION = 1
 MAX_MESSAGE_BYTES = 8192
 CHORD_INDEX = {"c9sus4": 0, "dm7": 1, "gm": 2}
 DEFAULT_PARAMETERS = {
-    "visual.fuzz.amount": 0.5,
-    "visual.fuzz.feedback": 0.9,
+    "visual.fuzz.amount": 0.2,
+    "visual.fuzz.feedback": 0.65,
     "output.blackout": False,
 }
 CAPABILITIES = {

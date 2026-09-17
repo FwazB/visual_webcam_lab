@@ -2,7 +2,8 @@
 
 A separate TouchDesigner project for aligning one image onto one flat surface.
 It owns the calibration grid, four corners, brightness, blackout, and projector
-window. Fuzz remains the local camera/audio effects project.
+window. It can receive Fuzz's camera/effects image or Fuzz's light-only map
+through one shared local receiver. Fuzz and Projection Mapping are the two projects.
 
 ## Open and calibrate
 
@@ -34,17 +35,42 @@ mapper open. On macOS, opening the other `.toe` from Finder starts its own
 session; do not replace the current project with File → Open.
 
 In the mapper, choose **Mapping → Source → Fuzz**. The `fuzz_in` TOP receives
-Fuzz's named sender **`body-synth-fuzz`**. Keep Fuzz running while using that
-source. Fuzz's local preview continues to work independently.
+Fuzz's named sender **`body-synth-fuzz`**. This feed includes the processed
+camera image. Keep Fuzz running while using that source. Fuzz's local preview
+continues to work independently.
+
+## Use the Fuzz light map
+
+In the existing Fuzz project's **Lights** page, select **View → Light Maps** following the
+[Fuzz Light Maps guide](../fuzz/README.md#light-maps). Fuzz's preview combines
+the camera and lights so you can see their placement. `/project1/fuzz/OUT`
+and **`body-synth-fuzz`** carry that preview. The separate
+`/project1/fuzz/light_maps/OUT` contains only lights on black and publishes
+**`body-synth-light-map`** for the physical projector.
+
+In this mapper, choose **Mapping → Source → Fuzz light map**. The existing
+`fuzz_in` receiver switches to that sender; its name is retained for compatibility.
+Keep Fuzz running in Light Maps mode; the Fuzz view stops the light-map worker
+and makes its light-only output black. Switch back to **Test pattern** for
+alignment or **Fuzz** for camera-based visuals. This mode lives inside Fuzz
+and does not require a third project or process.
 
 The image travels through [Syphon shared memory](https://docs.derivative.ca/Syphon_Spout_Out_TOP)
 on this Mac. No video goes through the trainer's WebSocket or across the
 network. The mapper has no camera/audio capture, pairing code, or control
 server. The Windows equivalent uses Spout and has not been tested here.
 
-If the grid works but Fuzz is blank, verify Fuzz's `OUT`, that `local_texture`
-is active, and that `fuzz_in` names the same sender. Switch back to Test pattern
-to distinguish an input problem from projector alignment.
+If the grid works but a live source is blank, verify that source's output and
+Syphon sender are active. `fuzz_in` should name `body-synth-fuzz` for Fuzz or
+`body-synth-light-map` for Fuzz light map. Switch back to Test pattern to distinguish
+an input problem from projector alignment.
+
+For light that follows the camera view, place the camera close to the
+projector's lens and point both in the same direction. Align the four corners
+on a flat reference surface. This is a planar alignment, without depth sensing
+or room reconstruction. A person moving closer to or farther from that surface
+can produce parallax and displaced light; test that movement with the actual
+camera and projector before relying on the alignment.
 
 ## Rebuild
 
@@ -65,10 +91,24 @@ venue-specific calibration.
 
 ## Validation
 
-Both networks built at 1280×720 without operator errors in TouchDesigner
+Earlier versions of both networks built at 1280×720 without operator errors in TouchDesigner
 2025.33070. Native pixel checks passed for the test grid, corner inset, brightness,
 blackout, and preserving calibration/display settings across a rebuild.
 Both projects were opened as independent processes and the mapper received
 Fuzz’s live 1280×720 image. The final export was re-expanded to verify its
 16×9 grid, saved corners, and lack of capture caches or Fuzz components.
 Physical alignment still requires a connected projector.
+
+For the Light Maps update, sender selection and preservation across rebuilds
+passed the Python parameter harness. Native TouchDesigner **2025.33230** checks
+then received a synthetic RGB signal through the actual
+`body-synth-light-map` sender: receiver mean RGB was approximately
+`(0.2018, 0.4036, 0.5969)`, with no receiver errors. This verifies the shared
+texture route, not physical projection alignment.
+
+The current **4,338-byte** artifact reopened independently with exactly nine
+operators, no Fuzz component or operator errors, and its 1280×720 test grid.
+It was re-expanded and checked for capture caches, credentials, local paths,
+and saved device identifiers. See [the security audit](../../docs/security-audit.md)
+for artifact hashes. Moving-person and physical projector alignment still
+require the actual camera and projector.

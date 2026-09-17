@@ -101,8 +101,8 @@ Two TouchDesigner projects keep local visuals and projector setup separate:
 
 | Project | Purpose |
 | --- | --- |
-| [Fuzz](touchdesigner/fuzz/fuzz.toe) | Local pitch-colored camera visuals, local preview, and optional guitar-trainer pairing |
-| [Projection Mapping](touchdesigner/projection_mapping/projection_mapping.toe) | Projector surface alignment and display output; optionally receives Fuzz's local image |
+| [Fuzz](touchdesigner/fuzz/fuzz.toe) | Pitch-colored camera visuals and a Light Maps view, local preview, and optional guitar-trainer pairing |
+| [Projection Mapping](touchdesigner/projection_mapping/projection_mapping.toe) | Projector surface alignment and display output; receives Fuzz's camera preview or light-only map |
 
 Fuzz runs the trainer's local control server on the Mac; no cloud relay is involved.
 
@@ -112,6 +112,7 @@ camera, hands, Spark pitch,       paired JSON: chord, hit,         camera distor
 chord scoring                    transport, visual controls       local preview
 
 Fuzz OUT ── local Syphon image: body-synth-fuzz ──► Projection Mapping (optional)
+Fuzz light_maps/OUT ── lights only: body-synth-light-map ──► the same mapper
 ```
 
 Use **TouchDesigner visuals** in the trainer and enter the pairing code printed
@@ -123,7 +124,7 @@ page blocks loopback, use the localhost app. No browser security flags are neede
 
 - Open [touchdesigner/fuzz/fuzz.toe](touchdesigner/fuzz/fuzz.toe) in TouchDesigner.
   Press **F1** to show the local camera-based Fuzz output; **Esc** returns to the editor.
-  No build step or MCP is needed. The project generates a fresh pairing code
+  The ordinary Fuzz view needs no helper build or MCP. The project generates a fresh pairing code
   each time it opens. In **Dialogs → Textport and DATs**, run:
 
   ```python
@@ -137,11 +138,29 @@ page blocks loopback, use the localhost app. No browser security flags are neede
   selection, rebuilding, and safe export instructions.
   The pitch you play chooses its color: E is yellow, A is green, and other
   notes follow the [circle-of-fifths palette](docs/pitch-colors.svg).
+  New scenes default to Amount **0.2** and Feedback **0.65**. Displacement is
+  zero at idle and uses bounded, brief onset and hit pulses.
+- **Light Maps lives inside Fuzz.** Build its local Apple Vision helper once:
+
+  ```sh
+  sh touchdesigner/fuzz/lights/build_mask_helper.sh
+  ```
+
+  Select `/project1/fuzz` → **Lights → View → Light Maps** for an undistorted
+  camera preview with silhouette lighting. Behind defaults to **0.6**, Front
+  to **0.2**, and Movement to **0.4**, with an RGB light-color control.
+  The helper receives 256×144 frames at up to 15 Hz through local pipes,
+  stores no raw frames, uses no network, and stops when the mode is off.
+  Its `.build` output is ignored by Git. Keep your head and torso visible
+  for segmentation; see the [Light Maps guide](touchdesigner/fuzz/README.md#light-maps).
 - For a projector, open the separate
   [Projection Mapping project](touchdesigner/projection_mapping/projection_mapping.toe).
   Fuzz's `local_texture` sender publishes `OUT` as `body-synth-fuzz` on the same
   Mac. Follow the [mapper guide](touchdesigner/projection_mapping/README.md)
-  for source selection, alignment, and display routing. Fuzz works on its own;
+  for source selection, alignment, and display routing. Choose **Source → Fuzz
+  light map** to receive `body-synth-light-map`: lights on black from Fuzz's
+  `light_maps/OUT`, without the camera image. These are the same two projects.
+  Fuzz works on its own;
   guitar pairing continues to use its existing port-9980 bridge.
 - Direction: [docs/touchdesigner-backend-redesign.md](docs/touchdesigner-backend-redesign.md)
   moves real-time media work into TouchDesigner with the web app as the
@@ -163,7 +182,7 @@ Native Apple teaching app direction: [docs/apple-native-roadmap.md](docs/apple-n
   selection, MPM pitch detection, onset detection, note segmentation.
 - `src/lib/lesson/`: step scoring, song charts, chart clock and song scorer.
 - `src/components/FretLab.tsx`, `src/hooks/`: the trainer UI and hooks.
-- `touchdesigner/fuzz/`: local Fuzz project, builder, and guitar bridge.
+- `touchdesigner/fuzz/`: local Fuzz project, builder, guitar bridge, and Light Maps source under `lights/`.
 - `touchdesigner/projection_mapping/`: separate projector project and builder.
 
 ## Status
@@ -174,11 +193,21 @@ headers checked on the local production server. Brave successfully paired
 with TouchDesigner, changed visual controls, and drove its chord channel
 through the YUKON loop. This does not establish real-guitar tracking accuracy.
 
-Both saved TouchDesigner projects reopened independently at 1280×720 without
-operator errors. The mapper received Fuzz from its separate process. Native
-checks cover the calibration grid, corner mapping, brightness, blackout, and
-calibration preservation. Real guitar/Spark input and physical projector
-alignment still require hardware testing.
+Earlier saved TouchDesigner projects reopened independently at 1280×720 without
+operator errors. Those mapper checks covered Fuzz reception, the calibration
+grid, corner mapping, brightness, blackout, and calibration preservation.
+For the current Light Maps update, the Apple Vision helper compiled and native
+shader, light-only Syphon transfer, and helper-shutdown checks passed in
+TouchDesigner **2025.33230**. Both shared files were exported and inspected for
+credentials, device identifiers, and capture caches. Both reopened independently
+at 1280×720 without operator errors: the mapper with its test grid, and Fuzz
+with fresh pairing, active capture, and the loopback bridge. The reopened Fuzz
+file produced nonzero light output after the live mask became ready.
+All **51 Python tests** and **64 Node tests**
+pass, alongside lint, build, and a zero-vulnerability dependency audit.
+A live person mask was observed, and a static camera image confirmed torso-mask
+alignment; framing the head and torso affects segmentation. Real guitar/Spark
+input, moving-person alignment, and physical projector alignment require hardware testing.
 
 ## Verification
 

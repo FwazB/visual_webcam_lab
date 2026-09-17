@@ -55,7 +55,7 @@ Safe export steps are in [the Fuzz README](../touchdesigner/fuzz/README.md).
 Removed 14,934 bytes of exact duplicate or unused files: the duplicate
 `BassAuraPhase1.toe`, the unreferenced `handFretboard.ts`, and an unused instrument
 barrel. Sanitizing the two remaining legacy projects removed another 6,960
-bytes. The new ready-to-open Fuzz project is about 8 KB and contains only its
+bytes. At the original audit, the ready-to-open Fuzz project was about 8 KB and contained only its
 scene, required startup code, and TD's standard project infrastructure.
 
 No dependencies were added. Existing runtime dependencies have active callers;
@@ -125,5 +125,61 @@ The 32-operator export was expanded and inspected: every `.ts` cache was removed
 and embedded source matches the repository. No test sources or machine-specific
 device identifiers remain.
 
-Current `fuzz.toe`: 12898 bytes, SHA-256
+At `a121810`, `fuzz.toe`: 12898 bytes, SHA-256
 `7f8ad43c920267ab63e163909c89ccfe3878c548ad7e895ae1785158e5b47ca8`.
+
+## Follow-up: Light Maps inside Fuzz
+
+Light Maps is a view in the existing Fuzz project. The workflow still uses
+two projects: Fuzz and Projection Mapping. No Node dependencies, network
+listeners, or bridge commands were added. The macOS person-mask helper uses
+Apple Vision locally, receiving 256×144 frames at up to 15 Hz through process
+pipes. It stores no raw camera frames and makes no network requests. Its
+compiled executable stays in the ignored `lights/.build` directory beside
+the source, outside the shared `.toe`.
+
+The worker keeps bounded frame state, replaces pending frames, and rejects
+masks older than 350 ms. Native checks in TouchDesigner **2025.33230** observed
+a live **Person mask ready** state and confirmed that switching back to Fuzz
+stopped the helper and cleared mask readiness. Missing masks pass through the
+camera preview and produce black light-only output. GPU pixel checks also
+passed for zero light controls and full-person/empty-person mask boundaries,
+without operator errors.
+
+The selected camera preview remains on `body-synth-fuzz`; the dedicated
+`body-synth-light-map` sender contains lights on black. Both use local Syphon
+sharing, not network video. The mapper's existing receiver successfully
+received a synthetic light-map signal with mean RGB approximately
+`(0.2018, 0.4036, 0.5969)` and no receiver errors. A static camera image showed
+torso-mask alignment; moving-person and physical projector alignment remain
+unverified.
+
+Both current artifacts were expanded and inspected. Embedded source matches
+the repository; saved credentials are blank; `PITCH` diagnostics are neutral;
+`MASK` has no pixel cache. `.ts` sample caches and `.oldacbo` backups were
+removed. No saved device UUIDs, `/Users/` paths, or temporary paths remain.
+The mapper reopened independently with nine operators, no Fuzz component,
+no errors, and a 1280×720 test grid. Fuzz reopened independently with all 49
+operator descendants, no mapper or operator errors, and 1280×720 output.
+Its pairing code was fresh, the bridge was active on `127.0.0.1`, camera/audio
+were active, and the saved Fuzz view used Amount 0.2 and Feedback 0.65.
+The local helper was present.
+
+A native startup check caught a cached shader validity input that kept the
+light map black after the mask became ready. Its frame dependency was fixed
+before the final export. After reopening that final artifact and enabling
+Light Maps, a delayed live check confirmed mask readiness and shader validity
+were both 1, with nonzero light output (maximum 0.5059, mean 0.0503), no operator
+errors, and no helper error.
+
+Current artifacts (SHA-256):
+
+| Artifact | Bytes | Operators | SHA-256 |
+| --- | ---: | ---: | --- |
+| `fuzz.toe` | 17,362 | 49 descendants: 35 at root, 14 inside Light Maps | `0c697baf91a626f99faec99517d8496d0e3c90413260459ad11b7dd7508fe111` |
+| `projection_mapping.toe` | 4,338 | 9 | `292628544caf83121b9862ce8a70a2ee4b8a8c593576bfbb0e0b985ed73f985e` |
+
+Current checks: **51 Python tests**, **64 Node tests**, lint, and production
+build pass. `npm audit` reports **0 known vulnerabilities** across **520**
+dependency records. The earlier CSP and physical-hardware limitations above
+still apply.

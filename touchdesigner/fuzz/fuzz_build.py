@@ -194,7 +194,7 @@ setpar(chord, "value1", 0.0)
 controls = ensure(base, "constantCHOP", "CONTROLS")
 state = base.fetch("fuzzState", {
     "revision": 0, "running": False, "sessionId": None,
-    "parameters": {"visual.fuzz.amount": 0.5, "visual.fuzz.feedback": 0.9, "output.blackout": False},
+    "parameters": {"visual.fuzz.amount": 0.2, "visual.fuzz.feedback": 0.65, "output.blackout": False},
 }, storeDefault=True)
 state["running"] = False
 base.store("lastHitAt", -1000.0)
@@ -233,8 +233,8 @@ setpar(startup, "frameend", False)
 
 # ------------------------------------------------------------- mappings ----
 # Pitch controls color; onsets and authenticated hits still push the warp.
-setexpr(warp, "displaceweightx", "op('CONTROLS')['amount'] * (0.02 + min(max(op('ONSET')[0], 0), 1) * 0.36 + mod.bridge_callbacks.hit_level(op('bridge')) * 0.2)")
-setexpr(warp, "displaceweighty", "op('CONTROLS')['amount'] * (0.02 + min(max(op('ONSET')[0], 0), 1) * 0.36 + mod.bridge_callbacks.hit_level(op('bridge')) * 0.2)")
+setexpr(warp, "displaceweightx", "op('CONTROLS')['amount'] * (min(max(op('ONSET')[0], 0), 1) * 0.08 + mod.bridge_callbacks.hit_level(op('bridge')) * 0.04)")
+setexpr(warp, "displaceweighty", "op('CONTROLS')['amount'] * (min(max(op('ONSET')[0], 0), 1) * 0.08 + mod.bridge_callbacks.hit_level(op('bridge')) * 0.04)")
 setexpr(dim, "opacity", "min(0.98, op('CONTROLS')['feedback'] * (0.9 + min(max(op('AUDIO_LEVEL')[0], 0.0), 1.0) * 0.1))")
 setpar(hue, "hueoffset", 0.0)
 setexpr(hue, "saturationmult", "1.0 - op('PITCH')['amount'] * parent().par.Tint")
@@ -242,6 +242,17 @@ for component, channel in zip("rgb", "rgb"):
     setexpr(pitch_swatch, "color" + component,
             "1.0 - op('PITCH')['amount'] * parent().par.Tint + op('PITCH')['{}'] * parent().par.Tint".format(channel))
 setexpr(blackout, "brightness1", "1.0 - op('CONTROLS')['blackout']")
+
+# A second view inside the same Fuzz project, using its existing camera.
+light_directory = FUZZ_DIRECTORY / 'lights'
+exec((light_directory / 'light_maps_build.py').read_text(),
+     dict(globals(), LIGHT_MAPS_DIRECTORY=light_directory))
+scene = ensure(base, 'switchTOP', 'view')
+light_preview = ensure(base, 'selectTOP', 'light_preview')
+setpar(light_preview, 'top', 'light_maps/PREVIEW')
+scene.setInputs([tail, light_preview])
+scene.par.index.expr = 'parent().par.View.menuIndex'
+blackout.setInputs([scene])
 
 # ---------------------------------------------------------- local output ----
 # Migrate the old window without leaving a duplicate projector component.
@@ -271,7 +282,7 @@ setpar(shared_out, "active", True)
 # --------------------------------------------------------------- layout ----
 rows = [
     ([camera, hue, pitch_tint, feedback, dim, warp, mix, tail, blackout, visual_out, component_out], 200),
-    ([pitch_swatch, noise], 40),
+    ([pitch_swatch, noise, light_preview, scene], 40),
     ([audio, rms, gain, smooth, audio_out], -140),
     ([slope, onset, onset_out], -300),
     ([pitch_module, pitch_callbacks, pitch, pitch_monitor], -620),

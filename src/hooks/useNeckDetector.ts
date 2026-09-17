@@ -51,7 +51,8 @@ function intervalFor(status: NeckTrackStatus): number {
     case "tracking":
       return 200;
     default:
-      return 100;
+      // Image acquisition also works without a hand, but scans the whole frame.
+      return 250;
   }
 }
 

@@ -22,6 +22,7 @@ export interface SyntheticParams {
   /** Board gray, wire gray. */
   boardGray?: number;
   wireGray?: number;
+  inlayGray?: number;
   backgroundGray?: number;
   seed?: number;
 }
@@ -59,6 +60,7 @@ export function renderSyntheticNeck(p: SyntheticParams = {}): SyntheticScene {
     noise: p.noise ?? 6,
     boardGray: p.boardGray ?? 40,
     wireGray: p.wireGray ?? 190,
+    inlayGray: p.inlayGray ?? 200,
     backgroundGray: p.backgroundGray ?? 110,
     seed: p.seed ?? 1,
   };
@@ -105,7 +107,7 @@ export function renderSyntheticNeck(p: SyntheticParams = {}): SyntheticScene {
             const r = 0.18 * gap;
             const offsets = space === 12 ? [-w * 0.2, w * 0.2] : [0];
             for (const so of offsets) {
-              if (Math.hypot(t - tc, s - so) <= r) g = 200;
+              if (Math.hypot(t - tc, s - so) <= r) g = params.inlayGray;
             }
           }
         } else if (Math.abs(s) <= w / 2 + 2) {

@@ -2,7 +2,8 @@
 
 A local TouchDesigner scene where the pitch you play colors the camera image,
 while audio level and plucks drive feedback and short displacement pulses.
-Its local preview works independently. Projector alignment and display routing
+Its **Light Maps** view adds silhouette lighting to the same camera without
+warping it. Both views live in Fuzz and share its local preview. Projector alignment and display routing
 belong to the separate [Projection Mapping project](../projection_mapping/README.md).
 
 ## Run the engine
@@ -13,7 +14,9 @@ Older builds cannot safely bind this server to loopback; the builder leaves
 the bridge off and reports the required upgrade.
 
 1. Open **[fuzz.toe](fuzz.toe)** from this folder. The complete network and
-   callbacks are embedded; no script execution or MCP setup is needed.
+   callbacks are embedded; the ordinary Fuzz view needs no helper or MCP setup.
+   Light Maps requires the one-time local helper build below. If the saved
+   project has no **Lights** page, rebuild it from the current source first.
 2. Press **F1** for the local Fuzz output. Press **Esc** to return to the editor.
    This uses your camera image. If it is black, check `camera_in` has a working
    device and that the camera is uncovered. `OUT` is the final image;
@@ -59,6 +62,56 @@ This estimates one pitch at a time from 65–1200 Hz. Distortion, echo, chord st
 tracks and looper playback can confuse the detector. Start with clean isolated
 notes before adding effects.
 
+## Light Maps
+
+Light Maps is a view inside the existing Fuzz project. It uses `camera_in` and
+a local Apple Vision person mask to place animated light behind or in front of
+your silhouette. The camera image remains undistorted. There is no third
+TouchDesigner project to open.
+
+On macOS, build the small helper once from the repository root using the
+installed Apple command-line tools:
+
+```sh
+sh touchdesigner/fuzz/lights/build_mask_helper.sh
+```
+
+The executable stays in `lights/.build/person-mask`, which Git ignores.
+The shader, Python callbacks, and worker are embedded when Fuzz is rebuilt;
+the executable stays beside the project and is not bundled into `fuzz.toe`.
+Keep the `lights` folder beside a working copy of the project if you use this mode.
+
+Select `/project1/fuzz`, open the **Lights** custom page, and choose
+**View → Light Maps**. Press **F1** to see the camera with the light overlay.
+
+| Control | Default | Effect |
+| --- | --- | --- |
+| Behind me (`Behind`) | 0.6 | Light outside the person mask |
+| In front of me (`Front`) | 0.2 | Subtle light within the person mask |
+| Movement (`Speed`) | 0.4 | Animation speed |
+| Light color | RGB 0.2, 0.65, 1.0 | Color of both light layers |
+
+`light_maps/mask_status` shows whether a fresh person mask is available.
+Include your head and torso in the camera frame: a tight crop or a partial
+body changes segmentation. If the mask is missing or stale, the preview
+shows the original camera and the light-only output is black.
+
+Frames are reduced to 256×144 and submitted at up to 15 Hz through local
+memory pipes. The helper uses Apple Vision on this Mac; it does not send
+frames over the network or save raw frames. The worker replaces pending
+frames instead of building a queue and rejects masks older than 350 ms.
+Switching **View → Fuzz** stops the helper and makes the light-only output
+black. Closing or rebuilding the project also releases the helper.
+
+`/project1/fuzz/OUT` and the **`body-synth-fuzz`** sender carry the selected
+camera preview. `/project1/fuzz/light_maps/OUT` publishes just the lights on
+black as **`body-synth-light-map`**. In the existing Projection Mapping
+project, choose **Source → Fuzz light map** for that light-only image.
+Follow the [mapper guide](../projection_mapping/README.md) for physical
+alignment. The person mask is a flat image, not a depth map or room model;
+camera/projector separation and movement toward or away from the calibrated
+surface can displace the projected light.
+
 ## Rebuild or export
 
 To rebuild while this repository's project is open, run in the Textport:
@@ -85,30 +138,38 @@ that shared file:
    b.op('audio_in').par.active = False
    b.op('pitch_callbacks').module.reset()
    b.op('PITCH').cook(force=True)
+   b.par.View = 'fuzz'
+   b.op('light_maps/mask_callbacks').module.reset()
+   b.op('light_maps/MASK').cook(force=True)
    b.op('bridge_callbacks').module.prepare_for_export(b.op('bridge'))
    b.op('camera_in').par.device.val = ''
    b.op('camera_in').par.device.expr = "me.par.device.menuNames[0] if me.par.device.menuNames else ''"
    ```
 
-   Audio capture is paused and pitch diagnostics are neutralized before saving.
+   Audio capture is paused, pitch diagnostics are neutralized, and the mask
+   helper is stopped before saving. The saved View is Fuzz, with a blank mask.
    The bridge stays off until reopening; pairing code, authenticated clients,
    hit pulse, transport and session are cleared. Check any other device fields
    for machine-specific identifiers before sharing.
 2. Use Derivative's [toeexpand](https://docs.derivative.ca/Toeexpand) on the staging file and
    remove **every `.ts` entry** from its `.toe.toc`. These are cached CHOP
    samples; include pitch diagnostics as well as audio/trigger caches.
+   Remove `.oldacbo` backup entries as well and check that `MASK` contains no
+   cached camera or mask pixels.
    Restore `audio_in`'s Active setting in this expanded staging copy; preserve
    the remaining operator definitions (`.n` and `.parm`).
 3. Run [toecollapse](https://docs.derivative.ca/Toecollapse) on the same staging
    filename. Both tools ship under the application's `Contents/MacOS` on macOS.
-4. Expand the result again and inspect it: no cached `.ts` files, prior pitch
+4. Expand the result again and inspect it: no cached `.ts` or `.oldacbo` files, prior pitch
    readings in other CHOP data, saved device IDs, local paths, or credentials.
    Storage appears as hex-encoded pickle
    payloads in `.n` files; inspect opcodes with `pickletools`, never execute
    an unknown pickle. The `dict` and `idict` pairing values must be `None`,
    and `fuzzClients` must be empty. Raw text searches alone miss storage.
 5. Reopen and verify output, fresh pairing, loopback binding, and operator
-   errors before copying the checked artifact to `fuzz.toe`.
+   errors before copying the checked artifact to `fuzz.toe`. Check both views
+   after building the local helper; do not include `.build` binaries or raw
+   camera frames in the shared export.
 
 TouchDesigner's [storage startup values](https://docs.derivative.ca/OP_Class)
 prevent the pairing code from being saved. Removing sample caches is a
@@ -120,8 +181,8 @@ not saved operator storage.
 
 | Control | Range / default | Effect |
 | --- | --- | --- |
-| Amount | 0–1 / 0.5 | Scales audio and note-hit displacement |
-| Feedback | 0–0.98 / 0.9 | Trail retention, mildly modulated by input level |
+| Amount | 0–1 / 0.2 | Scales short onset and note-hit displacement in the Fuzz view |
+| Feedback | 0–0.98 / 0.65 | Trail retention, mildly modulated by input level |
 | Blackout | Off by default | Makes the preview and shared final image black while the internal scene keeps running |
 
 | Signal | Source | Effect |
@@ -132,7 +193,9 @@ not saved operator storage.
 | `CHORD` | Authenticated `song.chord` and `note.hit` messages | Song state and a hit pulse that decays over 250 ms; does not choose the color |
 
 The camera sits behind the faded feedback image so an opaque camera frame
-cannot erase the entire trail. Audio visuals continue without the app or when
+cannot erase the entire trail. There is no idle displacement: each axis uses
+`Amount × (0.08 × bounded onset + 0.04 × bounded hit)`. The new defaults are
+gentler; rebuilds preserve previously saved control values. Audio visuals continue without the app or when
 Song mode is stopped. The final authenticated client disconnect also clears
 the hit pulse and song transport state.
 
@@ -142,11 +205,12 @@ The Web Server DAT listens on **127.0.0.1 only**. It accepts the `/body-synth`
 WebSocket path and requires a version-1 `hello` with the local pairing code
 before commands. Welcome and a complete state snapshot confirm connection.
 
-Only the three controls above, song chord/hit events, transport, and heartbeat
+Only Amount, Feedback, Blackout, song chord/hit events, transport, and heartbeat
 messages are accepted. The bridge validates types, finite numbers, ranges,
 and an 8 KB message limit. It never evaluates app-supplied Python, files, or
 operator paths. HTTP requests expose no state. This runtime bridge is separate
 from the development MCP on port 9981.
+The Lights-page controls are local TouchDesigner parameters.
 
 The public HTTPS trainer may be unable to open a plain local WebSocket in
 some browsers. If connection is blocked, use the locally served trainer; do
@@ -162,7 +226,10 @@ and display routing live in
 For the separate mapper to use Fuzz, keep both projects open on the same Mac.
 The `local_texture` Syphon Out TOP publishes the final `OUT` image under the
 sender name **`body-synth-fuzz`**. Select that source in the mapper following
-its [setup guide](../projection_mapping/README.md). The image is shared locally;
+its [setup guide](../projection_mapping/README.md). For lights without the camera
+image, choose the mapper's **Fuzz light map** source while Fuzz is in Light Maps
+view; this uses **`body-synth-light-map`** from `light_maps/OUT`.
+The image is shared locally;
 the trainer's WebSocket still carries only chord, hit, transport, and control
 messages. The mapper is optional for local Fuzz use and guitar pairing.
 
@@ -174,11 +241,37 @@ Run Python regression tests with NumPy available (included with TouchDesigner):
 python3 -m unittest discover -s touchdesigner/fuzz -p 'test_*.py' -v
 ```
 
-All 40 Python tests pass, including pitch, harmonics, silence, stale input,
-channel changes, and bridge security. Native tests produced yellow pixels for
-E2 (82.41 Hz), green for A2 (110 Hz), and natural colors after silence. The
-32-operator project reopened at 1280×720 without errors; rebuilding preserves the
-color amount. The saved export contains neutral pitch diagnostics, no cached
-audio, and no pairing code. Earlier checks verified separate-process Syphon
-transfer and trainer control acknowledgments. Real Spark input, guitar response,
-and physical projector alignment still require hardware testing.
+Earlier regression and native checks covered pitch, harmonics, silence, stale
+input, channel changes, and bridge security. Native pitch tests produced yellow
+pixels for E2 (82.41 Hz), green for A2 (110 Hz), and natural colors after silence.
+The prior saved Fuzz project reopened at 1280×720 without errors, and prior
+checks verified separate-process Syphon transfer and trainer acknowledgments.
+
+For the current update, all **51 Python tests** pass. The Apple Vision helper
+compiled and native checks in TouchDesigner **2025.33230** confirmed:
+
+- Missing masks leave the camera unchanged and the light-only output black.
+  Full-person and empty-person masks suppress the opposite light layer;
+  zero light controls preserve the camera and produce black light output.
+- The mapper received a synthetic RGB signal through the actual
+  `body-synth-light-map` sender with no receiver errors.
+- A live person mask reached **Person mask ready**. Switching View back to
+  Fuzz stopped the helper and cleared mask readiness without operator errors.
+- A startup shader-uniform cache issue was fixed so mask readiness updates
+  as frames arrive. After reopening the final saved file and selecting Light
+  Maps, both mask readiness and the shader validity input reached 1, and the
+  light-only output was nonzero (maximum 0.5059, mean 0.0503), without errors.
+
+A static camera image showed the mask aligned with the torso. This does not
+establish moving-person or physical projector alignment.
+
+The exported Fuzz file is **17,362 bytes**, with **49 operator descendants**:
+35 at the Fuzz level, including the Light Maps component, and 14 inside it.
+Its embedded source matches the repository, credentials are blank, pitch
+diagnostics are neutral, and capture caches, local paths, and saved device IDs
+are absent. It reopened independently at 1280×720 with no operator errors,
+fresh pairing, the bridge active on `127.0.0.1`, camera/audio active, and the
+saved Fuzz view using Amount 0.2 and Feedback 0.65. The helper was present.
+The mapper also reopened independently with nine operators and no errors.
+Artifact hashes and audit evidence are in [the security audit](../../docs/security-audit.md).
+Real Spark input and physical projector alignment remain hardware tests.

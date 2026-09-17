@@ -3,6 +3,7 @@
 // NeckModel. Pure over an RGBA frame so it can run inline or in a worker.
 
 import { fretFraction, neckWidthMmAt, type InstrumentProfile } from "@/lib/instrument/profile";
+import { findFretRun, findNeckSeeds } from "./acquire";
 import {
   fitFretLaw,
   geometricScore,
@@ -13,7 +14,7 @@ import {
   type Orientation,
 } from "./fretFit";
 import { handMaskInterval } from "./fretHand";
-import { axisRangeInFrame, sampleStrip, type Strip } from "./image";
+import { axisRangeInFrame, dominantLineAngle, sampleStrip, type Strip } from "./image";
 import { edgeS } from "./model";
 import {
   alongProfile,
@@ -69,6 +70,8 @@ interface StripPlan {
   nS: number;
   /** Optional along-axis half extent around the origin (px); full frame if absent. */
   tSpan?: number;
+  /** Image-edge proposals keep dark inlays from collapsing the sampled band. */
+  minWidth?: number;
 }
 
 interface StripAnalysis {
@@ -117,7 +120,12 @@ function analyseStrip(
   // anchor the band on the row through s = 0.
   const anchorRow = Math.round((0 - plan.s0) / rowStep);
   const peakiness = rowPeakiness(resp, validCols);
-  const band = bandFromEnergy(peakiness, 0.4, anchorRow);
+  let band = bandFromEnergy(peakiness, 0.4, anchorRow);
+  if (band && plan.minWidth && (band[1] - band[0]) * rowStep < plan.minWidth) {
+    const center = (band[0] + band[1]) / 2;
+    const half = plan.minWidth / rowStep / 2;
+    band = [Math.max(0, Math.floor(center - half)), Math.min(nS - 1, Math.ceil(center + half))];
+  }
   let rows: [number, number];
   if (band && band[1] - band[0] >= 4) {
     const margin = Math.round(0.15 * (band[1] - band[0]));
@@ -261,7 +269,7 @@ function widthScore(
   return Math.exp(-((meanLog / 0.08) ** 2));
 }
 
-export function detectNeck(frame: RgbaFrame, opts: DetectOptions): NeckObservation {
+function detectFromPlan(frame: RgbaFrame, opts: DetectOptions, seed?: StripPlan): NeckObservation {
   const tStart = performance.now();
   const timings: Record<string, number> = {};
   let tMark = tStart;
@@ -298,6 +306,8 @@ export function detectNeck(frame: RgbaFrame, opts: DetectOptions): NeckObservati
   } else if (hand) {
     const half = Math.max(hand.mcpDist, 40);
     plan = { origin: hand.centre, angle: Math.atan2(hand.dir.y, hand.dir.x), s0: -half, nS: Math.round(2 * half) };
+  } else if (seed) {
+    plan = seed;
   } else {
     return empty("no-prior", tStart);
   }
@@ -329,6 +339,9 @@ export function detectNeck(frame: RgbaFrame, opts: DetectOptions): NeckObservati
   for (let pass = 0; pass < 3; pass++) {
     const a = analyseStrip(frame, { ...plan, tSpan: 420 }, bestAngle, setNormalFor(bestAngle), 2, maskFor(bestAngle), false);
     if (!a) return empty("strip-off-frame", tStart);
+    if (seed && (!a.band || (a.band[1] - a.band[0]) * 2 > seed.nS * 0.85)) {
+      return empty("unbounded-neck-band", tStart);
+    }
     if (a.band) {
       const sTop = a.strip.s0 + a.band[0] * 2;
       const sBot = a.strip.s0 + a.band[1] * 2;
@@ -341,6 +354,7 @@ export function detectNeck(frame: RgbaFrame, opts: DetectOptions): NeckObservati
       const tilt = estimateTilt(a.resp, a.band, 2, a.peakiness, a.valid);
       if (tilt !== null) {
         const corr = handed * tilt;
+        if (seed && Math.abs(bestAngle + corr - seed.angle) > 8 * DEG) break;
         tiltHistory.push(corr);
         bestAngle += corr;
         if (Math.abs(corr) < 0.3 * DEG) break;
@@ -367,6 +381,7 @@ export function detectNeck(frame: RgbaFrame, opts: DetectOptions): NeckObservati
     : null;
   if (opts.debug) Object.assign(opts.debug, { strip: { t0: strip.t0, nT: strip.nT, s0: strip.s0, nS: strip.nS }, band: A.band, wiresRaw: wires, edges1: edges });
   if (wires.length < 2) return { ...empty("too-few-wires", tStart), wires };
+  if (seed && (wires.length < 5 || wires.length > 28)) return { ...empty("no-fret-pattern", tStart), wires };
 
   // 6. Fit both orientations, vote.
   const tRange: [number, number] = [strip.t0, strip.t0 + strip.nT - 1];
@@ -481,4 +496,39 @@ export function detectNeck(frame: RgbaFrame, opts: DetectOptions): NeckObservati
     handMask: masks[0] ?? null,
     timingMs: performance.now() - tStart,
   };
+}
+
+/** Acquire from image edges when no usable hand or tracked neck is available. */
+export function detectNeck(frame: RgbaFrame, opts: DetectOptions): NeckObservation {
+  const start = performance.now();
+  const prior = detectFromPlan(frame, opts);
+  if (prior.model && prior.model.confidence >= 0.45) return prior;
+  const proposals = findNeckSeeds(frame).map((seed) => {
+    const wires = dominantLineAngle(frame, seed.origin, Math.max(80, seed.nS), seed.angle + Math.PI / 2, 8 * DEG);
+    const angle = wires ? (wires.angle + Math.PI / 2) % Math.PI : seed.angle;
+    const dir = unit(angle);
+    const normal = { x: -dir.y, y: dir.x };
+    const analysis = analyseStrip(frame, seed, angle, normal, 2, [], false);
+    const bounded = analysis?.band && (analysis.band[1] - analysis.band[0]) * 2 <= seed.nS * 0.85;
+    const strong = bounded ? analysis.wires.filter((wire) => wire.strength >= 1.5) : [];
+    const run = findFretRun(strong);
+    const score = run.score * run.wires.length / Math.max(1, strong.length);
+    return { ...seed, angle, score };
+  }).filter((seed) => seed.score > 0).sort((a, b) => b.score - a.score);
+  if (opts.debug) opts.debug.acquisitionSeeds = proposals;
+  const acquisitionResults: Array<Record<string, unknown>> = [];
+  if (opts.debug) opts.debug.acquisitionResults = acquisitionResults;
+  for (const seed of proposals.slice(0, 4)) {
+    const result = detectFromPlan(frame, { ...opts, hand: null, prevModel: null }, seed);
+    const model = result.model;
+    acquisitionResults.push({ seed, reason: result.reason, confidence: model?.confidence, wires: model?.assignedWires.length });
+    if (!model || model.confidence < 0.5 || model.assignedWires.length < 6) continue;
+    const assigned = model.assignedWires.slice().sort((a, b) => a.t - b.t);
+    const span = assigned[assigned.length - 1].t - assigned[0].t;
+    const middle = (assigned[assigned.length - 1].t + assigned[0].t) / 2;
+    const width = edgeS(model.bottomEdge, middle) - edgeS(model.topEdge, middle);
+    if (width < 12 || span < Math.max(width * 4, Math.min(frame.width, frame.height) * 0.3)) continue;
+    return { ...result, timingMs: performance.now() - start };
+  }
+  return { ...prior, timingMs: performance.now() - start };
 }

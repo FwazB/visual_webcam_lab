@@ -21,6 +21,7 @@ __pycache__/
 /touchdesigner/projection_mapping/*.toe
 !/touchdesigner/projection_mapping/projection_mapping.toe
 /touchdesigner/projection_mapping/Backup/
+/touchdesigner/fuzz/lights/.build/
 
 # next.js
 /.next/

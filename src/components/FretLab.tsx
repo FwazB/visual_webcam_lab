@@ -810,7 +810,7 @@ export default function FretLab({ profile }: FretLabProps) {
           {handsError && <p role="status" className="max-w-xs rounded border border-amber-200/20 bg-black/80 px-2 py-1 text-xs text-amber-200">{handsError}</p>}
           {(neckStatus === "lost" || neckStatus === "searching") && webcamReady && !handsLoading && !handsError && (
             <div className="text-[11px] font-mono px-2 py-1 rounded bg-black/60 border border-white/10 text-zinc-300">
-              show the neck and fretting hand
+              show a clear view of the fretboard
             </div>
           )}
         </div>

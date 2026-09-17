@@ -3,9 +3,9 @@
 From the Textport, with this project's .toe beside the builder:
     exec(open(project.folder + '/projection_mapping_build.py').read())
 
-Fuzz publishes the macOS Syphon sender "body-synth-fuzz" in another process.
-The mapper starts with a built-in calibration grid. Select Fuzz on the Mapping
-page when ready. Corner coordinates use fractions: (0, 0) bottom left,
+Fuzz publishes "body-synth-fuzz" and, in Light Maps mode, "body-synth-light-map"
+from its own process. The mapper starts with a built-in calibration grid. Select
+the source on the Mapping page when ready. Corner coordinates use fractions: (0, 0) bottom left,
 (1, 1) top right. Select a display on projector, then press F1; Escape exits.
 
 Rebuilding updates only /project1/projection_mapping and preserves its corner
@@ -14,7 +14,8 @@ calibration, controls, and projector display settings. No windows open here.
 
 ROOT_PATH = "/project1"
 BASE_NAME = "projection_mapping"
-SENDER_NAME = "body-synth-fuzz"
+FUZZ_SENDER_NAME = "body-synth-fuzz"
+LIGHT_MAP_SENDER_NAME = "body-synth-light-map"
 
 
 def ensure(parent_op, op_type, name):
@@ -37,12 +38,16 @@ page = next((page for page in base.customPages if page.name == "Mapping"), None)
 if page is None:
     page = base.appendCustomPage("Mapping")
 
-if getattr(base.par, "Source", None) is None:
+source = getattr(base.par, "Source", None)
+saved_source = source.eval() if source is not None else "testpattern"
+new_source = source is None
+if new_source:
     source = page.appendMenu("Source", label="Source")[0]
-    source.menuNames = ["testpattern", "fuzz"]
-    source.menuLabels = ["Test pattern", "Fuzz"]
+source.menuNames = ["testpattern", "fuzz", "lightmaps"]
+source.menuLabels = ["Test pattern", "Fuzz", "Fuzz light map"]
+if new_source:
     source.default = 0
-    source.val = 0
+source.val = saved_source if saved_source in source.menuNames else "testpattern"
 if getattr(base.par, "Brightness", None) is None:
     brightness = page.appendFloat("Brightness", label="Brightness")[0]
     brightness.default = 1.0
@@ -83,10 +88,13 @@ for name, value in {
 
 receiver = ensure(base, "syphonspoutinTOP", "fuzz_in")
 setpar(receiver, "usespoutactivesender", False)
-setpar(receiver, "sendername", SENDER_NAME)
+# Keep the existing receiver name and use one input for both local feeds.
+receiver.par.sendername.expr = "{!r} if parent().par.Source.eval() == 'lightmaps' else {!r}".format(
+    LIGHT_MAP_SENDER_NAME, FUZZ_SENDER_NAME
+)
 select = ensure(base, "switchTOP", "source")
 select.setInputs([grid, receiver])
-select.par.index.expr = "parent().par.Source.menuIndex"
+select.par.index.expr = "0 if parent().par.Source.eval() == 'testpattern' else 1"
 
 new_corners = base.op("corners") is None
 corners = ensure(base, "cornerpinTOP", "corners")
@@ -154,4 +162,4 @@ base.viewer = True
 projector.par.setperform.pulse()
 print("Projection mapper ready at", base.path)
 print("Use Mapping controls; select the projector display before pressing F1.")
-print("Syphon sender:", SENDER_NAME, "| Output:", visual_out.path)
+print("Syphon senders:", FUZZ_SENDER_NAME, "/", LIGHT_MAP_SENDER_NAME, "| Output:", visual_out.path)
