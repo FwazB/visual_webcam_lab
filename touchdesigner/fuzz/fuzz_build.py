@@ -148,6 +148,45 @@ spark = [name for name in audio.par.device.menuNames if "spark" in name.lower()]
 if spark:
     audio.par.device = spark[0]
 
+# Optional local speaker monitoring. Keep this separate from visual controls
+# and fail closed when the Spark or the explicit speaker output disappears.
+monitor_page = next((p for p in base.customPages if p.name == "Audio monitor"), None)
+if monitor_page is None:
+    monitor_page = base.appendCustomPage("Audio monitor")
+if getattr(base.par, "Monitor", None) is None:
+    monitor_toggle = monitor_page.appendToggle("Monitor", label="Monitor guitar")[0]
+    monitor_toggle.default = monitor_toggle.val = False
+if getattr(base.par, "Monitorlevel", None) is None:
+    monitor_level = monitor_page.appendFloat("Monitorlevel", label="Speaker volume")[0]
+    monitor_level.default = monitor_level.val = 0.25
+    monitor_level.min = monitor_level.normMin = 0.0
+    monitor_level.max = monitor_level.normMax = 1.0
+    monitor_level.clampMin = monitor_level.clampMax = True
+
+speaker_monitor = ensure(base, "audiodeviceoutCHOP", "speaker_monitor")
+setpar(speaker_monitor, "active", False)
+connect(audio, speaker_monitor)
+if getattr(audio.par, "errormissing", None) is not None:
+    setpar(audio, "errormissing", True)
+setpar(speaker_monitor, "errormissing", True)
+setpar(speaker_monitor, "bufferlength", 0.05)
+setpar(speaker_monitor, "clampoutput", True)
+setpar(speaker_monitor, "cookalways", True)
+setexpr(speaker_monitor, "volume", "parent().par.Monitorlevel")
+# Resolve the current menu value by label; do not save a machine's device ID.
+setexpr(speaker_monitor, "device",
+        "next((name for name, label in zip(me.par.device.menuNames, me.par.device.menuLabels) "
+        "if name == 'BuiltInSpeakerDevice' and label.split(':', 1)[0].strip() == 'MacBook Pro Speakers'), '') "
+        "if absTime.frame >= 0 else ''")
+setexpr(speaker_monitor, "active",
+        "absTime.frame >= 0 and parent().par.Monitor.eval() "
+        "and op('audio_in').par.active.eval() and not op('audio_in').errors() "
+        "and any(name == op('audio_in').par.device.eval() and 'spark' in label.lower() "
+        "for name, label in zip(op('audio_in').par.device.menuNames, op('audio_in').par.device.menuLabels)) "
+        "and any(name == me.par.device.eval() == 'BuiltInSpeakerDevice' "
+        "and label.split(':', 1)[0].strip() == 'MacBook Pro Speakers' "
+        "for name, label in zip(me.par.device.menuNames, me.par.device.menuLabels))")
+
 setpar(rms, "function", "rmspower")
 setpar(gain, "fromrange1", 0.0)
 setpar(gain, "fromrange2", 0.08)
@@ -283,7 +322,7 @@ setpar(shared_out, "active", True)
 rows = [
     ([camera, hue, pitch_tint, feedback, dim, warp, mix, tail, blackout, visual_out, component_out], 200),
     ([pitch_swatch, noise, light_preview, scene], 40),
-    ([audio, rms, gain, smooth, audio_out], -140),
+    ([audio, rms, gain, smooth, audio_out, speaker_monitor], -140),
     ([slope, onset, onset_out], -300),
     ([pitch_module, pitch_callbacks, pitch, pitch_monitor], -620),
     ([chord, controls, bridge, callbacks, startup, preview, shared_out], -460),

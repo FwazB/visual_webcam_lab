@@ -172,14 +172,42 @@ Light Maps, a delayed live check confirmed mask readiness and shader validity
 were both 1, with nonzero light output (maximum 0.5059, mean 0.0503), no operator
 errors, and no helper error.
 
-Current artifacts (SHA-256):
+Light Maps artifacts at `8199972` (SHA-256):
 
 | Artifact | Bytes | Operators | SHA-256 |
 | --- | ---: | ---: | --- |
 | `fuzz.toe` | 17,362 | 49 descendants: 35 at root, 14 inside Light Maps | `0c697baf91a626f99faec99517d8496d0e3c90413260459ad11b7dd7508fe111` |
 | `projection_mapping.toe` | 4,338 | 9 | `292628544caf83121b9862ce8a70a2ee4b8a8c593576bfbb0e0b985ed73f985e` |
 
-Current checks: **51 Python tests**, **64 Node tests**, lint, and production
+Checks for `8199972`: **51 Python tests**, **64 Node tests**, lint, and production
 build pass. `npm audit` reports **0 known vulnerabilities** across **520**
 dependency records. The earlier CSP and physical-hardware limitations above
 still apply.
+
+## Follow-up: local MacBook speaker monitoring
+
+Fuzz adds one Audio Device Out CHOP, `speaker_monitor`, connected directly to
+its existing audio input. The export grows by **400 bytes**, to **17,762 bytes**
+and **50 operator descendants** (36 at root, 14 inside Light Maps). No
+dependencies, listeners, bridge commands, or additional projects were added.
+Projection Mapping is unchanged.
+
+Monitoring defaults off, with volume 0.25 and a 50 ms output buffer. The active
+guard requires an available, selected Spark input, active error-free capture,
+and the explicit built-in MacBook speaker output. It checks each frame and
+does not follow the default output or monitor the Mac microphone. The output
+uses the stable built-in speaker menu entry; no device UUID is serialized.
+
+Native checks in TouchDesigner **2025.33230** confirmed active Spark USB input
+to built-in speaker output at 44.1 kHz stereo with no errors or warnings.
+The route disabled when monitoring was toggled off, capture was disabled, or
+the Mac microphone was selected. Actual cable unplugging and audible playback
+remain unverified. The exported artifact passed credential and cache scans,
+then reopened independently with 50 operators, monitoring off, volume 0.25,
+and no operator errors. Re-enabling the Spark speaker route after reopening
+again produced no audio errors or warnings. All 51 Python tests pass.
+
+Current `fuzz.toe` SHA-256:
+`d7a0623f1236b96a6d89c367648a3d1bd4fdd71930687393c47898c71f913ba4`.
+The unchanged mapper remains 4,338 bytes, nine operators, SHA-256
+`292628544caf83121b9862ce8a70a2ee4b8a8c593576bfbb0e0b985ed73f985e`.

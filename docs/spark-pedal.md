@@ -76,6 +76,14 @@ TouchDesigner's audio device selection is separate from **Connect guitar** in
 the browser. Verify the actual USB signal as above: selecting Spark does not
 guarantee a dry guitar-only channel or exclude its effects and looper.
 
+To hear the pedal through the MacBook, select `/project1/fuzz` → **Audio monitor**
+and enable **Monitor guitar**. Fuzz routes the selected Spark USB input to
+**MacBook Pro Speakers**, with **Speaker volume** initially at 0.25. It mutes
+this route when the Spark input or named speakers are unavailable, and shared
+exports open with monitoring off. This is separate from the browser's analysis
+path and from the Mac's default output selection. See the
+[Fuzz setup](../touchdesigner/fuzz/README.md#hear-the-guitar-through-the-macbook).
+
 ## First hardware check
 
 - Confirm the exact input label, negotiated channel count, and sample rate.

@@ -40,6 +40,20 @@ Opening this project activates camera/audio input and a paired, loopback-only
 control server. Close the project to release its devices. Browser camera/audio
 capture is independent and stops when its page is closed.
 
+## Hear the guitar through the MacBook
+
+Select the USB-connected Spark in `audio_in` → **Device**, then select
+`/project1/fuzz` → **Audio monitor** and enable **Monitor guitar**. The
+`speaker_monitor` output sends the pedal's USB audio to **MacBook Pro Speakers**.
+**Speaker volume** starts at 0.25; the Mac's speaker volume also applies.
+Shared project exports open with monitoring off.
+
+Monitoring stops if the selected input is not an available Spark, capture has
+an error, or the named speakers are unavailable. It does not monitor the Mac
+microphone or follow the system's default output. Turn **Monitor guitar** off
+to mute this route. This affects local playback only; pitch and visual analysis
+continue. The browser trainer does not monitor guitar audio.
+
 ## Notes and colors
 
 ![Fuzz note colors around the circle of fifths](../../docs/pitch-colors.svg)
@@ -247,7 +261,7 @@ pixels for E2 (82.41 Hz), green for A2 (110 Hz), and natural colors after silenc
 The prior saved Fuzz project reopened at 1280×720 without errors, and prior
 checks verified separate-process Syphon transfer and trainer acknowledgments.
 
-For the current update, all **51 Python tests** pass. The Apple Vision helper
+For the Light Maps release (`8199972`), all **51 Python tests** passed. The Apple Vision helper
 compiled and native checks in TouchDesigner **2025.33230** confirmed:
 
 - Missing masks leave the camera unchanged and the light-only output black.
@@ -265,7 +279,7 @@ compiled and native checks in TouchDesigner **2025.33230** confirmed:
 A static camera image showed the mask aligned with the torso. This does not
 establish moving-person or physical projector alignment.
 
-The exported Fuzz file is **17,362 bytes**, with **49 operator descendants**:
+The Fuzz export at `8199972` was **17,362 bytes**, with **49 operator descendants**:
 35 at the Fuzz level, including the Light Maps component, and 14 inside it.
 Its embedded source matches the repository, credentials are blank, pitch
 diagnostics are neutral, and capture caches, local paths, and saved device IDs
@@ -273,5 +287,15 @@ are absent. It reopened independently at 1280×720 with no operator errors,
 fresh pairing, the bridge active on `127.0.0.1`, camera/audio active, and the
 saved Fuzz view using Amount 0.2 and Feedback 0.65. The helper was present.
 The mapper also reopened independently with nine operators and no errors.
+
+The current speaker-monitor export is **17,762 bytes**, with **50 operator
+descendants**: 36 at the Fuzz level and 14 inside Light Maps. The one additional
+operator is `speaker_monitor`; no dependencies were added. Credential and cache
+scans passed. In the native project, Spark USB audio routed to the MacBook's
+built-in speakers at 44.1 kHz stereo, volume 0.25, and a 50 ms buffer, with no
+operator errors or warnings. Monitoring correctly disabled when its toggle
+was off, capture was off, or the Mac microphone was selected. Actual cable
+unplugging and audible playback have not been verified.
+
 Artifact hashes and audit evidence are in [the security audit](../../docs/security-audit.md).
-Real Spark input and physical projector alignment remain hardware tests.
+Real-note pitch accuracy and physical projector alignment remain hardware tests.
