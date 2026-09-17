@@ -18,6 +18,9 @@ __pycache__/
 /touchdesigner/fuzz/*.toe
 !/touchdesigner/fuzz/fuzz.toe
 /touchdesigner/fuzz/Backup/
+/touchdesigner/projection_mapping/*.toe
+!/touchdesigner/projection_mapping/projection_mapping.toe
+/touchdesigner/projection_mapping/Backup/
 
 # next.js
 /.next/

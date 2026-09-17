@@ -2,6 +2,8 @@
 
 A local TouchDesigner scene where guitar input and the trainer's Song mode
 drive camera feedback, hue changes, and short displacement pulses.
+Its local preview works independently. Projector alignment and display routing
+belong to the separate [Projection Mapping project](../projection_mapping/README.md).
 
 ## Run the engine
 
@@ -12,9 +14,10 @@ the bridge off and reports the required upgrade.
 
 1. Open **[fuzz.toe](fuzz.toe)** from this folder. The complete network and
    callbacks are embedded; no script execution or MCP setup is needed.
-2. Press **F1** for the Fuzz output window. Press **Esc** to return to the editor.
+2. Press **F1** for the local Fuzz output. Press **Esc** to return to the editor.
    This uses your camera image. If it is black, check `camera_in` has a working
-   device and that the camera is uncovered. `OUT` is the final image.
+   device and that the camera is uncovered. `OUT` is the final image;
+   the `preview` Window COMP also provides a bordered local preview window.
 3. For guitar-driven visuals, select the Spark in `audio_in` → Device after
    plugging it in. Otherwise TouchDesigner uses its default audio input.
    The browser's **Connect guitar** selection is separate.
@@ -88,7 +91,7 @@ separate step: ordinary `.toe` saves can contain recent audio samples.
 | --- | --- | --- |
 | Amount | 0–1 / 0.5 | Scales audio and note-hit displacement |
 | Feedback | 0–0.98 / 0.9 | Trail retention, mildly modulated by input level |
-| Blackout | Off by default | Makes the final output black while the internal scene keeps running |
+| Blackout | Off by default | Makes the preview and shared final image black while the internal scene keeps running |
 
 | Signal | Source | Effect |
 | --- | --- | --- |
@@ -117,10 +120,19 @@ The public HTTPS trainer may be unable to open a plain local WebSocket in
 some browsers. If connection is blocked, use the locally served trainer; do
 not disable browser security. See the trainer's connection panel for status.
 
-## Projection
+## Local preview and optional projector feed
 
-`projector` is a Window COMP showing `OUT`. Open it as a separate window on
-the projector's display. Corner-pin mapping remains a separate future task.
+`preview` is a bordered Window COMP showing `OUT` on this computer.
+Fuzz owns the camera/audio effect and its local controls; projector calibration
+and display routing live in
+[projection_mapping.toe](../projection_mapping/projection_mapping.toe).
+
+For the separate mapper to use Fuzz, keep both projects open on the same Mac.
+The `local_texture` Syphon Out TOP publishes the final `OUT` image under the
+sender name **`body-synth-fuzz`**. Select that source in the mapper following
+its [setup guide](../projection_mapping/README.md). The image is shared locally;
+the trainer's WebSocket still carries only chord, hit, transport, and control
+messages. The mapper is optional for local Fuzz use and guitar pairing.
 
 ## Validation
 
@@ -130,15 +142,14 @@ Run protocol/security regression tests without TouchDesigner:
 python3 -m unittest discover -s touchdesigner/fuzz -p 'test_*.py' -v
 ```
 
-The builder has been run in TouchDesigner 2025.33070: all 25 operators cooked
-without errors at 1280×720, and the active listener was verified to bind only
-to `127.0.0.1:9980`. The older 2025.32820 build was also checked: its bridge
-stays off, and standalone visuals work. A non-commercial camera resolution
-warning is expected when the selected camera requests a larger image.
-The local trainer paired in Brave, acknowledged amount/blackout changes, and
-advanced TouchDesigner's chord channel through Gm → C9sus4 → Dm7 while playing.
-Direct WebSocket checks also verified authentication rejection, parameter
-acknowledgements, heartbeat, and reconnect. Clients send close status `1000`;
-this TouchDesigner build did not complete a close handshake with an empty frame.
-Real Spark input, guitar response, and projector output still require physical
-testing.
+The saved Fuzz project reopened in TouchDesigner 2025.33070 with 26 operators,
+no operator errors, and 1280×720 output. F1 opens its bordered local preview
+on the primary display. It contains no projector or mapping component. A
+separate running mapper received the named `body-synth-fuzz` texture.
+
+The bridge generated a fresh pairing code and bound only to `127.0.0.1:9980`.
+Its 17 regression tests pass. The exported file contains no pairing code,
+authenticated clients, camera identifier, or cached audio samples. Earlier
+trainer checks verified chord changes, control acknowledgments and heartbeat.
+Real Spark input, guitar response, and physical projector alignment still
+require hardware testing.

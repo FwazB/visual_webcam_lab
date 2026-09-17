@@ -1,7 +1,7 @@
 # Security audit — 2026-09-17
 
-Scope: the web app, dependency lockfile and MCP launch configuration, local
-Fuzz bridge, and all three retained TouchDesigner project files. This is a
+Original audit at `b7e52ba`: the web app, dependency lockfile and MCP launch
+configuration, local Fuzz bridge, and three retained TouchDesigner project files. This is a
 source and local runtime review, not a penetration-test certification.
 
 ## Findings fixed
@@ -17,7 +17,7 @@ The Fuzz export also saves the bridge inactive. Its embedded startup callback
 checks the explicit `127.0.0.1` binding before enabling the listener. Unsupported
 TouchDesigner versions leave it off.
 
-## Evidence
+## Original audit evidence
 
 - `npm audit`: **0 known vulnerabilities**, 520 dependency records checked.
 - `npm test`: **56 passed**, including 10 new media-lifecycle regressions.
@@ -82,3 +82,27 @@ ignored, not source deliverables.
   project and is rejected by the restarted bridge.
 - Loopback pairing limits remote control; it does not isolate this program
   from other software already running as the same local user.
+
+## Follow-up: separate local Fuzz and projection mapping
+
+Fuzz now owns camera/audio effects, a primary-display preview, and the optional
+local texture sender. Projection Mapping is a separate nine-operator project
+with a generated calibration grid, four corners, brightness/blackout, and its
+own display window. It has no capture devices, pairing credential, or listener.
+Both files reopened independently without operator errors at 1280×720. The
+mapper received Fuzz's image from a separate TouchDesigner process. Synthetic
+texture-transfer and native calibration/persistence checks passed.
+The 17 bridge regression tests passed again, and a fresh `npm audit` reported
+zero known vulnerabilities across 520 dependency records.
+
+The shared texture uses Syphon on this Mac; it does not introduce a network
+video service. Local applications with Syphon support can receive that texture
+while Fuzz is running. No dependencies were added. The new Fuzz file was
+re-expanded and checked for blank pairing storage, removed audio caches and
+camera IDs; the mapper contains no Fuzz processing or credential storage.
+The original audit hashes above identify the pre-split artifacts.
+
+Current split artifacts (SHA-256):
+
+- `fuzz`: 8266 bytes, `88df7811b99e67301ece30b37dc0c84bff5af48eedc35c33674adee9689bed0e`.
+- `projection_mapping`: 4250 bytes, `7ea8a76006772d80c1511248d82fd63f816f1f963c357a03f4bf21e4a01cd329`.

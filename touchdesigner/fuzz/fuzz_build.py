@@ -2,7 +2,8 @@
 
 Run from the TouchDesigner Textport with:
 
-    exec(open('/Users/fb/dev/visualarts/body-synth/touchdesigner/fuzz/fuzz_build.py').read())
+    FUZZ_DIRECTORY = project.folder
+    exec(open(FUZZ_DIRECTORY + '/fuzz_build.py').read())
 
 Before sharing a .toe, call bridge_callbacks.prepare_for_export(bridge).
 The bridge requires TouchDesigner 2025.33070+.
@@ -12,7 +13,7 @@ Non-destructive: creates or updates operators only inside /project1/fuzz.
 Signal flow
 -----------
 video   camera_in -> feedback loop (composite + hue shift + dim + displace by
-        noise) -> OUT -> out1, plus a borderless Window COMP for projection.
+        noise) -> OUT -> out1, a local preview, and a local Syphon/Spout sender.
 audio   audio_in (the Spark over USB, or the Mac input) -> RMS -> smoothing
         -> AUDIO_LEVEL; slope of RMS -> trigger envelope -> ONSET.
 chords  authenticated bridge on ws://127.0.0.1:9980/body-synth receives
@@ -29,7 +30,7 @@ ROOT_PATH = "/project1"
 BASE_NAME = "fuzz"
 BRIDGE_PORT = 9980
 # Override FUZZ_DIRECTORY before exec() when using another checkout.
-FUZZ_DIRECTORY = Path(globals().get("FUZZ_DIRECTORY", "/Users/fb/dev/visualarts/body-synth/touchdesigner/fuzz"))
+FUZZ_DIRECTORY = Path(globals().get("FUZZ_DIRECTORY", project.folder))
 FUZZ_BRIDGE_ENABLED = globals().get("FUZZ_BRIDGE_ENABLED", True)
 
 
@@ -192,14 +193,30 @@ setexpr(hue, "hueoffset", "op('CHORD')['chord'] * 40.0 + op('ONSET')[0] * 15.0")
 setexpr(hue, "saturationmult", "1.0 + min(max(op('AUDIO_LEVEL')[0], 0), 1) * 0.5")
 setexpr(blackout, "brightness1", "1.0 - op('CONTROLS')['blackout']")
 
-# ----------------------------------------------------------- projection ----
-projector = ensure(base, "windowCOMP", "projector")
-setpar(projector, "winop", "OUT")
-setpar(projector, "borders", False)
-if getattr(projector.par, "title", None) is not None:
-    setpar(projector, "title", "fuzz projector")
-# Open it from the Window COMP ("Open as Separate Window") on the projector's
-# display. Corner-pin mapping onto surfaces is the next step.
+# ---------------------------------------------------------- local output ----
+# Migrate the old window without leaving a duplicate projector component.
+old_window = base.op("projector")
+if old_window is not None:
+    if base.op("preview") is None:
+        old_window.name = "preview"
+    else:
+        old_window.destroy()
+preview = ensure(base, "windowCOMP", "preview")
+setpar(preview, "winop", "OUT")
+setpar(preview, "borders", True)
+setpar(preview, "title", "Fuzz local preview")
+setpar(preview, "justifyoffsetto", "primarydisplay")
+setpar(preview, "size", "custom")
+setpar(preview, "winw", 960)
+setpar(preview, "winh", 540)
+preview.par.setperform.pulse()
+
+# Shared GPU memory only: projection geometry and display routing live in the
+# separate projection_mapping project, which can receive this named texture.
+shared_out = ensure(base, "syphonspoutoutTOP", "local_texture")
+connect(visual_out, shared_out)
+setpar(shared_out, "sendername", "body-synth-fuzz")
+setpar(shared_out, "active", True)
 
 # --------------------------------------------------------------- layout ----
 rows = [
@@ -207,7 +224,7 @@ rows = [
     ([noise], 40),
     ([audio, rms, gain, smooth, audio_out], -140),
     ([slope, onset, onset_out], -300),
-    ([chord, controls, bridge, callbacks, startup, projector], -460),
+    ([chord, controls, bridge, callbacks, startup, preview, shared_out], -460),
 ]
 for nodes, y in rows:
     for index, node in enumerate(nodes):
@@ -226,6 +243,7 @@ if FUZZ_BRIDGE_ENABLED:
     callbacks.module.start_bridge(bridge)
 print("fuzz ready at {}/{}".format(ROOT_PATH, BASE_NAME))
 print("Visual output:", visual_out.path, "errors:", visual_out.errors())
+print("Local preview:", preview.path, "shared texture: body-synth-fuzz")
 print("Audio level:", audio_out.path, "errors:", audio_out.errors())
 print("Onset:", onset_out.path, "errors:", onset_out.errors())
 if FUZZ_BRIDGE_ENABLED:

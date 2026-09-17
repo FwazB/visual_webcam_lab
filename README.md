@@ -12,8 +12,8 @@ Live: the body-synth project on Vercel deploys `main`.
 - `/guitar` and `/bass`: fretboard trainer. Tracks the fretting hand,
   detects the fret wires on the real neck, listens to the instrument over a
   USB interface (Positive Grid Spark), and scores lessons and songs.
-- `/visualz`: projection-mapping style performance visuals driven by body
-  segmentation, hand tracking, and audio.
+- `/visualz`: browser visual-effects prototype driven by body segmentation,
+  hand tracking, and audio.
 - `/ascii`: body-mask ASCII webcam experiment.
 - `/`: the original body.synth audio-file prototype.
 
@@ -97,12 +97,21 @@ More detail in [GUIDE.md](GUIDE.md).
 
 ## TouchDesigner
 
-TouchDesigner runs a local control server on the Mac; no cloud relay is involved.
+Two TouchDesigner projects keep local visuals and projector setup separate:
+
+| Project | Purpose |
+| --- | --- |
+| [Fuzz](touchdesigner/fuzz/fuzz.toe) | Local camera/audio visuals, local preview, and optional guitar-trainer pairing |
+| [Projection Mapping](touchdesigner/projection_mapping/projection_mapping.toe) | Projector surface alignment and display output; optionally receives Fuzz's local image |
+
+Fuzz runs the trainer's local control server on the Mac; no cloud relay is involved.
 
 ```
-browser (Vercel or localhost) ── ws://127.0.0.1:9980/body-synth ──► TouchDesigner
-camera, hands, Spark pitch,       paired JSON: chord, hit,         video distortion,
-chord scoring                    transport, visual controls       projection output
+browser (Vercel or localhost) ── ws://127.0.0.1:9980/body-synth ──► Fuzz
+camera, hands, Spark pitch,       paired JSON: chord, hit,         camera distortion,
+chord scoring                    transport, visual controls       local preview
+
+Fuzz OUT ── local Syphon image: body-synth-fuzz ──► Projection Mapping (optional)
 ```
 
 Use **TouchDesigner visuals** in the trainer and enter the pairing code printed
@@ -113,7 +122,7 @@ Browser local-network rules vary: allow local access if requested; if the hosted
 page blocks loopback, use the localhost app. No browser security flags are needed.
 
 - Open [touchdesigner/fuzz/fuzz.toe](touchdesigner/fuzz/fuzz.toe) in TouchDesigner.
-  Press **F1** to show the camera-based Fuzz output; **Esc** returns to the editor.
+  Press **F1** to show the local camera-based Fuzz output; **Esc** returns to the editor.
   No build step or MCP is needed. The project generates a fresh pairing code
   each time it opens. In **Dialogs → Textport and DATs**, run:
 
@@ -126,6 +135,12 @@ page blocks loopback, use the localhost app. No browser security flags are neede
   engine state. TouchDesigner also analyzes its selected audio input locally.
   See [touchdesigner/fuzz/README.md](touchdesigner/fuzz/README.md) for device
   selection, rebuilding, and safe export instructions.
+- For a projector, open the separate
+  [Projection Mapping project](touchdesigner/projection_mapping/projection_mapping.toe).
+  Fuzz's `local_texture` sender publishes `OUT` as `body-synth-fuzz` on the same
+  Mac. Follow the [mapper guide](touchdesigner/projection_mapping/README.md)
+  for source selection, alignment, and display routing. Fuzz works on its own;
+  guitar pairing continues to use its existing port-9980 bridge.
 - Direction: [docs/touchdesigner-backend-redesign.md](docs/touchdesigner-backend-redesign.md)
   moves real-time media work into TouchDesigner with the web app as the
   control surface; message types live in `src/lib/touchdesigner/protocol.ts`.
@@ -146,6 +161,8 @@ Native Apple teaching app direction: [docs/apple-native-roadmap.md](docs/apple-n
   selection, MPM pitch detection, onset detection, note segmentation.
 - `src/lib/lesson/`: step scoring, song charts, chart clock and song scorer.
 - `src/components/FretLab.tsx`, `src/hooks/`: the trainer UI and hooks.
+- `touchdesigner/fuzz/`: local Fuzz project, builder, and guitar bridge.
+- `touchdesigner/projection_mapping/`: separate projector project and builder.
 
 ## Status
 
@@ -155,9 +172,11 @@ headers checked on the local production server. Brave successfully paired
 with TouchDesigner, changed visual controls, and drove its chord channel
 through the YUKON loop. This does not establish real-guitar tracking accuracy.
 
-Hardware verification is still required for the real guitar/Spark input and
-projector alignment. The fuzz network has now been built and cooked inside
-TouchDesigner at 1280×720; use the paired-bridge requirements above.
+Both saved TouchDesigner projects reopened independently at 1280×720 without
+operator errors. The mapper received Fuzz from its separate process. Native
+checks cover the calibration grid, corner mapping, brightness, blackout, and
+calibration preservation. Real guitar/Spark input and physical projector
+alignment still require hardware testing.
 
 ## Verification
 
