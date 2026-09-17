@@ -4,7 +4,8 @@
 
 This project contains several webcam-based visual tools:
 
-- `/bass` helps practice bass fretboard shapes with MediaPipe hand tracking.
+- `/guitar` and `/bass` are fretboard trainers: hand tracking, automatic
+  neck detection, and pitch detection from a USB guitar interface.
 - `/visualz` turns a live performance into projection-mapping style visuals.
 - `/ascii` is a body-mask ASCII webcam experiment.
 - `/` keeps the older body.synth audio-file prototype.
@@ -69,15 +70,55 @@ Background sequences add room-scale visuals:
 - `Color` sets the base projection color.
 - Bass tone still modulates color around the selected base color.
 
-## Using `/bass`
+## Using `/guitar` And `/bass`
 
 Open:
 
 ```text
+http://localhost:3000/guitar
 http://localhost:3000/bass
 ```
 
-Allow camera access and hold the bass in frame. The app uses MediaPipe hand landmarks to infer finger positions and compare them against selected key/shape targets.
+Both routes run the same fretboard trainer with a different instrument profile
+(`src/lib/instrument/profile.ts`).
+
+### Neck detection
+
+Allow camera access, sit facing the laptop, and hold the instrument normally
+with the fretting hand (left) on the neck. The app:
+
+- tracks the hands with MediaPipe and picks the fretting hand by handedness,
+- detects the fret wires along the neck from the video and fits the fret-law
+  (frets shrink by 2^(1/12) toward the bridge) to get absolute fret numbers,
+- maps fingertips to (string, fret) on the real neck and on the panel below.
+
+Side lighting that makes the fret wires glint helps. If the fret numbers are
+off, use the buttons over the video: `−1 fret` / `+1 fret`, `Flip nut↔bridge`,
+`Flip strings`, `Lock neck` (freezes the model once it is right), `Reset`.
+
+### Guitar input (Spark PEDAL or any interface)
+
+Click `Connect guitar`. The Spark is picked automatically when it is plugged
+in over USB-C; otherwise choose an input from the list. Use a clean, low-gain
+preset with delay and reverb off while practising; the pitch detector hears
+the processed amp tone. On macOS set the microphone mode to `Standard` (not
+Voice Isolation) in Control Center.
+
+With audio connected:
+
+- the lesson advances note by note: yellow when a finger is near the target,
+  green when the right pitch is played, red flash on a wrong note,
+- the played position is confirmed by fusing pitch with fingertip positions,
+  and repeated disagreement auto-corrects the neck's fret numbering.
+
+Without audio the lesson falls back to the vision-only shape match.
+
+### Debug tools
+
+Append `?debug=1` for the neck overlay details, the audio/fusion panel (levels,
+note log, Δk histogram, thresholds, test tones and a chromatic sweep), a video
+clip loader, pause, and `swap hands` for left-handed players.
+`?synthetic=1&debug=1` renders a synthetic neck instead of the camera.
 
 ## Verification
 

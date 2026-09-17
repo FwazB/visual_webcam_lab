@@ -1,7 +1,9 @@
 // Shape library: transposable fretboard patterns.
 // Positions are relative to the root; the root sits on the E string.
 
-import { findRootFret, type NoteName } from "./theory";
+import type { NoteName } from "./theory";
+import { BASS_STANDARD, midiAt, type InstrumentProfile } from "@/lib/instrument/profile";
+import { findRootFret } from "@/lib/instrument/positions";
 
 export type Role =
   | "R" | "b3" | "3" | "4" | "5" | "b7" | "7" | "8";
@@ -101,14 +103,29 @@ export const KEYS: NoteName[] = [
  */
 export function resolveShape(
   shape: Shape,
-  rootPc: number
-): Array<{ string: number; fret: number; role: Role }> {
-  const rootFret = findRootFret(0, rootPc);
-  return shape.positions.map((p) => ({
-    string: p.stringOffset,
-    fret: rootFret + p.fretOffset,
-    role: p.role,
-  }));
+  rootPc: number,
+  profile: InstrumentProfile = BASS_STANDARD
+): ResolvedPosition[] {
+  const rootFret = findRootFret(profile, 0, rootPc);
+  return shape.positions
+    .filter((p) => p.stringOffset < profile.stringCount)
+    .map((p) => {
+      const fret = rootFret + p.fretOffset;
+      return {
+        string: p.stringOffset,
+        fret,
+        role: p.role,
+        midi: midiAt(profile, p.stringOffset, fret),
+      };
+    });
+}
+
+export interface ResolvedPosition {
+  string: number;
+  fret: number;
+  role: Role;
+  /** MIDI note this position sounds on the given profile. */
+  midi: number;
 }
 
 export type MatchState = "green" | "yellow" | "red";

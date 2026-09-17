@@ -1,11 +1,10 @@
 "use client";
 
 import dynamic from "next/dynamic";
+import { BASS_STANDARD } from "@/lib/instrument/profile";
 
-const BassLab = dynamic(() => import("@/components/BassLab"), {
-  ssr: false,
-});
+const FretLab = dynamic(() => import("@/components/FretLab"), { ssr: false });
 
 export default function BassPage() {
-  return <BassLab />;
+  return <FretLab profile={BASS_STANDARD} />;
 }

@@ -10,8 +10,18 @@ export interface NormalizedLandmark {
   visibility?: number;
 }
 
-export interface PoseData {
+export interface HandDetection {
   landmarks: NormalizedLandmark[];
+  /** MediaPipe handedness label ("Left" | "Right"), camera perspective. */
+  label: string;
+  score: number;
+}
+
+export interface PoseData {
+  /** First detected hand (legacy). Prefer `hands` when handedness matters. */
+  landmarks: NormalizedLandmark[];
+  /** All detected hands with handedness. */
+  hands: HandDetection[];
   // Derived values (0-1 normalized)
   leftPinch: number;  // Left hand pinch (0 = pinched, 1 = spread)
   rightPinch: number; // Right hand pinch (0 = pinched, 1 = spread)
@@ -180,6 +190,7 @@ export function usePoseTracking(videoRef: React.RefObject<HTMLVideoElement | nul
           rightWristYHistoryRef.current = [];
           const neutralPose: PoseData = {
             landmarks: [],
+            hands: [],
             leftPinch: 0.5, rightPinch: 0.5,
             handX: 0.5, handsVisible: false,
             leftHandThrow: false, rightHandThrow: false,
@@ -331,8 +342,14 @@ export function usePoseTracking(videoRef: React.RefObject<HTMLVideoElement | nul
             }
           }
 
+          const hands: HandDetection[] = result.landmarks.map((lm, i) => ({
+            landmarks: lm,
+            label: result.handednesses?.[i]?.[0]?.categoryName ?? "Right",
+            score: result.handednesses?.[i]?.[0]?.score ?? 0,
+          }));
           const newPoseData: PoseData = {
             landmarks: result.landmarks[0],
+            hands,
             leftPinch: hasLeft ? leftPinch : 0.5,
             rightPinch: hasRight ? rightPinch : 0.5,
             handX,
