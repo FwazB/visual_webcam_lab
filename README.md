@@ -1,56 +1,72 @@
-# visual webcam lab
+# body.synth
 
-Browser-based webcam visual experiments built with Next.js, MediaPipe, Three.js, and Tone.js.
+A webcam-and-audio lab for playing and learning guitar and bass in the
+browser. Next.js app, MediaPipe hand tracking, a home-grown neck detector,
+an AudioWorklet pitch detector, Three.js visuals, and Tone.js.
+
+Live: the body-synth project on Vercel deploys `main`.
 
 ## Routes
 
-- `/` - original body synth / audio-file hand-control experiment.
-- `/ascii` - webcam ASCII/body-mask visual.
-- `/bass` - bass fretboard learning view with MediaPipe hand tracking.
-- `/visualz` - live projection-mapping style visual instrument for guitar/bass performance.
+- `/guitar` and `/bass`: fretboard trainer. Tracks the fretting hand,
+  detects the fret wires on the real neck, listens to the instrument over a
+  USB interface (Positive Grid Spark), and scores lessons and songs.
+- `/visualz`: projection-mapping style performance visuals driven by body
+  segmentation, hand tracking, and audio.
+- `/ascii`: body-mask ASCII webcam experiment.
+- `/`: the original body.synth audio-file prototype.
 
-## Apple Native Direction
-
-The next product direction is native Apple teaching apps for regular guitar and bass. iPhone/iPad own the ARKit spatial fretboard overlays; Mac becomes the larger-screen lesson planner, fretboard explorer, tab reader, and practice companion. Create ML comes later for instrument/fretboard recognition once the manual AR teaching flow works.
-
-Roadmap: [docs/apple-native-roadmap.md](docs/apple-native-roadmap.md)
-
-## Visualz
-
-`/visualz` is a visual experience, not an audio effects processor. Your amp owns the sound. The browser uses camera, hand/body tracking, and audio input only as control signals.
-
-Current controls:
-
-- Projection modes: `Aura`, `Echo`, `Rift`, `Shatter`, `Pulse`. These can be stacked.
-- Intensity: `1-100`, plus overdrive range above `100`.
-- Color: base projection color, with tone-reactive modulation.
-- Background sequence: `Off`, `Orbits`, `Grid`, `Bursts`.
-
-Tracking behavior:
-
-- MediaPipe selfie segmentation creates a body/room projection surface.
-- MediaPipe hand tracking drives hand-origin burst effects.
-- The body mask is converted into object center, bounds, area, and velocity for Three.js shader modulation.
-- Grid mode warps the whole room/video feed in the shader.
-- Orbits anchor around the tracked head area.
-
-## Setup
+## Quick start
 
 ```bash
-npm install
+npm ci
 npm run dev
 ```
 
-Open `http://localhost:3000`.
+Open <http://localhost:3000/guitar>, allow the camera, sit facing the laptop
+with the guitar held normally (right-handed: left hand frets).
 
-For `/visualz`:
+## Spark / guitar input
 
-1. Allow camera access.
-2. Click `Start control`.
-3. Allow audio input access.
-4. Select your instrument input or use the laptop mic listening to your amp.
+1. Plug the Spark into the Mac over USB-C and power it on. Use a clean,
+   low-gain preset with delay and reverb off.
+2. Click **Connect guitar**. The Spark is picked automatically; otherwise
+   choose it from the list. Allow the microphone permission.
+3. Chrome on macOS: set the microphone mode to **Standard** (not Voice
+   Isolation) in Control Center.
 
-## Scripts
+Lessons then advance note by note (yellow near the target, green on the
+right pitch, red on a wrong note), and **Song** mode plays a chord loop with
+a click and optional backing while scoring what you play. Without audio the
+trainer falls back to vision-only shape matching.
+
+Debug tools: append `?debug=1` (neck overlay details, audio panel with
+levels, note log, thresholds and test tones, clip loader, pause, swap hands).
+`?synthetic=1&debug=1` renders a synthetic neck instead of the camera.
+
+More detail in [GUIDE.md](GUIDE.md).
+
+## Layout
+
+- `src/lib/instrument/`: instrument profiles (tuning, scale length, inlays),
+  pitch math, positions, audio–vision fusion.
+- `src/lib/neck/`: fret-wire detection, fret-law fit, tracking, overlay.
+- `src/lib/audio/` and `public/worklets/pitch-processor.js`: device
+  selection, MPM pitch detection, onset detection, note segmentation.
+- `src/lib/lesson/`: step scoring, song charts, chart clock and song scorer.
+- `src/components/FretLab.tsx`, `src/hooks/`: the trainer UI and hooks.
+
+## Directions
+
+- Desktop engine: [docs/touchdesigner-backend-redesign.md](docs/touchdesigner-backend-redesign.md)
+  moves real-time media work into TouchDesigner with the web app as the
+  control surface. Development uses the TouchDesigner MCP, see
+  [docs/touchdesigner-mcp.md](docs/touchdesigner-mcp.md). Projects live in
+  `touchdesigner/`: `fuzz/` (chord-driven video distortion and projection,
+  see its README) and the earlier BassAura prototypes.
+- Native Apple teaching app: [docs/apple-native-roadmap.md](docs/apple-native-roadmap.md).
+
+## Verification
 
 ```bash
 npm run lint
@@ -58,11 +74,6 @@ npm run build
 npm audit
 ```
 
-## Stack
-
-- Next.js 16
-- React 19
-- MediaPipe Tasks Vision
-- Three.js
-- Tone.js
-- Tailwind CSS
+Security headers (including a report-only Content-Security-Policy) are set
+in `next.config.ts`. Once the browser console shows no CSP reports in
+production, rename the header to `Content-Security-Policy` to enforce it.
