@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "touchdesigner": {
+      "command": "npx",
+      "args": ["touchdesigner-mcp-server"]
+    }
+  }
+}

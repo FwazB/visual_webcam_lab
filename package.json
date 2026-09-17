@@ -10,7 +10,7 @@
   },
   "dependencies": {
     "@mediapipe/tasks-vision": "^0.10.34",
-    "next": "16.2.6",
+    "next": "^16.3.5",
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "three": "^0.183.2",
@@ -23,13 +23,9 @@
     "@types/react-dom": "^19",
     "@types/three": "^0.183.1",
     "eslint": "^9",
-    "eslint-config-next": "16.2.6",
+    "eslint-config-next": "^16.3.5",
     "tailwindcss": "^4",
+    "touchdesigner-mcp-server": "^2.0.0",
     "typescript": "^5"
-  },
-  "overrides": {
-    "next": {
-      "postcss": "8.5.10"
-    }
   }
 }

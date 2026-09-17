@@ -1,0 +1,38 @@
+# TouchDesigner MCP (development only)
+
+The TouchDesigner backend redesign (`touchdesigner-backend-redesign.md`,
+Phase 0) calls for an MCP so an agent can author and inspect the engine
+network. This repo is configured for `8beeeaaat/touchdesigner-mcp`
+(<https://github.com/8beeeaaat/touchdesigner-mcp>), the route Derivative's
+community post "Claude Code + MCP_server + Touchdesigner (the easy way)"
+describes.
+
+It is a local development tool. It never ships with the web app and only
+listens on 127.0.0.1.
+
+## One-time setup
+
+1. Install TouchDesigner (a 2023.11 or newer build). Non-commercial is fine.
+2. In the TouchDesigner project you want to drive (for example
+   `touchdesigner/BassAuraPhase1.2.toe`, or a fresh project), import the
+   `mcp_webserver_base.tox` that ships with the MCP server, placed directly
+   under the project: `/project1/mcp_webserver_base`. It starts a Web Server
+   DAT on `http://127.0.0.1:9981`.
+3. Claude Code picks up `.mcp.json` at the repo root, which runs
+   `npx touchdesigner-mcp-server` (the package is a pinned dev dependency, so the lockfile checks its integrity). Approve the project MCP server
+   when Claude Code asks on first use. If TouchDesigner is not on the default
+   host/port, add `--host` / `--port` to the `args` in `.mcp.json`.
+
+## Working session
+
+- Keep TouchDesigner open with the project loaded while working.
+- After updating the MCP server or the `.tox`, restart both TouchDesigner
+  and Claude Code so the new code is loaded.
+- The `.tox` locates its Python modules with relative paths; do not move the
+  server's files around after installing.
+
+## What the agent can then do
+
+Create and wire operators, set parameters, read and write DATs, run Python
+in the project, and check for errors, which is what the redesign's Phase 1
+(WebSocket bridge on port 9980 plus the Body Echo session) needs.
