@@ -37,6 +37,7 @@ const FINGER_INITIAL: Record<FingerName, string> = { index: "1", middle: "2", ri
 const NAV_ROUTES = [
   { id: "guitar-standard", href: "/guitar", label: "Guitar" },
   { id: "bass-standard", href: "/bass", label: "Bass" },
+  { id: "studio", href: "/studio", label: "Studio" },
 ];
 
 interface Target extends FretPosition {

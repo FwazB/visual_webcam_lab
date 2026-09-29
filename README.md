@@ -1,8 +1,9 @@
 # body.synth
 
-A browser guitar and bass trainer that listens to your instrument, with
-TouchDesigner for visuals. Next.js app, an AudioWorklet pitch detector,
-Tone.js click and backing, and MediaPipe hand tracking for the camera mirror.
+A browser guitar and bass trainer that listens to your instrument, a small
+multitrack recording studio, and TouchDesigner for visuals. Next.js app,
+AudioWorklet pitch detection and recording, Tone.js click and backing, and
+MediaPipe hand tracking for the camera mirror.
 
 Live: the body-synth project on Vercel deploys `main`.
 
@@ -11,6 +12,8 @@ Live: the body-synth project on Vercel deploys `main`.
 - `/guitar` and `/bass`: fretboard trainer. Listens to the instrument over a
   USB interface (Positive Grid Spark), shows targets and the notes you play
   on a fretboard diagram, and scores lessons and songs.
+- `/studio`: multitrack recorder for the guitar: record takes over a click,
+  arrange and trim them, export a WAV.
 - `/ascii`: body-mask ASCII webcam experiment.
 - `/` redirects to `/guitar`.
 
@@ -67,6 +70,32 @@ camera is a mirror with fingertip dots; practice works without it.
 clarity thresholds, a 60 Hz notch, test tones per string, a chromatic sweep
 that reports octave errors, and the note log.
 
+## Studio
+
+`/studio` records the same USB input (the Spark is picked automatically) into
+tracks on a timeline, like a small GarageBand.
+
+- **Record:** press **● Rec** or `R`. One bar of count-in clicks plays first
+  (toggle **count-in**), then the take records onto the armed track (● on the
+  track; a new "Guitar" track is created if none is armed) until you stop. A
+  new take replaces what is under it on that track; undo brings it back.
+  Other tracks play while you record, so you can layer parts.
+- **Edit:** drag a clip to move it, including to another track; drag its
+  edges to trim; `S` splits the selected clip at the playhead; `⌫` deletes it.
+  Moves snap to beats (**snap**, or hold `⌥` to skip). `⌘Z` / `⇧⌘Z` undo and
+  redo. Scroll sideways to move along the timeline; `⌘`-scroll or pinch zooms.
+- **Mix:** per-track mute, solo and volume; **Import audio** adds a file (a
+  backing track, a loop) on a new track at the playhead; **Export WAV** renders
+  every audible clip to a 16-bit stereo file.
+- **Latency:** takes are shifted earlier by the browser's latency estimate so
+  they line up with what you heard. If takes sound late or early, set
+  **latency ms** yourself; it is remembered.
+
+Takes record the pedal's processed tone (amp model and effects). Listen
+through the pedal's headphones or line out; the browser does not echo the
+input. The project autosaves in this browser (IndexedDB); export a WAV to keep
+a copy anywhere else.
+
 ## First test with a real guitar
 
 1. Open `/guitar?debug=1`, connect the Spark, and confirm the pill shows its
@@ -121,11 +150,14 @@ needed.
 
 ## Layout
 
-- `src/components/FretLab.tsx`: the trainer UI.
+- `src/components/FretLab.tsx`: the trainer UI; `src/components/Studio.tsx`: the studio.
 - `src/hooks/`: guitar pitch input, song transport, hand tracking,
-  TouchDesigner bridge, body segmentation (for `/ascii`).
+  studio engine, TouchDesigner bridge, body segmentation (for `/ascii`).
 - `src/lib/audio/` and `public/worklets/pitch-processor.js`: device
   selection, MPM pitch detection, onset detection, note segmentation.
+- `src/lib/studio/` and `public/worklets/recorder-processor.js`: studio
+  project model and edits, playback/recording engine, timeline drawing,
+  WAV export, autosave.
 - `src/lib/instrument/`: instrument profiles (tuning, frets, inlays), pitch
   math, fretboard positions.
 - `src/lib/lesson/`: shapes, song charts, step and song scoring, beat clock,

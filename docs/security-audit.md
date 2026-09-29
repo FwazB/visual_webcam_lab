@@ -30,6 +30,9 @@ audited at `b7e52ba` (2026-09-17); later changes were reviewed as they landed.
   `lights/.build`. The pitch detector keeps at most 4096 samples in module
   memory, not saved storage. Speaker monitoring defaults off and only routes
   a selected Spark input to the built-in speakers.
+- **Studio recordings.** `/studio` keeps its project and recorded audio in the
+  browser's IndexedDB for this origin only; nothing is uploaded. Clearing
+  site data or **New** deletes it.
 - **Web app.** Fully client-side: no API routes, server actions or secrets.
   Security headers are set in `next.config.ts` and checked by
   `npm run smoke`.

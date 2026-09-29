@@ -6,6 +6,7 @@ const base = new URL(process.argv[2] ?? "http://127.0.0.1:3000");
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
 const localWorklets = {
   "/worklets/pitch-processor.js": await readFile(new URL("../public/worklets/pitch-processor.js", import.meta.url)),
+  "/worklets/recorder-processor.js": await readFile(new URL("../public/worklets/recorder-processor.js", import.meta.url)),
 };
 
 const home = await fetch(base, { redirect: "manual", signal: AbortSignal.timeout(15000) });
@@ -13,7 +14,7 @@ assert.equal(home.status, 307, "/ must redirect");
 assert.equal(new URL(home.headers.get("location") ?? "", base).pathname, "/guitar");
 console.log(`PASS ${base.origin}/: redirects to /guitar`);
 
-for (const path of ["/guitar", "/bass", "/worklets/pitch-processor.js"]) {
+for (const path of ["/guitar", "/bass", "/studio", "/worklets/pitch-processor.js", "/worklets/recorder-processor.js"]) {
   const response = await fetch(new URL(path, base), { signal: AbortSignal.timeout(15000) });
   assert.equal(response.status, 200, `${path} must load`);
   assert.equal(response.headers.get("x-content-type-options"), "nosniff");
