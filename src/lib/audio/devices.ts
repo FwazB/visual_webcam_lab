@@ -2,9 +2,8 @@
 
 const ID_KEY = "bodysynth.audio.inputDeviceId";
 const LABEL_KEY = "bodysynth.audio.inputDeviceLabel";
-const LATENCY_KEY = "bodysynth.audio.inputLatencyMs";
 
-export const SPARK_LABEL = /spark/i;
+const SPARK_LABEL = /spark/i;
 
 function storage(): Storage | null {
   try {
@@ -14,7 +13,7 @@ function storage(): Storage | null {
   }
 }
 
-export function getStoredDevice(): { id: string | null; label: string | null } {
+function getStoredDevice(): { id: string | null; label: string | null } {
   const s = storage();
   return { id: s?.getItem(ID_KEY) ?? null, label: s?.getItem(LABEL_KEY) ?? null };
 }
@@ -29,16 +28,6 @@ export function storeDevice(device: MediaDeviceInfo | null): void {
   }
   s.setItem(ID_KEY, device.deviceId);
   s.setItem(LABEL_KEY, device.label);
-}
-
-export function getStoredInputLatencyMs(): number {
-  const v = storage()?.getItem(LATENCY_KEY);
-  const n = v ? Number(v) : NaN;
-  return Number.isFinite(n) ? n : 0;
-}
-
-export function storeInputLatencyMs(ms: number): void {
-  storage()?.setItem(LATENCY_KEY, String(ms));
 }
 
 /**
@@ -74,11 +63,12 @@ export function pickPreferredDevice(devices: MediaDeviceInfo[]): MediaDeviceInfo
   return devices.find((d) => SPARK_LABEL.test(d.label)) ?? null;
 }
 
-export function instrumentConstraints(deviceId: string): MediaStreamConstraints {
+/** Raw input: no echo cancellation, noise suppression or gain control. */
+export function instrumentConstraints(deviceId: string, channels = 1): MediaStreamConstraints {
   return {
     audio: {
       deviceId: { exact: deviceId },
-      channelCount: { ideal: 1 },
+      channelCount: { ideal: channels },
       echoCancellation: false,
       noiseSuppression: false,
       autoGainControl: false,

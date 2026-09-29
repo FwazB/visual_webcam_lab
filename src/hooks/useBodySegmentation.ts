@@ -2,9 +2,8 @@
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import { ImageSegmenter, FilesetResolver } from "@mediapipe/tasks-vision";
+import { MEDIAPIPE_WASM_URL } from "@/lib/mediapipe";
 
-const WASM_URL =
-  "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.34/wasm";
 const MODEL_URL =
   "https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter/float16/1/selfie_segmenter.tflite";
 
@@ -24,26 +23,30 @@ export function useBodySegmentation(videoRef: React.RefObject<HTMLVideoElement |
     let cancelled = false;
 
     async function init() {
-      const vision = await FilesetResolver.forVisionTasks(WASM_URL);
-      if (cancelled) return;
+      try {
+        const vision = await FilesetResolver.forVisionTasks(MEDIAPIPE_WASM_URL);
+        if (cancelled) return;
 
-      const segmenter = await ImageSegmenter.createFromOptions(vision, {
-        baseOptions: {
-          modelAssetPath: MODEL_URL,
-          delegate: "GPU",
-        },
-        runningMode: "VIDEO",
-        outputConfidenceMasks: true,
-        outputCategoryMask: false,
-      });
+        const segmenter = await ImageSegmenter.createFromOptions(vision, {
+          baseOptions: {
+            modelAssetPath: MODEL_URL,
+            delegate: "GPU",
+          },
+          runningMode: "VIDEO",
+          outputConfidenceMasks: true,
+          outputCategoryMask: false,
+        });
 
-      if (cancelled) {
-        segmenter.close();
-        return;
+        if (cancelled) {
+          segmenter.close();
+          return;
+        }
+
+        segmenterRef.current = segmenter;
+      } catch {
+        // Without a mask the ASCII view still renders the whole frame.
       }
-
-      segmenterRef.current = segmenter;
-      setIsLoading(false);
+      if (!cancelled) setIsLoading(false);
     }
 
     init();

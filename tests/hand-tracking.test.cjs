@@ -15,13 +15,12 @@ function setup(vision) {
       return [initial, (next) => { states[i] = next; }];
     },
     useEffect: (effect) => effects.push(effect),
-    useCallback: (callback) => callback,
   };
-  const source = fs.readFileSync(require.resolve("../src/hooks/usePoseTracking.ts"), "utf8");
+  const source = fs.readFileSync(require.resolve("../src/hooks/useHandTracking.ts"), "utf8");
   const { outputText } = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } });
   const loaded = { exports: {} };
   new Function("require", "module", "exports", outputText)((name) => name === "react" ? react : vision, loaded, loaded.exports);
-  loaded.exports.usePoseTracking({ current: null });
+  loaded.exports.useHandTracking({ current: null });
   return { states, cleanup: effects[0]() };
 }
 
@@ -32,9 +31,9 @@ test("failed WASM loading clears the spinner and exposes a safe error", async ()
     HandLandmarker: { createFromOptions: async () => { creates++; } },
   });
   await new Promise(setImmediate);
-  assert.equal(run.states[1], false);
-  assert.match(run.states[2], /Hand tracking could not start/);
-  assert.doesNotMatch(run.states[2], /private|token/);
+  assert.equal(run.states[0], false);
+  assert.match(run.states[1], /Hand tracking could not start/);
+  assert.doesNotMatch(run.states[1], /private|token/);
   assert.equal(creates, 0);
   run.cleanup();
 });
@@ -45,8 +44,8 @@ test("failed GPU/model initialization clears loading instead of rejecting unhand
     HandLandmarker: { createFromOptions: async () => { throw new Error("GPU unavailable"); } },
   });
   await new Promise(setImmediate);
-  assert.equal(run.states[1], false);
-  assert.match(run.states[2], /audio practice still works/);
+  assert.equal(run.states[0], false);
+  assert.match(run.states[1], /audio practice still works/);
   run.cleanup();
 });
 
@@ -62,8 +61,8 @@ test("a detector created after unmount is closed without updating state", async 
   finish({ close: () => { closed++; } });
   await new Promise(setImmediate);
   assert.equal(closed, 1);
-  assert.equal(run.states[1], true);
-  assert.equal(run.states[2], null);
+  assert.equal(run.states[0], true);
+  assert.equal(run.states[1], null);
 });
 
 test("normal unmount releases the detector exactly once", async () => {
@@ -73,8 +72,8 @@ test("normal unmount releases the detector exactly once", async () => {
     HandLandmarker: { createFromOptions: async () => ({ close: () => { closed++; } }) },
   });
   await new Promise(setImmediate);
-  assert.equal(run.states[1], false);
-  assert.equal(run.states[2], null);
+  assert.equal(run.states[0], false);
+  assert.equal(run.states[1], null);
   run.cleanup();
   run.cleanup();
   assert.equal(closed, 1);

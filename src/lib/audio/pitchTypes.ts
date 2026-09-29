@@ -21,8 +21,6 @@ export interface NoteEvent {
   id: number;
   /** AudioContext seconds of the physical onset (not receipt time). */
   t: number;
-  /** performance.now()-domain estimate of the same instant. */
-  tPerf: number;
   midi: number;
   midiFloat: number;
   cents: number;

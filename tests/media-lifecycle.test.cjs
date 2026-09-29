@@ -37,6 +37,7 @@ function cameraEffect(name) {
     navigator: { mediaDevices: { getUserMedia: () => new Promise((resolve) => { finish = resolve; }) } },
     videoRef: { current: video },
     setWebcamReady() {},
+    setCameraError() {},
     console,
   };
   vm.runInNewContext(compile(`module.exports = ${effect}`), context);
@@ -44,7 +45,7 @@ function cameraEffect(name) {
   return { finish: (stream) => finish(stream), cleanup, video };
 }
 
-for (const name of ["AsciiCamera", "BodySynth", "Visualz"]) {
+for (const name of ["AsciiCamera", "FretLab"]) {
   test(`${name} releases a camera granted after navigation`, async () => {
     const run = cameraEffect(name);
     const stream = mediaStream();
@@ -65,91 +66,3 @@ for (const name of ["AsciiCamera", "BodySynth", "Visualz"]) {
     assert.equal(stream.stopped(), 1);
   });
 }
-
-function audioInput(failAt) {
-  const states = [];
-  const effects = [];
-  const pending = [];
-  const contexts = [];
-  let frames = 0;
-  const react = {
-    useRef: (current) => ({ current }),
-    useState: (initial) => {
-      const index = states.length;
-      states.push(initial);
-      return [initial, (value) => { states[index] = value; }];
-    },
-    useCallback: (callback) => callback,
-    useEffect: (effect) => effects.push(effect),
-  };
-  class AudioContext {
-    state = "running";
-    sampleRate = 48000;
-    constructor() {
-      if (failAt === "constructor") throw new Error("Audio context unavailable");
-      contexts.push(this);
-    }
-    createAnalyser() {
-      if (failAt === "analyser") throw new Error("Audio graph unavailable");
-      return { fftSize: 1024, frequencyBinCount: 512, getByteTimeDomainData: (array) => array.fill(128), getByteFrequencyData: (array) => array.fill(0) };
-    }
-    createMediaStreamSource() { return { connect() {} }; }
-    async close() { this.state = "closed"; }
-  }
-  const context = {
-    exports: {},
-    require: () => react,
-    window: { AudioContext },
-    navigator: { mediaDevices: { getUserMedia: () => new Promise((resolve) => pending.push(resolve)) } },
-    cancelAnimationFrame() {},
-    requestAnimationFrame: () => ++frames,
-  };
-  vm.runInNewContext(compile(fs.readFileSync(require.resolve("../src/hooks/useAudioReactiveInput.ts"), "utf8")), context);
-  const hook = context.exports.useAudioReactiveInput();
-  return { hook, unmount: effects[0](), pending, contexts, states, frames: () => frames };
-}
-
-test("visual audio input releases permission granted after unmount", async () => {
-  const run = audioInput();
-  const stream = mediaStream();
-  const start = run.hook.start();
-  run.unmount();
-  run.pending[0](stream);
-  await start;
-  assert.equal(stream.stopped(), 1);
-  assert.equal(run.frames(), 0);
-  assert.equal(run.contexts.length, 0);
-  assert.equal(run.states[0], false);
-});
-
-for (const failAt of ["constructor", "analyser"]) {
-  test(`visual audio input releases acquired resources after ${failAt} failure`, async () => {
-    const run = audioInput(failAt);
-    const stream = mediaStream();
-    const start = run.hook.start();
-    run.pending[0](stream);
-    await start;
-    assert.equal(stream.stopped(), 1);
-    assert.equal(run.states[0], false);
-    assert.ok(run.states[1]);
-    assert.ok(run.contexts.every((ctx) => ctx.state === "closed"));
-  });
-}
-
-test("repeated connect attempts retain only the latest microphone", async () => {
-  const run = audioInput();
-  const first = mediaStream();
-  const second = mediaStream();
-  const startFirst = run.hook.start();
-  const startSecond = run.hook.start();
-  run.pending[1](second);
-  await startSecond;
-  run.pending[0](first);
-  await startFirst;
-  assert.equal(first.stopped(), 1);
-  assert.equal(second.stopped(), 0);
-  assert.equal(run.contexts.length, 1);
-  run.hook.stop();
-  assert.equal(second.stopped(), 1);
-  assert.equal(run.contexts[0].state, "closed");
-});

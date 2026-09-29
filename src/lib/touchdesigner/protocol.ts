@@ -8,7 +8,7 @@ export const FUZZ_PARAMETER_IDS = [
 export type FuzzParameterId = (typeof FUZZ_PARAMETER_IDS)[number];
 export type FuzzChordId = "c9sus4" | "dm7" | "gm";
 
-export type EngineModule =
+type EngineModule =
   | "tracking"
   | "analysis"
   | "mapping"
@@ -17,63 +17,14 @@ export type EngineModule =
   | "visuals"
   | "output";
 
-export type SessionIntent = "play" | "practice" | "perform" | "create";
+type ParameterValue = number | string | boolean | null;
 
-export type ParameterValue = number | string | boolean | null;
-
-export type SignalId =
-  | `audio.${string}`
-  | `body.${string}`
-  | `hand.left.${string}`
-  | `hand.right.${string}`
-  | `instrument.${string}`
-  | `lesson.${string}`
-  | `midi.${string}`
-  | `osc.${string}`;
-
-export type ParameterId =
+type ParameterId =
   | `tracking.${string}`
   | `audio.${string}`
   | `lesson.${string}`
   | `visual.${string}`
   | `output.${string}`;
-
-export interface MappingTransform {
-  inputMin: number;
-  inputMax: number;
-  outputMin: number;
-  outputMax: number;
-  curve: "linear" | "exponential" | "smoothstep";
-  invert?: boolean;
-  smoothingMs?: number;
-}
-
-export interface SignalMapping {
-  id: string;
-  source: SignalId;
-  target: ParameterId;
-  enabled: boolean;
-  transform: MappingTransform;
-}
-
-export interface InstrumentProfile {
-  family: "guitar" | "bass" | "voice" | "other";
-  name: string;
-  tuning?: string[];
-}
-
-export interface BodySynthSession {
-  id: string;
-  name: string;
-  intent: SessionIntent;
-  instrument?: InstrumentProfile;
-  modules: EngineModule[];
-  sceneId?: string;
-  audioPresetId?: string;
-  lessonId?: string;
-  mappings: SignalMapping[];
-  parameters: Partial<Record<ParameterId, ParameterValue>>;
-}
 
 export interface EngineCapabilities {
   modules: EngineModule[];
@@ -92,15 +43,6 @@ export interface EngineState {
   parameters: Partial<Record<ParameterId, ParameterValue>>;
 }
 
-export interface EngineTelemetry {
-  fps: number;
-  cookMs: number;
-  audioLevel: number;
-  bodyConfidence: number;
-  trackedHands: number;
-  droppedFrames: number;
-}
-
 interface MessageBase<TType extends string> {
   type: TType;
   requestId?: string;
@@ -112,14 +54,10 @@ export type AppToEngineMessage =
       clientId: string;
       pairingCode: string;
     })
-  | (MessageBase<"session.load"> & { session: BodySynthSession })
-  | MessageBase<"session.start">
-  | MessageBase<"session.stop">
   | (MessageBase<"parameter.set"> & {
       parameter: ParameterId;
       value: ParameterValue;
     })
-  | (MessageBase<"cue.fire"> & { cueId: string })
   | (MessageBase<"transport.set"> & {
       playing: boolean;
       positionSeconds?: number;
@@ -134,7 +72,7 @@ export type AppToEngineMessage =
     })
   | (MessageBase<"ping"> & { sentAt: number });
 
-export type EngineToAppMessage =
+type EngineToAppMessage =
   | (MessageBase<"welcome"> & {
       protocolVersion: number;
       engineVersion: string;
@@ -145,7 +83,6 @@ export type EngineToAppMessage =
       revision: number;
       changes: Partial<EngineState>;
     })
-  | (MessageBase<"telemetry.frame"> & { telemetry: EngineTelemetry })
   | (MessageBase<"event"> & {
       name: string;
       payload?: Record<string, ParameterValue>;
@@ -174,9 +111,6 @@ export function parseEngineMessage(raw: string): EngineToAppMessage | null {
       case "state.patch":
         valid = isRevision(value.revision) && isState(value.changes, true)
           && (value.changes.revision === undefined || value.changes.revision === value.revision);
-        break;
-      case "telemetry.frame":
-        valid = isTelemetry(value.telemetry);
         break;
       case "event":
         valid = isText(value.name, 128) && (value.payload === undefined || isValues(value.payload));
@@ -261,11 +195,4 @@ function isState(value: unknown, partial = false): value is EngineState {
     && (partial && value.running === undefined || typeof value.running === "boolean")
     && (partial && value.sessionId === undefined || value.sessionId === null || isText(value.sessionId))
     && (partial && value.parameters === undefined || isValues(value.parameters, true));
-}
-
-function isTelemetry(value: unknown): value is EngineTelemetry {
-  return isRecord(value) && isNonNegative(value.fps) && isNonNegative(value.cookMs)
-    && isNonNegative(value.audioLevel) && value.audioLevel <= 1
-    && isNonNegative(value.bodyConfidence) && value.bodyConfidence <= 1
-    && isRevision(value.trackedHands) && value.trackedHands <= 2 && isRevision(value.droppedFrames);
 }

@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "body.synth",
-  description: "Modulate sound with your body using MediaPipe pose tracking",
+  description: "Guitar and bass trainer scored from your instrument's pitch",
 };
 
 export const viewport: Viewport = {

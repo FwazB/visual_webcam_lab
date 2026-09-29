@@ -1,9 +1,10 @@
 // Song charts: a chord loop with voicings per instrument, used by the song
 // practice mode. Chord progressions are described in our own voicings.
 
-import type { FingerName } from "@/lib/neck/fretHand";
+/** Fretting-hand finger shown as 1–4 in voicings. */
+export type FingerName = "index" | "middle" | "ring" | "pinky";
 
-export interface VoicingNote {
+interface VoicingNote {
   /** String index, 0 = lowest-pitched string. */
   s: number;
   f: number;
@@ -21,12 +22,12 @@ export interface ChordVoicing {
   rootMidiPc: number;
 }
 
-export interface ChartBar {
+interface ChartBar {
   chordId: string;
   beats: number;
 }
 
-export interface SongSection {
+interface SongSection {
   name: string;
   loop: ChartBar[];
   repeats: number;
@@ -50,8 +51,7 @@ export interface SongChart {
  * Justin Bieber – YUKON (SWAG, 2025). Key G minor, mid-tempo, a three-chord
  * vamp that loops for the whole song. Published analyses disagree on tempo
  * (96 vs 81 BPM) and bar counts, so both are adjustable in the UI. Voicings
- * are kept around the 3rd–7th frets so one hand position covers the loop,
- * which is also where the camera neck tracker is most reliable.
+ * are kept around the 3rd–7th frets so one hand position covers the loop.
  */
 export const YUKON: SongChart = {
   id: "yukon",

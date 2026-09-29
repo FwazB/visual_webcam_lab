@@ -91,24 +91,11 @@ venue-specific calibration.
 
 ## Validation
 
-Earlier versions of both networks built at 1280×720 without operator errors in TouchDesigner
-2025.33070. Native pixel checks passed for the test grid, corner inset, brightness,
-blackout, and preserving calibration/display settings across a rebuild.
-Both projects were opened as independent processes and the mapper received
-Fuzz’s live 1280×720 image. The final export was re-expanded to verify its
-16×9 grid, saved corners, and lack of capture caches or Fuzz components.
-Physical alignment still requires a connected projector.
-
-For the Light Maps update, sender selection and preservation across rebuilds
-passed the Python parameter harness. Native TouchDesigner **2025.33230** checks
-then received a synthetic RGB signal through the actual
-`body-synth-light-map` sender: receiver mean RGB was approximately
-`(0.2018, 0.4036, 0.5969)`, with no receiver errors. This verifies the shared
-texture route, not physical projection alignment.
-
-The current **4,338-byte** artifact reopened independently with exactly nine
-operators, no Fuzz component or operator errors, and its 1280×720 test grid.
-It was re-expanded and checked for capture caches, credentials, local paths,
-and saved device identifiers. See [the security audit](../../docs/security-audit.md)
-for artifact hashes. Moving-person and physical projector alignment still
-require the actual camera and projector.
+Last verified in TouchDesigner **2025.33230**: the network builds at 1280×720
+without operator errors; the test grid, corner inset, brightness, blackout and
+calibration preservation pass pixel checks; the mapper receives Fuzz's live
+image and the `body-synth-light-map` sender from a separate process. The shared
+`projection_mapping.toe` reopens with nine operators and no Fuzz component,
+capture caches, credentials, local paths or device identifiers. Artifact
+hashes are in [the security audit](../../docs/security-audit.md). Physical
+alignment requires a connected projector.

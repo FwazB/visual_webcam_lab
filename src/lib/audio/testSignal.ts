@@ -1,5 +1,5 @@
 // Synthetic guitar-like test signals routed into the detection chain, plus a
-// clip player and a chromatic sweep for measuring octave errors.
+// chromatic sweep for measuring octave errors.
 
 import { midiToHz } from "@/lib/instrument/pitch";
 
@@ -17,17 +17,11 @@ function driveCurve(amount: number): Float32Array<ArrayBuffer> {
 export interface TestSignal {
   /** Play a plucked note into `target`; returns the stop time. */
   playPluck: (midi: number, opts?: { durationMs?: number; drive?: number; monitor?: boolean }) => number;
-  loadClip: (url: string) => Promise<void>;
-  playClip: () => void;
-  stopClip: () => void;
   /** Chromatic sweep; resolves with the played notes and their times. */
   sweep: (midiFrom: number, midiTo: number, opts?: { drive?: number; noteMs?: number; gapMs?: number }) => Promise<Array<{ midi: number; t: number }>>;
 }
 
 export function createTestSignal(ctx: AudioContext, target: AudioNode): TestSignal {
-  let clip: AudioBuffer | null = null;
-  let clipSource: AudioBufferSourceNode | null = null;
-
   const playPluck: TestSignal["playPluck"] = (midi, opts = {}) => {
     const durationMs = opts.durationMs ?? 600;
     const t0 = ctx.currentTime + 0.02;
@@ -52,26 +46,6 @@ export function createTestSignal(ctx: AudioContext, target: AudioNode): TestSign
     return t0 + durationMs / 1000;
   };
 
-  const loadClip = async (url: string) => {
-    const res = await fetch(url);
-    clip = await ctx.decodeAudioData(await res.arrayBuffer());
-  };
-
-  const stopClip = () => {
-    clipSource?.stop();
-    clipSource = null;
-  };
-
-  const playClip = () => {
-    if (!clip) return;
-    stopClip();
-    const src = ctx.createBufferSource();
-    src.buffer = clip;
-    src.connect(target);
-    src.start();
-    clipSource = src;
-  };
-
   const sweep: TestSignal["sweep"] = async (midiFrom, midiTo, opts = {}) => {
     const noteMs = opts.noteMs ?? 500;
     const gapMs = opts.gapMs ?? 150;
@@ -85,5 +59,5 @@ export function createTestSignal(ctx: AudioContext, target: AudioNode): TestSign
     return played;
   };
 
-  return { playPluck, loadClip, playClip, stopClip, sweep };
+  return { playPluck, sweep };
 }

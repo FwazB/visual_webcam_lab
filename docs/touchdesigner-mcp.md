@@ -1,8 +1,7 @@
 # TouchDesigner MCP (development only)
 
-The TouchDesigner backend redesign (`touchdesigner-backend-redesign.md`,
-Phase 0) calls for an MCP so an agent can author and inspect the engine
-network. This repo is configured for `8beeeaaat/touchdesigner-mcp`
+An MCP server lets an agent author and inspect the TouchDesigner networks
+(Fuzz, Projection Mapping). This repo is configured for `8beeeaaat/touchdesigner-mcp`
 (<https://github.com/8beeeaaat/touchdesigner-mcp>), the route Derivative's
 community post "Claude Code + MCP_server + Touchdesigner (the easy way)"
 describes.
@@ -17,7 +16,7 @@ the server on every interface.
    release added the Web Server DAT's Local Address setting used to restrict
    control to localhost. See the [release notes](https://derivative.ca/release/202533070/75035).
 2. In the TouchDesigner project you want to drive (for example
-   `touchdesigner/BassAuraPhase1.2.toe`, or a fresh project), import the
+   `touchdesigner/fuzz/fuzz.toe`, or a fresh project), import the
    `mcp_webserver_base.tox` that ships with the MCP server, placed directly
    under the project: `/project1/mcp_webserver_base`. It starts a Web Server
    DAT on port 9981. Set that DAT's **Local Address** to `127.0.0.1` and
@@ -43,5 +42,4 @@ the server on every interface.
 ## What the agent can then do
 
 Create and wire operators, set parameters, read and write DATs, run Python
-in the project, and check for errors, which is what the redesign's Phase 1
-(WebSocket bridge on port 9980 plus the Body Echo session) needs.
+in the project, and check for errors.

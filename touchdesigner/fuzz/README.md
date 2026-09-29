@@ -255,47 +255,14 @@ Run Python regression tests with NumPy available (included with TouchDesigner):
 python3 -m unittest discover -s touchdesigner/fuzz -p 'test_*.py' -v
 ```
 
-Earlier regression and native checks covered pitch, harmonics, silence, stale
-input, channel changes, and bridge security. Native pitch tests produced yellow
-pixels for E2 (82.41 Hz), green for A2 (110 Hz), and natural colors after silence.
-The prior saved Fuzz project reopened at 1280×720 without errors, and prior
-checks verified separate-process Syphon transfer and trainer acknowledgments.
+Last verified in TouchDesigner **2025.33230**: all Python tests pass; E2 and
+A2 tint yellow and green; missing or empty masks leave the camera unchanged
+and the light-only output black; a live person mask drives nonzero light
+output; the mapper receives both Syphon senders; the Spark USB input routes
+to the MacBook speakers when **Monitor guitar** is on. The shared `fuzz.toe`
+reopens at 1280×720 without operator errors, with fresh pairing and the bridge
+on `127.0.0.1`, and passes the credential and cache scans above.
 
-For the Light Maps release (`8199972`), all **51 Python tests** passed. The Apple Vision helper
-compiled and native checks in TouchDesigner **2025.33230** confirmed:
-
-- Missing masks leave the camera unchanged and the light-only output black.
-  Full-person and empty-person masks suppress the opposite light layer;
-  zero light controls preserve the camera and produce black light output.
-- The mapper received a synthetic RGB signal through the actual
-  `body-synth-light-map` sender with no receiver errors.
-- A live person mask reached **Person mask ready**. Switching View back to
-  Fuzz stopped the helper and cleared mask readiness without operator errors.
-- A startup shader-uniform cache issue was fixed so mask readiness updates
-  as frames arrive. After reopening the final saved file and selecting Light
-  Maps, both mask readiness and the shader validity input reached 1, and the
-  light-only output was nonzero (maximum 0.5059, mean 0.0503), without errors.
-
-A static camera image showed the mask aligned with the torso. This does not
-establish moving-person or physical projector alignment.
-
-The Fuzz export at `8199972` was **17,362 bytes**, with **49 operator descendants**:
-35 at the Fuzz level, including the Light Maps component, and 14 inside it.
-Its embedded source matches the repository, credentials are blank, pitch
-diagnostics are neutral, and capture caches, local paths, and saved device IDs
-are absent. It reopened independently at 1280×720 with no operator errors,
-fresh pairing, the bridge active on `127.0.0.1`, camera/audio active, and the
-saved Fuzz view using Amount 0.2 and Feedback 0.65. The helper was present.
-The mapper also reopened independently with nine operators and no errors.
-
-The current speaker-monitor export is **17,762 bytes**, with **50 operator
-descendants**: 36 at the Fuzz level and 14 inside Light Maps. The one additional
-operator is `speaker_monitor`; no dependencies were added. Credential and cache
-scans passed. In the native project, Spark USB audio routed to the MacBook's
-built-in speakers at 44.1 kHz stereo, volume 0.25, and a 50 ms buffer, with no
-operator errors or warnings. Monitoring correctly disabled when its toggle
-was off, capture was off, or the Mac microphone was selected. Actual cable
-unplugging and audible playback have not been verified.
-
-Artifact hashes and audit evidence are in [the security audit](../../docs/security-audit.md).
-Real-note pitch accuracy and physical projector alignment remain hardware tests.
+Artifact hashes are in [the security audit](../../docs/security-audit.md).
+Real-note pitch accuracy, moving-person alignment and physical projector
+alignment remain hardware tests.

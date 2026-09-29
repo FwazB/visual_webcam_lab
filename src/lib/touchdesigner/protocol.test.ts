@@ -15,7 +15,6 @@ const validMessages = [
   { type: "welcome", protocolVersion: 1, engineVersion: "fuzz-1", capabilities },
   { type: "state.snapshot", state },
   { type: "state.patch", revision: 1, changes: { parameters: { "visual.fuzz.amount": 0.8 } } },
-  { type: "telemetry.frame", telemetry: { fps: 60, cookMs: 8, audioLevel: 0.2, bodyConfidence: 0, trackedHands: 0, droppedFrames: 1 } },
   { type: "event", name: "cue.fired", payload: { cueId: "fuzz", value: true } },
   { type: "error", code: "bad_command", message: "Unsupported command", recoverable: true },
   { type: "pong", sentAt: 1000, receivedAt: 1001 },
@@ -56,7 +55,7 @@ test("rejects malformed fields in every engine message family", () => {
     { type: "error", code: "bad", message: "bad", recoverable: "true" },
     { type: "pong", sentAt: -1, receivedAt: 1 },
     { type: "pong", sentAt: 1, receivedAt: "1" },
-    { ...validMessages[6], requestId: 42 },
+    { ...validMessages[5], requestId: 42 },
   ];
   for (const message of invalid) assert.equal(parseEngineMessage(JSON.stringify(message)), null, JSON.stringify(message));
   assert.equal(parseEngineMessage('{"type":"event","name":"bad","payload":{"__proto__":null}}'), null);

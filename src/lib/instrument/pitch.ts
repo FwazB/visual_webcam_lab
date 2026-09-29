@@ -6,14 +6,14 @@ export const NOTE_NAMES = [
 
 export type NoteName = (typeof NOTE_NAMES)[number];
 
-export const A4_MIDI = 69;
-export const A4_HZ = 440;
+const A4_MIDI = 69;
+const A4_HZ = 440;
 
 export function midiToHz(midi: number): number {
   return A4_HZ * Math.pow(2, (midi - A4_MIDI) / 12);
 }
 
-export interface PitchEstimate {
+interface PitchEstimate {
   midiFloat: number;
   midi: number;
   cents: number;

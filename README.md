@@ -1,21 +1,18 @@
 # body.synth
 
-A webcam-and-audio lab for playing and learning guitar and bass in the
-browser, with TouchDesigner for visuals. Next.js app, MediaPipe hand
-tracking, a home-grown neck detector, an AudioWorklet pitch detector,
-Three.js visuals, and Tone.js.
+A browser guitar and bass trainer that listens to your instrument, with
+TouchDesigner for visuals. Next.js app, an AudioWorklet pitch detector,
+Tone.js click and backing, and MediaPipe hand tracking for the camera mirror.
 
 Live: the body-synth project on Vercel deploys `main`.
 
 ## Routes
 
-- `/guitar` and `/bass`: fretboard trainer. Tracks the fretting hand,
-  detects the fret wires on the real neck, listens to the instrument over a
-  USB interface (Positive Grid Spark), and scores lessons and songs.
-- `/visualz`: browser visual-effects prototype driven by body segmentation,
-  hand tracking, and audio.
+- `/guitar` and `/bass`: fretboard trainer. Listens to the instrument over a
+  USB interface (Positive Grid Spark), shows targets and the notes you play
+  on a fretboard diagram, and scores lessons and songs.
 - `/ascii`: body-mask ASCII webcam experiment.
-- `/`: the original body.synth audio-file prototype.
+- `/` redirects to `/guitar`.
 
 ## Quick start
 
@@ -24,8 +21,8 @@ npm ci
 npm run dev
 ```
 
-Open <http://localhost:3000/guitar>, allow the camera, sit facing the laptop
-with the guitar held normally (right-handed: left hand frets).
+Open <http://localhost:3000/guitar>, allow the camera, click **Connect guitar**
+and allow the microphone.
 
 ## Spark PEDAL / guitar input
 
@@ -33,66 +30,53 @@ with the guitar held normally (right-handed: left hand frets).
    powered pedal to the Mac with a USB-C **data** cable. Use a clean,
    low-gain preset with delay, reverb, modulation, and the pedal looper off.
 2. Click **Connect guitar**. The Spark is picked automatically and its name
-   shows in the green pill; otherwise choose it from the list. Allow the
-   microphone permission.
-3. On macOS: set the microphone mode to **Standard** (not Voice
-   Isolation) in Control Center.
+   shows in the green pill; otherwise choose it from the list.
+3. On macOS, set the microphone mode to **Standard** (not Voice Isolation)
+   in Control Center.
 
-Without audio the trainer falls back to vision-only shape matching.
-The detector listens to one pitch at a time: **pick chord notes separately**
-for accuracy/streak scoring. Full strums and layered loops are not polyphonic
-chord recognition. Monitor your guitar through the pedal's headphones or
-line outputs; the browser does not echo the live guitar back to the output.
-The browser's click/backing uses the computer's selected output.
+The detector hears one pitch at a time: **pick chord notes separately**.
+Monitor through the pedal's headphones or line outputs; the browser does not
+echo the guitar. The click and backing use the computer's selected output.
+Details and hardware limits: [Spark PEDAL guide](docs/spark-pedal.md).
 
-The integration uses USB audio, not pedal footswitch or MIDI control. See
-[the Spark PEDAL signal path and test guide](docs/spark-pedal.md) for the
-hardware controls, input selection, and the limits still requiring a device test.
+## Trainer
 
-## Trainer modes
+Everything is scored from the pitch the trainer hears. The fretboard diagram
+under the camera shows the targets, and each note you play pulses on it:
+green when it was right, white otherwise. When a pitch exists in several
+places on the neck, the pulse is drawn at the matching target, or at the
+position nearest the current target.
 
-**Shapes**: pick a key and a shape (root, root+5th, triads, pentatonic box).
-With audio, the lesson advances note by note: yellow when a finger is near
-the target, green on the right pitch, red flash on a wrong note.
-
-**Song**: a chord loop plays with a click and optional backing (kick, hats,
-synth bass on the chord root) while every note you play is scored against
-the current chord. Shows accuracy, streak, and wrong notes. The current
-chord's voicing and finger numbers are drawn over your actual neck in the
-live camera image. An optional **Fretboard reference** opens a separate diagram;
-it stays collapsed by default so the camera view remains central.
+- **Shapes:** pick a key and a shape (root, root + 5th, triads, pentatonic
+  box). Play the targets in order: the current one is yellow, played ones
+  turn green, a wrong note flashes the light red.
+- **Song:** a chord loop with click and optional backing (kick, hats, synth
+  bass on the chord root). Every note is scored against the current chord:
+  accuracy, streak and wrong notes. With the transport stopped, the loop's
+  chords can be practised one at a time.
 
 First chart: **YUKON** (Justin Bieber), G minor, C9sus4 → Dm7 → Gm, voiced
 around the 3rd to 7th frets. Tempo defaults to 96 BPM and bars-per-chord to
-1; published analyses disagree on both, so adjust them in the panel until
-it matches the record.
+1; published analyses disagree on both, so adjust them until they match the
+record.
 
-Neck controls over the video: `Lock neck`, `−1 fret` / `+1 fret`,
-`Flip nut↔bridge`, `Flip strings`, `Reset`. Side lighting that makes the
-fret wires glint helps detection.
+Without a guitar connected, targets still show but nothing is scored. The
+camera is a mirror with fingertip dots; practice works without it.
 
-Debug tools: append `?debug=1` (neck overlay details, audio panel with
-levels, note log, thresholds and test tones, clip loader, pause, swap hands
-for left-handed players). `?synthetic=1&debug=1` renders a labelled synthetic
-test neck instead of the camera; **Use my camera** returns to the live image.
+`?debug=1` adds the audio panel: levels, clarity, detected note, gate and
+clarity thresholds, a 60 Hz notch, test tones per string, a chromatic sweep
+that reports octave errors, and the note log.
 
-More detail in [GUIDE.md](GUIDE.md).
+## First test with a real guitar
 
-## First test checklist (real guitar + Spark)
-
-1. Open `/guitar?debug=1`, connect the Spark, confirm the pill shows its
+1. Open `/guitar?debug=1`, connect the Spark, and confirm the pill shows its
    name and the panel reports the negotiated sample rate.
-2. Raise only the left hand: fingertip circles must follow it. If they
-   follow the picking hand, use `swap hands`.
-3. Barre the low E: the index label must read `E|<fret>`. If it reads the
-   high e, click `Flip strings`.
-4. Overlay wires should sit on the real wires along the neck; slide the
-   hand from fret 1 to 12 and the numbers must not change. Nudge or lock if
-   needed.
-5. Play open strings and a chromatic run in the audio panel: one note per
-   pluck, cents near zero, no octave errors.
-6. Song mode → Play, play the vamp, watch accuracy and streak.
-7. Browser console: lines mentioning `Content-Security-Policy-Report-Only`
+2. Play open strings and a chromatic run: one note per pluck, cents near
+   zero, no octave errors.
+3. Shapes mode: play the targets and watch each turn green and the pulse
+   land on the right string and fret.
+4. Song mode → Play, play the vamp, watch accuracy and streak.
+5. Browser console: lines mentioning `Content-Security-Policy-Report-Only`
    are reports, not failures. Collect them so the policy can be enforced.
 
 ## TouchDesigner
@@ -101,113 +85,54 @@ Two TouchDesigner projects keep local visuals and projector setup separate:
 
 | Project | Purpose |
 | --- | --- |
-| [Fuzz](touchdesigner/fuzz/fuzz.toe) | Pitch-colored camera visuals and a Light Maps view, local preview, and optional guitar-trainer pairing |
+| [Fuzz](touchdesigner/fuzz/fuzz.toe) | Pitch-colored camera visuals, a Light Maps view, local preview, and optional trainer pairing |
 | [Projection Mapping](touchdesigner/projection_mapping/projection_mapping.toe) | Projector surface alignment and display output; receives Fuzz's camera preview or light-only map |
-
-Fuzz runs the trainer's local control server on the Mac; no cloud relay is involved.
 
 ```
 browser (Vercel or localhost) ── ws://127.0.0.1:9980/body-synth ──► Fuzz
-camera, hands, Spark pitch,       paired JSON: chord, hit,         camera distortion,
-chord scoring                    transport, visual controls       local preview
+Spark pitch, chord scoring        paired JSON: chord, hit,         camera distortion,
+                                  transport, visual controls       local preview
 
 Fuzz OUT ── local Syphon image: body-synth-fuzz ──► Projection Mapping (optional)
 Fuzz light_maps/OUT ── lights only: body-synth-light-map ──► the same mapper
 ```
 
-Use **TouchDesigner visuals** in the trainer and enter the pairing code printed
-in TouchDesigner (instructions below). Connection is explicit and the code is kept only in memory.
-The paired bridge requires TouchDesigner **2025.33070 or newer** for explicit
-localhost binding; older builds can run the standalone visual network only.
-Browser local-network rules vary: allow local access if requested; if the hosted
-page blocks loopback, use the localhost app. No browser security flags are needed.
+To pair the trainer, open `fuzz.toe` (TouchDesigner **2025.33070 or newer**),
+print the pairing code in **Dialogs → Textport and DATs**, and paste it into
+the trainer's **TouchDesigner visuals** panel:
 
-- Open [touchdesigner/fuzz/fuzz.toe](touchdesigner/fuzz/fuzz.toe) in TouchDesigner.
-  Press **F1** to show the local camera-based Fuzz output; **Esc** returns to the editor.
-  The ordinary Fuzz view needs no helper build or MCP. The project generates a fresh pairing code
-  each time it opens. In **Dialogs → Textport and DATs**, run:
+```python
+print(op('/project1/fuzz').fetch('pairingCode'))
+```
 
-  ```python
-  print(op('/project1/fuzz').fetch('pairingCode'))
-  ```
+The trainer then sends chord changes and note hits. Fuzz also analyzes its own
+audio input, so it works without the browser. If the hosted page cannot reach
+the loopback bridge, use the localhost app; no browser security flags are
+needed.
 
-  Paste that code into the trainer's TouchDesigner panel. The trainer sends
-  chord changes and note hits; warp, trails, and blackout use acknowledged
-  engine state. TouchDesigner also analyzes its selected audio input locally.
-  See [touchdesigner/fuzz/README.md](touchdesigner/fuzz/README.md) for device
-  selection, rebuilding, and safe export instructions.
-  The pitch you play chooses its color: E is yellow, A is green, and other
-  notes follow the [circle-of-fifths palette](docs/pitch-colors.svg).
-  New scenes default to Amount **0.2** and Feedback **0.65**. Displacement is
-  zero at idle and uses bounded, brief onset and hit pulses.
-- **Light Maps lives inside Fuzz.** Build its local Apple Vision helper once:
-
-  ```sh
-  sh touchdesigner/fuzz/lights/build_mask_helper.sh
-  ```
-
-  Select `/project1/fuzz` → **Lights → View → Light Maps** for an undistorted
-  camera preview with silhouette lighting. Behind defaults to **0.6**, Front
-  to **0.2**, and Movement to **0.4**, with an RGB light-color control.
-  The helper receives 256×144 frames at up to 15 Hz through local pipes,
-  stores no raw frames, uses no network, and stops when the mode is off.
-  Its `.build` output is ignored by Git. Keep your head and torso visible
-  for segmentation; see the [Light Maps guide](touchdesigner/fuzz/README.md#light-maps).
-- For a projector, open the separate
-  [Projection Mapping project](touchdesigner/projection_mapping/projection_mapping.toe).
-  Fuzz's `local_texture` sender publishes `OUT` as `body-synth-fuzz` on the same
-  Mac. Follow the [mapper guide](touchdesigner/projection_mapping/README.md)
-  for source selection, alignment, and display routing. Choose **Source → Fuzz
-  light map** to receive `body-synth-light-map`: lights on black from Fuzz's
-  `light_maps/OUT`, without the camera image. These are the same two projects.
-  Fuzz works on its own;
-  guitar pairing continues to use its existing port-9980 bridge.
-- Direction: [docs/touchdesigner-backend-redesign.md](docs/touchdesigner-backend-redesign.md)
-  moves real-time media work into TouchDesigner with the web app as the
-  control surface; message types live in `src/lib/touchdesigner/protocol.ts`.
-- Authoring from Claude Code uses the TouchDesigner MCP, configured in
-  `.mcp.json` and documented in [docs/touchdesigner-mcp.md](docs/touchdesigner-mcp.md).
-  TouchDesigner must be open with the MCP `.tox` loaded for that to work.
-- Earlier BassAura prototypes also live in `touchdesigner/`.
-
-Native Apple teaching app direction: [docs/apple-native-roadmap.md](docs/apple-native-roadmap.md).
+- [Fuzz guide](touchdesigner/fuzz/README.md): device selection, pitch colors,
+  Light Maps (build its helper with `sh touchdesigner/fuzz/lights/build_mask_helper.sh`),
+  speaker monitoring, rebuilding, and safe export.
+- [Projection Mapping guide](touchdesigner/projection_mapping/README.md):
+  source selection, alignment, and display routing.
+- [TouchDesigner MCP](docs/touchdesigner-mcp.md): authoring the networks from
+  Claude Code (`.mcp.json`).
+- Message types: `src/lib/touchdesigner/protocol.ts`.
 
 ## Layout
 
-- `src/lib/instrument/`: instrument profiles (tuning, scale length, inlays),
-  pitch math, positions, audio–vision fusion.
-- `src/lib/neck/`: fret-wire detection, fret-law fit, tracking, overlay,
-  synthetic scene generator.
+- `src/components/FretLab.tsx`: the trainer UI.
+- `src/hooks/`: guitar pitch input, song transport, hand tracking,
+  TouchDesigner bridge, body segmentation (for `/ascii`).
 - `src/lib/audio/` and `public/worklets/pitch-processor.js`: device
   selection, MPM pitch detection, onset detection, note segmentation.
-- `src/lib/lesson/`: step scoring, song charts, chart clock and song scorer.
-- `src/components/FretLab.tsx`, `src/hooks/`: the trainer UI and hooks.
-- `touchdesigner/fuzz/`: local Fuzz project, builder, guitar bridge, and Light Maps source under `lights/`.
-- `touchdesigner/projection_mapping/`: separate projector project and builder.
-
-## Status
-
-Verified: the neck detector, pitch detector, note tracker, and song scoring
-on synthetic data in Node; lint, build, and `npm audit` clean; security
-headers checked on the local production server. Brave successfully paired
-with TouchDesigner, changed visual controls, and drove its chord channel
-through the YUKON loop. This does not establish real-guitar tracking accuracy.
-
-Earlier saved TouchDesigner projects reopened independently at 1280×720 without
-operator errors. Those mapper checks covered Fuzz reception, the calibration
-grid, corner mapping, brightness, blackout, and calibration preservation.
-For the current Light Maps update, the Apple Vision helper compiled and native
-shader, light-only Syphon transfer, and helper-shutdown checks passed in
-TouchDesigner **2025.33230**. Both shared files were exported and inspected for
-credentials, device identifiers, and capture caches. Both reopened independently
-at 1280×720 without operator errors: the mapper with its test grid, and Fuzz
-with fresh pairing, active capture, and the loopback bridge. The reopened Fuzz
-file produced nonzero light output after the live mask became ready.
-All **51 Python tests** and **64 Node tests**
-pass, alongside lint, build, and a zero-vulnerability dependency audit.
-A live person mask was observed, and a static camera image confirmed torso-mask
-alignment; framing the head and torso affects segmentation. Real guitar/Spark
-input, moving-person alignment, and physical projector alignment require hardware testing.
+- `src/lib/instrument/`: instrument profiles (tuning, frets, inlays), pitch
+  math, fretboard positions.
+- `src/lib/lesson/`: shapes, song charts, step and song scoring, beat clock,
+  fretboard diagram drawing.
+- `src/lib/touchdesigner/`: bridge client and protocol.
+- `touchdesigner/fuzz/`: Fuzz project, builder, bridge, and Light Maps source.
+- `touchdesigner/projection_mapping/`: projector project and builder.
 
 ## Verification
 
@@ -221,8 +146,5 @@ npm audit
 npm run smoke -- http://127.0.0.1:3000
 ```
 
-Security headers (including a report-only Content-Security-Policy) are set
-in `next.config.ts`. Once the browser console shows no CSP reports in
-production, rename the header to `Content-Security-Policy` to enforce it.
-Audit scope, fixes, and remaining limitations: [docs/security-audit.md](docs/security-audit.md).
-Commits carry no AI attribution trailers (see `AGENTS.md`).
+Security headers, including a report-only Content-Security-Policy, are set in
+`next.config.ts`. Audit scope and limits: [docs/security-audit.md](docs/security-audit.md).

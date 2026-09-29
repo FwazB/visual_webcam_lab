@@ -17,10 +17,9 @@ __pycache__/
 # Keep only the audited, sanitized Fuzz project; ignore incremental saves.
 /touchdesigner/fuzz/*.toe
 !/touchdesigner/fuzz/fuzz.toe
-/touchdesigner/fuzz/Backup/
 /touchdesigner/projection_mapping/*.toe
 !/touchdesigner/projection_mapping/projection_mapping.toe
-/touchdesigner/projection_mapping/Backup/
+/touchdesigner/**/Backup/
 /touchdesigner/fuzz/lights/.build/
 
 # next.js

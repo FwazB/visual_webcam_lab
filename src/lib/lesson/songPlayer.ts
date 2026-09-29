@@ -7,7 +7,7 @@ import { pitchClassOf } from "@/lib/instrument/pitch";
 import type { NoteEvent } from "@/lib/audio/pitchTypes";
 import type { ChordVoicing, SongChart } from "./songs";
 
-export interface ChartPosition {
+interface ChartPosition {
   /** Absolute chart beat, negative during the count-in. */
   absoluteBeat: number;
   sectionIndex: number;
@@ -29,7 +29,7 @@ export interface ChartPosition {
 }
 
 /** Total beats of one pass of a section's loop. */
-export function loopBeats(chart: SongChart, sectionIndex: number): number {
+function loopBeats(chart: SongChart, sectionIndex: number): number {
   return chart.sections[sectionIndex].loop.reduce((a, b) => a + b.beats, 0);
 }
 
@@ -89,11 +89,11 @@ export function voicingFor(chart: SongChart, profile: InstrumentProfile, chordId
   return chart.voicings[profile.id]?.[chordId] ?? null;
 }
 
-export function chordPitchClasses(profile: InstrumentProfile, v: ChordVoicing): Set<number> {
+function chordPitchClasses(profile: InstrumentProfile, v: ChordVoicing): Set<number> {
   return new Set(v.notes.map((n) => pitchClassOf(midiAt(profile, n.s, n.f))));
 }
 
-export interface ChordSlotScore {
+interface ChordSlotScore {
   chordId: string;
   loopIndex: number;
   barIndex: number;

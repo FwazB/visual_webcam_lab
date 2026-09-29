@@ -1,22 +1,22 @@
 // Shape library: transposable fretboard patterns.
 // Positions are relative to the root; the root sits on the E string.
 
-import type { NoteName } from "./theory";
-import { BASS_STANDARD, midiAt, type InstrumentProfile } from "@/lib/instrument/profile";
+import { NOTE_NAMES } from "@/lib/instrument/pitch";
+import { midiAt, type InstrumentProfile } from "@/lib/instrument/profile";
 import { findRootFret } from "@/lib/instrument/positions";
 
-export type Role =
+type Role =
   | "R" | "b3" | "3" | "4" | "5" | "b7" | "7" | "8";
 
-export interface ShapePosition {
-  /** 0 = E, 1 = A, 2 = D, 3 = G */
+interface ShapePosition {
+  /** Strings above the lowest (root) string. */
   stringOffset: number;
   /** Semitones from the root fret, interpreted as frets on the target string. */
   fretOffset: number;
   role: Role;
 }
 
-export interface Shape {
+interface Shape {
   id: string;
   name: string;
   description: string;
@@ -93,9 +93,7 @@ export const SHAPES: Shape[] = [
 ];
 
 /** Keys available in the picker. */
-export const KEYS: NoteName[] = [
-  "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B",
-];
+export const KEYS = NOTE_NAMES;
 
 /**
  * Resolve a shape in a given key to absolute (string, fret) positions.
@@ -104,7 +102,7 @@ export const KEYS: NoteName[] = [
 export function resolveShape(
   shape: Shape,
   rootPc: number,
-  profile: InstrumentProfile = BASS_STANDARD
+  profile: InstrumentProfile,
 ): ResolvedPosition[] {
   const rootFret = findRootFret(profile, 0, rootPc);
   return shape.positions
@@ -120,7 +118,7 @@ export function resolveShape(
     });
 }
 
-export interface ResolvedPosition {
+interface ResolvedPosition {
   string: number;
   fret: number;
   role: Role;
@@ -129,40 +127,3 @@ export interface ResolvedPosition {
 }
 
 export type MatchState = "green" | "yellow" | "red";
-
-/**
- * Compare current fingertip positions vs. resolved shape targets.
- * Returns the traffic-light state and how many targets were covered.
- */
-export function matchShape(
-  targets: Array<{ string: number; fret: number }>,
-  fingers: Array<{ string: number; fret: number }>
-): { state: MatchState; coveredIdx: Set<number> } {
-  const STRING_TOL = 0.4;
-  const FRET_TOL = 0.6;
-  const covered = new Set<number>();
-
-  targets.forEach((tgt, i) => {
-    const hit = fingers.some(
-      (fp) =>
-        Math.abs(fp.string - tgt.string) <= STRING_TOL &&
-        Math.abs(fp.fret - tgt.fret) <= FRET_TOL
-    );
-    if (hit) covered.add(i);
-  });
-
-  if (covered.size === targets.length) return { state: "green", coveredIdx: covered };
-  if (covered.size >= Math.max(1, Math.ceil(targets.length / 2))) {
-    return { state: "yellow", coveredIdx: covered };
-  }
-
-  // Even one finger near a target → yellow
-  const near = fingers.some((fp) =>
-    targets.some(
-      (tgt) =>
-        Math.abs(fp.string - tgt.string) <= 1.0 &&
-        Math.abs(fp.fret - tgt.fret) <= 1.5
-    )
-  );
-  return { state: near ? "yellow" : "red", coveredIdx: covered };
-}

@@ -1,25 +1,22 @@
 "use client";
 
-// Developer panel for the audio chain and fusion: meters, note log,
-// Δk histogram, thresholds, and test tones.
+// Developer panel for the audio chain: meters, note log, thresholds, and
+// test tones.
 
 import { useEffect, useState } from "react";
 import type { GuitarPitch } from "@/hooks/useGuitarPitch";
 import type { InstrumentProfile } from "@/lib/instrument/profile";
 import { midiToName } from "@/lib/instrument/pitch";
-import type { FusionOutput } from "@/lib/instrument/fusion";
 import type { StepView } from "@/lib/lesson/stepMachine";
 import AudioDevicePicker from "./AudioDevicePicker";
 
 interface PitchDebugPanelProps {
   pitch: GuitarPitch;
   profile: InstrumentProfile;
-  getFusion: () => FusionOutput | null;
   getStep: () => StepView | null;
-  neckK: number | null;
 }
 
-export default function PitchDebugPanel({ pitch, profile, getFusion, getStep, neckK }: PitchDebugPanelProps) {
+export default function PitchDebugPanel({ pitch, profile, getStep }: PitchDebugPanelProps) {
   const [, setTick] = useState(0);
   const [sweepReport, setSweepReport] = useState<string | null>(null);
   useEffect(() => {
@@ -29,7 +26,6 @@ export default function PitchDebugPanel({ pitch, profile, getFusion, getStep, ne
 
   const frame = pitch.frameRef.current;
   const note = pitch.activeNoteRef.current;
-  const fusion = getFusion();
   const step = getStep();
   const log = pitch.noteLogRef.current.slice(-10).reverse();
   const onsetAgo = frame ? frame.t - pitch.lastOnsetRef.current : 999;
@@ -129,30 +125,7 @@ export default function PitchDebugPanel({ pitch, profile, getFusion, getStep, ne
           note #{note.id} {midiToName(note.midi)} {note.cents >= 0 ? "+" : ""}{note.cents.toFixed(0)}c conf {note.confidence.toFixed(2)} {note.kind}
         </div>
       )}
-      {fusion && (
-        <div className="space-y-1">
-          <div className="flex justify-between">
-            <span>fusion {fusion.verdict} {fusion.fusionConfidence.toFixed(2)}</span>
-            <span>k {neckK ?? "—"}</span>
-          </div>
-          <div className="flex items-end gap-px h-6">
-            {fusion.debug.histogram.map((h, i) => (
-              <div key={i} className="flex-1 flex flex-col items-center justify-end">
-                <div className="w-full" style={{ height: `${Math.min(100, (h / 3) * 100)}%`, background: i === 4 ? "#8f8" : "#fc4" }} />
-                <span className="text-[9px] text-zinc-500">{i - 4}</span>
-              </div>
-            ))}
-          </div>
-          {fusion.lastConfirmed && (
-            <div className="text-zinc-300">
-              last: {profile.stringLabels[fusion.lastConfirmed.s]}|{fusion.lastConfirmed.f} {fusion.lastConfirmed.finger} cost {fusion.lastConfirmed.cost.toFixed(2)}
-              {fusion.lastConfirmed.ambiguous ? " ambiguous" : ""}{fusion.lastConfirmed.unmatched ? " unmatched" : ""}
-            </div>
-          )}
-          <div className="text-zinc-500">offsets {fusion.stringOffsets.map((o) => o.toFixed(2)).join(" ")}</div>
-        </div>
-      )}
-      {step && <div className="text-zinc-300">step {step.phase} target#{step.targetIndex} done {step.completed}{step.hint ? ` · ${step.hint}` : ""}</div>}
+      {step && <div className="text-zinc-300">step {step.phase} target#{step.targetIndex} done {step.completed}</div>}
       {log.length > 0 && (
         <div className="text-zinc-500 max-h-24 overflow-y-auto">
           {log.map((n) => (

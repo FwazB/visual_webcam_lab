@@ -6,9 +6,11 @@ const { SongScorer, chartPositionAt } = require("../src/lib/lesson/songPlayer");
 const { YUKON } = require("../src/lib/lesson/songs");
 const { GUITAR_STANDARD } = require("../src/lib/instrument/profile");
 const { configureHumFilter } = require("../src/lib/audio/inputFilter");
+const { nearestPosition } = require("../src/lib/instrument/positions");
+const { StepMachine } = require("../src/lib/lesson/stepMachine");
 
 const near = (actual, expected) => assert.ok(Math.abs(actual - expected) < 1e-9, `${actual} != ${expected}`);
-const note = (midi) => ({ id: 1, t: 0, tPerf: 0, midi, midiFloat: midi, cents: 0, hz: 440, confidence: 1, strength: 1, kind: "pluck" });
+const note = (midi) => ({ id: 1, t: 0, midi, midiFloat: midi, cents: 0, hz: 440, confidence: 1, strength: 1, kind: "pluck" });
 
 test("tempo edits preserve the beat and the times of delayed notes", () => {
   const clock = new BeatClock();
@@ -122,4 +124,36 @@ test("wrong notes are visible immediately without waiting for a chord change", (
   assert.equal(scorer.summary().wrongNotes, 1);
   scorer.tick(chartPositionAt(YUKON, 4.1));
   assert.equal(scorer.summary().wrongNotes, 1);
+});
+
+test("played notes land on the position nearest the reference", () => {
+  // A3 (57) is A string fret 12, D string fret 7, G string fret 2.
+  assert.deepEqual(nearestPosition(GUITAR_STANDARD, 57, null), { string: 3, fret: 2 });
+  assert.deepEqual(nearestPosition(GUITAR_STANDARD, 57, { string: 2, fret: 5 }), { string: 2, fret: 7 });
+  assert.deepEqual(nearestPosition(GUITAR_STANDARD, 57, { string: 1, fret: 10 }), { string: 1, fret: 12 });
+  assert.equal(nearestPosition(GUITAR_STANDARD, 20, null), null);
+});
+
+test("a sequence step advances on the right pitch and flashes red on a wrong one", () => {
+  const step = new StepMachine();
+  let advanced = 0;
+  step.setOnAdvance(() => { advanced++; });
+  step.setStep({ targets: [{ midi: 45 }, { midi: 52 }], mode: "sequence" });
+  assert.equal(step.view.light, "yellow");
+
+  assert.equal(step.onNote({ ...note(44), t: 1 }), false);
+  assert.equal(step.onFrame(1.1).light, "red");
+  assert.equal(step.onFrame(1.5).light, "yellow");
+
+  // 30 cents sharp is still in tune.
+  assert.equal(step.onNote({ ...note(45), midiFloat: 45.3, t: 2 }), true);
+  assert.equal(step.onFrame(2.05).light, "green");
+  assert.equal(step.onFrame(2.2).targetIndex, 1);
+
+  assert.equal(step.onNote({ ...note(52), midiFloat: 52.4, t: 3 }), false);
+  assert.equal(step.onNote({ ...note(52), t: 4 }), true);
+  const view = step.onFrame(4.2);
+  assert.equal(view.targetIndex, 0);
+  assert.equal(view.completed, 2);
+  assert.equal(advanced, 1);
 });

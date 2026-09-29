@@ -9,7 +9,7 @@ export interface FretPosition {
   fret: number;
 }
 
-export function pitchClassAt(profile: InstrumentProfile, stringIdx: number, fret: number): number {
+function pitchClassAt(profile: InstrumentProfile, stringIdx: number, fret: number): number {
   return pitchClassOf(midiAt(profile, stringIdx, fret));
 }
 
@@ -31,4 +31,20 @@ export function candidatePositions(profile: InstrumentProfile, midi: number): Fr
     if (fret >= 0 && fret <= profile.fretCount) out.push({ string: s, fret });
   }
   return out;
+}
+
+/**
+ * The position of `midi` closest to `near` (fret distance plus a heavier
+ * string distance), or the lowest fret when there is no reference.
+ */
+export function nearestPosition(
+  profile: InstrumentProfile,
+  midi: number,
+  near: FretPosition | null,
+): FretPosition | null {
+  const candidates = candidatePositions(profile, midi);
+  if (candidates.length === 0) return null;
+  const cost = (p: FretPosition) =>
+    near ? Math.abs(p.fret - near.fret) + 1.5 * Math.abs(p.string - near.string) : p.fret;
+  return candidates.reduce((best, p) => (cost(p) < cost(best) ? p : best));
 }

@@ -28,7 +28,7 @@ export interface BridgeSocket {
   close(code?: number, reason?: string): void;
 }
 
-export interface TouchDesignerSnapshot {
+interface TouchDesignerSnapshot {
   status: "disconnected" | "connecting" | "handshaking" | "ready" | "error";
   error: string | null;
   state: EngineState | null;

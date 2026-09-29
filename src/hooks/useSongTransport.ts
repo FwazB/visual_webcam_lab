@@ -9,11 +9,10 @@ import type { SongChart } from "@/lib/lesson/songs";
 import { chartPositionAt } from "@/lib/lesson/songPlayer";
 import { BeatClock } from "@/lib/lesson/beatClock";
 
-export interface SongTransport {
+interface SongTransport {
   playing: boolean;
   bpm: number;
   setBpm: (bpm: number) => void;
-  countInBars: number;
   metronome: boolean;
   backing: boolean;
   setMetronome: (on: boolean) => void;
@@ -25,8 +24,6 @@ export interface SongTransport {
   beatsRef: React.RefObject<number>;
   /** Chart beats at a given AudioContext time (same clock as NoteEvent.t when sharing the context). */
   beatsAt: (audioTime: number) => number;
-  /** Current beats, computed now. */
-  beatsNow: () => number;
 }
 
 interface Voices {
@@ -206,7 +203,7 @@ export function useSongTransport(chart: SongChart, audioContext: AudioContext | 
   }, [stop, disposeVoices]);
 
   return useMemo<SongTransport>(
-    () => ({ playing, bpm, setBpm, countInBars, metronome, backing, setMetronome, setBacking, start, stop, beatsRef, beatsAt, beatsNow }),
-    [playing, bpm, setBpm, metronome, backing, start, stop, beatsAt, beatsNow],
+    () => ({ playing, bpm, setBpm, metronome, backing, setMetronome, setBacking, start, stop, beatsRef, beatsAt }),
+    [playing, bpm, setBpm, metronome, backing, start, stop, beatsAt],
   );
 }

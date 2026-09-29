@@ -5,7 +5,7 @@
 import { hzToMidi } from "@/lib/instrument/pitch";
 import type { NoteEvent, NoteOff, PitchFrame, WorkletMessage } from "./pitchTypes";
 
-export interface NoteTrackerOptions {
+interface NoteTrackerOptions {
   gateDb: number;
   clarityThreshold: number;
   hopMs: number;
@@ -13,7 +13,7 @@ export interface NoteTrackerOptions {
 
 type State = "idle" | "attack" | "sustain";
 
-export interface NoteTrackerOutput {
+interface NoteTrackerOutput {
   frame?: PitchFrame;
   noteOn?: NoteEvent;
   noteOff?: NoteOff;
@@ -33,9 +33,6 @@ export class NoteTracker {
   private divergentSince = 0;
   private divergentMidi = 0;
   private octaveHops = 0;
-  private lastFrame: PitchFrame | null = null;
-  /** Maps AudioContext seconds to performance.now() ms. */
-  audioToPerf: (t: number) => number = (t) => t * 1000;
 
   constructor(opts: NoteTrackerOptions) {
     this.opts = opts;
@@ -43,14 +40,6 @@ export class NoteTracker {
 
   setOptions(opts: Partial<NoteTrackerOptions>): void {
     Object.assign(this.opts, opts);
-  }
-
-  get activeNote(): NoteEvent | null {
-    return this.note;
-  }
-
-  get latestFrame(): PitchFrame | null {
-    return this.lastFrame;
   }
 
   reset(): void {
@@ -97,7 +86,6 @@ export class NoteTracker {
       rms: msg.rms,
       db: msg.db,
     };
-    this.lastFrame = frame;
     const out: NoteTrackerOutput = { frame };
     const voiced = msg.hz > 0 && msg.clarity >= this.opts.clarityThreshold;
 
@@ -180,7 +168,6 @@ export class NoteTracker {
     const note: NoteEvent = {
       id: this.nextId++,
       t,
-      tPerf: this.audioToPerf(t),
       midi,
       midiFloat: med.midiFloat,
       cents: (med.midiFloat - midi) * 100,

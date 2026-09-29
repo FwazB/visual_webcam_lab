@@ -6,20 +6,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { InstrumentProfile } from "@/lib/instrument/profile";
 import {
-  getStoredInputLatencyMs,
   instrumentConstraints,
   listAudioInputs,
   pickPreferredDevice,
   storeDevice,
 } from "@/lib/audio/devices";
 import { NoteTracker } from "@/lib/audio/noteTracker";
-import type { NoteEvent, NoteOff, PitchFrame, WorkletConfig, WorkletMessage } from "@/lib/audio/pitchTypes";
+import type { NoteEvent, PitchFrame, WorkletConfig, WorkletMessage } from "@/lib/audio/pitchTypes";
 import { createTestSignal, type TestSignal } from "@/lib/audio/testSignal";
 import { configureHumFilter } from "@/lib/audio/inputFilter";
 
-export type GuitarPitchStatus = "idle" | "needs-device" | "starting" | "running" | "suspended" | "error";
+type GuitarPitchStatus = "idle" | "needs-device" | "starting" | "running" | "suspended" | "error";
 
-export interface GuitarPitchTuning {
+interface GuitarPitchTuning {
   gateDb: number;
   clarityThreshold: number;
   k: number;
@@ -40,8 +39,6 @@ export interface GuitarPitch {
   noteLogRef: React.RefObject<NoteEvent[]>;
   lastOnsetRef: React.RefObject<number>;
   onNote: (cb: (e: NoteEvent) => void) => () => void;
-  onNoteOff: (cb: (e: NoteOff) => void) => () => void;
-  audioTimeToPerf: (t: number) => number;
   context: AudioContext | null;
   settings: MediaTrackSettings | null;
   tuning: GuitarPitchTuning;
@@ -72,7 +69,6 @@ export function useGuitarPitch(profile: InstrumentProfile): GuitarPitch {
   const streamRef = useRef<MediaStream | null>(null);
   const nodeRef = useRef<AudioWorkletNode | null>(null);
   const notchRef = useRef<BiquadFilterNode | null>(null);
-  const inputNodeRef = useRef<BiquadFilterNode | null>(null);
   const trackerRef = useRef<NoteTracker>(
     new NoteTracker({ gateDb: -45, clarityThreshold: profile.pitch.clarityThreshold, hopMs: profile.pitch.hopMs }),
   );
@@ -81,19 +77,11 @@ export function useGuitarPitch(profile: InstrumentProfile): GuitarPitch {
   const noteLogRef = useRef<NoteEvent[]>([]);
   const lastOnsetRef = useRef<number>(0);
   const noteCbs = useRef(new Set<(e: NoteEvent) => void>());
-  const noteOffCbs = useRef(new Set<(e: NoteOff) => void>());
-  const perfOffsetRef = useRef(0);
-  const inputLatencyRef = useRef(getStoredInputLatencyMs());
   const tuningRef = useRef(tuning);
   const startAttemptRef = useRef(0);
   useEffect(() => {
     tuningRef.current = tuning;
   });
-
-  const audioTimeToPerf = useCallback(
-    (t: number) => t * 1000 + perfOffsetRef.current - inputLatencyRef.current,
-    [],
-  );
 
   const stop = useCallback(() => {
     startAttemptRef.current++;
@@ -103,7 +91,6 @@ export function useGuitarPitch(profile: InstrumentProfile): GuitarPitch {
     nodeRef.current?.disconnect();
     nodeRef.current = null;
     notchRef.current = null;
-    inputNodeRef.current = null;
     const ctx = ctxRef.current;
     if (ctx && ctx.state !== "closed") ctx.close().catch(() => {});
     ctxRef.current = null;
@@ -193,20 +180,15 @@ export function useGuitarPitch(profile: InstrumentProfile): GuitarPitch {
         source.connect(hpf).connect(notch).connect(lpf).connect(node);
         nodeRef.current = node;
         notchRef.current = notch;
-        inputNodeRef.current = hpf;
 
         const tracker = trackerRef.current;
         tracker.reset();
-        tracker.audioToPerf = audioTimeToPerf;
         node.port.onmessage = (e: MessageEvent<WorkletMessage>) => {
           const msg = e.data;
           if (msg.type === "onset") lastOnsetRef.current = msg.t;
           const out = tracker.handle(msg);
           if (out.frame) frameRef.current = out.frame;
-          if (out.noteOff) {
-            activeNoteRef.current = null;
-            noteOffCbs.current.forEach((cb) => cb(out.noteOff!));
-          }
+          if (out.noteOff) activeNoteRef.current = null;
           if (out.noteOn) {
             activeNoteRef.current = out.noteOn;
             const log = noteLogRef.current;
@@ -229,7 +211,7 @@ export function useGuitarPitch(profile: InstrumentProfile): GuitarPitch {
         storeDevice(null);
       }
     },
-    [audioTimeToPerf, profile, sendConfig, stop],
+    [profile, sendConfig, stop],
   );
 
   const start = useCallback(async () => {
@@ -267,15 +249,12 @@ export function useGuitarPitch(profile: InstrumentProfile): GuitarPitch {
     [devices, startWithDevice, stop],
   );
 
-  // Clock mapping between AudioContext time and performance.now().
+  // Follow suspend/resume of the context, resume on focus, and refresh the
+  // device list when interfaces are plugged in or removed.
   useEffect(() => {
     const ctx = context;
     if (!ctx) return;
     const sync = () => {
-      const ts = ctx.getOutputTimestamp();
-      if (ts.contextTime !== undefined && ts.performanceTime !== undefined) {
-        perfOffsetRef.current = ts.performanceTime - ts.contextTime * 1000;
-      }
       setStatus((s) => (s === "running" || s === "suspended" ? (ctx.state === "running" ? "running" : "suspended") : s));
     };
     sync();
@@ -303,12 +282,6 @@ export function useGuitarPitch(profile: InstrumentProfile): GuitarPitch {
       noteCbs.current.delete(cb);
     };
   }, []);
-  const onNoteOff = useCallback((cb: (e: NoteOff) => void) => {
-    noteOffCbs.current.add(cb);
-    return () => {
-      noteOffCbs.current.delete(cb);
-    };
-  }, []);
 
   return useMemo<GuitarPitch>(
     () => ({
@@ -324,14 +297,12 @@ export function useGuitarPitch(profile: InstrumentProfile): GuitarPitch {
       noteLogRef,
       lastOnsetRef,
       onNote,
-      onNoteOff,
-      audioTimeToPerf,
       context,
       settings,
       tuning,
       setTuning,
       test,
     }),
-    [status, error, devices, selectedDeviceId, selectDevice, start, stop, onNote, onNoteOff, audioTimeToPerf, context, settings, tuning, setTuning, test],
+    [status, error, devices, selectedDeviceId, selectDevice, start, stop, onNote, context, settings, tuning, setTuning, test],
   );
 }
