@@ -14,6 +14,9 @@ Live: the body-synth project on Vercel deploys `main`.
   on a fretboard diagram, and scores lessons and songs.
 - `/studio`: multitrack recorder for the guitar: record takes over a click,
   arrange and trim them, export a WAV.
+- `/for-you`: practice picks, with an optional read-only Spotify connection.
+  Matches your top tracks to verified lesson guides and ranks those sections
+  by instrument, chosen comfort level, and practice goal.
 - `/ascii`: body-mask ASCII webcam experiment.
 - `/` redirects to `/guitar`.
 
@@ -69,6 +72,42 @@ camera is a mirror with fingertip dots; practice works without it.
 `?debug=1` adds the audio panel: levels, clarity, detected note, gate and
 clarity thresholds, a 60 Hz notch, test tones per string, a chromatic sweep
 that reports octave errors, and the note log.
+
+## Songs for you / Spotify
+
+Open `/for-you` for starter sections from 11 songs, including YUKON, Best Part,
+Pink + White, Ain't No Sunshine, Stand By Me, and Feel Good Inc. Difficulty is
+our estimate for the named practice section; it is not a full-song grade or
+an assessment of your ability. Only YUKON has a scored chart in the trainer.
+Other cards link to their educator's guide.
+
+To use your own Spotify favorites:
+
+1. Create a Web API app in the [Spotify dashboard](https://developer.spotify.com/dashboard).
+   Development mode requires the app owner to have Spotify Premium and allows
+   up to five authorized users. Add your own Spotify account to Users and Access.
+2. Register the exact callback for the site you use:
+   `https://body-synth-beta.vercel.app/for-you`, or
+   `http://127.0.0.1:3000/for-you` locally. Spotify does not allow `localhost`.
+   The page's setup panel shows its actual callback URL. The connection's
+   privacy page is `/for-you/privacy` on that same origin.
+3. Paste the app's **public Client ID** into the setup panel, then Connect
+   Spotify and grant top-track access. Never enter a Client Secret.
+   Optionally configure `NEXT_PUBLIC_SPOTIFY_CLIENT_ID` before building to
+   skip entering this public configuration on each device.
+
+The app uses OAuth PKCE (`user-top-read` only) to fetch up to 50 top tracks
+from the last four weeks. It matches title and artist to our independent
+catalog, then ranks guides by the preferences you explicitly choose. Unknown
+songs, covers, and different live/remix arrangements stay unassessed. No
+Spotify audio, recommendation endpoint, listening profile, or AI model is used.
+
+Tokens and tracks stay in browser memory and clear on reload or Disconnect.
+A pending PKCE verifier/state is kept temporarily in session storage, expires
+after ten minutes, and is consumed at callback. Only your practice preferences
+and public Client ID persist locally. Disconnect also cancels in-flight
+requests; revoke the saved Spotify authorization in your Spotify Apps settings
+if desired. There is no background polling or playlist write access.
 
 ## Studio
 

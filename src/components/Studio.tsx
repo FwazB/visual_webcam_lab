@@ -538,6 +538,7 @@ export default function Studio() {
           <nav className="flex gap-1">
             <Link href="/guitar" className="text-xs px-2.5 py-1 rounded-full bg-white/10 text-zinc-400 hover:text-white">Guitar</Link>
             <Link href="/bass" className="text-xs px-2.5 py-1 rounded-full bg-white/10 text-zinc-400 hover:text-white">Bass</Link>
+            <Link href="/for-you" className="text-xs px-2.5 py-1 rounded-full bg-white/10 text-zinc-400 hover:text-white">For you</Link>
           </nav>
         </div>
 

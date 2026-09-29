@@ -38,6 +38,7 @@ const NAV_ROUTES = [
   { id: "guitar-standard", href: "/guitar", label: "Guitar" },
   { id: "bass-standard", href: "/bass", label: "Bass" },
   { id: "studio", href: "/studio", label: "Studio" },
+  { id: "for-you", href: "/for-you", label: "For you" },
 ];
 
 interface Target extends FretPosition {
@@ -92,7 +93,7 @@ export default function FretLab({ profile }: FretLabProps) {
   const [matchState, setMatchState] = useState<MatchState>("yellow");
   // Rendered client-only (dynamic import with ssr: false), so window exists.
   const [debug] = useState(() => new URLSearchParams(window.location.search).get("debug") === "1");
-  const [mode, setMode] = useState<"shapes" | "song">("shapes");
+  const [mode, setMode] = useState<"shapes" | "song">(() => new URLSearchParams(window.location.search).get("song") === SONGS[0].id ? "song" : "shapes");
   const [barsPerChord, setBarsPerChord] = useState<1 | 2>(1);
   const song = SONGS[0];
   const chart = useMemo(() => withBarsPerChord(song, barsPerChord), [song, barsPerChord]);
