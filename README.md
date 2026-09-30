@@ -18,7 +18,10 @@ Live: the body-synth project on Vercel deploys `main`.
   Matches your top tracks to verified lesson guides and ranks those sections
   by instrument, chosen comfort level, and practice goal.
 - `/ascii`: body-mask ASCII webcam experiment.
-- `/` redirects to `/guitar`.
+- `/`: homepage. Six guitar strings, one per project: move the mouse across
+  them to strum (tap on touch screens), tap **sound off** to hear them. The
+  strings flash in the same circle-of-fifths colors as Fuzz. Below them, a
+  card for every project, including the TouchDesigner ones.
 
 ## Quick start
 
@@ -202,6 +205,8 @@ needed.
 - `src/lib/lesson/`: shapes, song charts, step and song scoring, beat clock,
   fretboard diagram drawing.
 - `src/lib/touchdesigner/`: bridge client and protocol.
+- `src/app/page.tsx`, `src/components/home/`, `src/lib/home/`: the homepage,
+  its string physics and Karplus–Strong pluck sound, and the project list.
 - `touchdesigner/fuzz/`: Fuzz project, builder, bridge, and Light Maps source.
 - `touchdesigner/projection_mapping/`: projector project and builder.
 

@@ -134,7 +134,7 @@ export default function SongsForYou() {
   return (
     <main className="fixed inset-0 overflow-y-auto bg-black text-white">
       <header className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 px-5 py-4 sm:px-8">
-        <Link href="/guitar" className="font-semibold tracking-tight">body.synth <span className="ml-2 font-normal text-zinc-500">/ songs</span></Link>
+        <Link href="/" className="font-semibold tracking-tight">body.synth <span className="ml-2 font-normal text-zinc-500">/ songs</span></Link>
         <nav aria-label="Main navigation" className="flex gap-1 text-xs">
           {[ ["/for-you", "For you"], ["/guitar", "Guitar"], ["/bass", "Bass"], ["/studio", "Studio"] ].map(([href, label]) => <Link key={href} href={href} aria-current={href === "/for-you" ? "page" : undefined} className={`rounded-full px-3 py-2 ${href === "/for-you" ? "bg-white/10 text-white" : "text-zinc-400 hover:text-white"}`}>{label}</Link>)}
         </nav>

@@ -9,12 +9,7 @@ const localWorklets = {
   "/worklets/recorder-processor.js": await readFile(new URL("../public/worklets/recorder-processor.js", import.meta.url)),
 };
 
-const home = await fetch(base, { redirect: "manual", signal: AbortSignal.timeout(15000) });
-assert.equal(home.status, 307, "/ must redirect");
-assert.equal(new URL(home.headers.get("location") ?? "", base).pathname, "/guitar");
-console.log(`PASS ${base.origin}/: redirects to /guitar`);
-
-for (const path of ["/guitar", "/bass", "/studio", "/worklets/pitch-processor.js", "/worklets/recorder-processor.js"]) {
+for (const path of ["/", "/guitar", "/bass", "/studio", "/for-you", "/worklets/pitch-processor.js", "/worklets/recorder-processor.js"]) {
   const response = await fetch(new URL(path, base), { signal: AbortSignal.timeout(15000) });
   assert.equal(response.status, 200, `${path} must load`);
   assert.equal(response.headers.get("x-content-type-options"), "nosniff");
@@ -31,9 +26,13 @@ for (const path of ["/guitar", "/bass", "/studio", "/worklets/pitch-processor.js
     assert.match(response.headers.get("cache-control") ?? "", /max-age=0/);
     assert.equal(sha256(body), sha256(localWorklets[path]), "deployed processor must match this checkout");
   } else {
-    // The pages use next/dynamic with SSR disabled. HTTP checks can verify
-    // its shell/assets; rendered controls are checked in the browser.
+    // Most pages use next/dynamic with SSR disabled. HTTP checks can verify
+    // their shell/assets; rendered controls are checked in the browser.
     assert.match(body, /<title>body\.synth<\/title>/);
+    if (path === "/") {
+      // The homepage is server-rendered: every project link is in the HTML.
+      for (const href of ["/guitar", "/bass", "/studio", "/for-you", "/ascii"]) assert.ok(body.includes(`href="${href}"`), `/ must link to ${href}`);
+    }
     const scripts = [...body.matchAll(/<script[^>]+src="([^"]+)"/g)];
     assert.ok(scripts.length > 0, `${path} must reference application scripts`);
     const asset = await fetch(new URL(scripts.at(-1)[1], base), { signal: AbortSignal.timeout(15000) });

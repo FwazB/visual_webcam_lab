@@ -404,7 +404,7 @@ export default function FretLab({ profile }: FretLabProps) {
     <div className="fixed inset-0 bg-black text-white overflow-y-auto flex flex-col">
       <div className="relative z-10 p-3 sm:p-4 flex items-start justify-between flex-shrink-0 gap-3">
         <div className="min-w-0">
-          <h1 className="text-lg sm:text-xl font-bold tracking-tight">{profile.name.toLowerCase()}.lab</h1>
+          <h1 className="text-lg sm:text-xl font-bold tracking-tight"><Link href="/" className="hover:text-zinc-300">{profile.name.toLowerCase()}.lab</Link></h1>
           <p className="text-zinc-400 text-xs truncate">{status}</p>
         </div>
         <div className="flex items-center gap-2">

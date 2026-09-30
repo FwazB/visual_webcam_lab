@@ -35,3 +35,16 @@ export function midiToName(midi: number): string {
   const octave = Math.floor(midi / 12) - 1;
   return `${NOTE_NAMES[pitchClassOf(midi)]}${octave}`;
 }
+
+/** Pitch classes around the circle of fifths, starting from E (matches Fuzz). */
+const FIFTHS_FROM_E = [4, 9, 2, 7, 0, 5, 10, 3, 8, 1, 6, 11];
+
+/**
+ * Hue in degrees for a pitch class, the same artistic palette as
+ * touchdesigner/fuzz/pitch_color.py: E is yellow (60°), A green (120°), and
+ * the other ten fifths divide the remaining 300° equally.
+ */
+export function pitchClassHue(pc: number): number {
+  const index = FIFTHS_FROM_E.indexOf(pitchClassOf(pc));
+  return index === 0 ? 60 : (120 + ((index - 1) * 300) / 11) % 360;
+}
