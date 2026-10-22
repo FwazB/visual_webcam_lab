@@ -1,0 +1,4 @@
+node_modules/
+models/
+private/
+__pycache__/
