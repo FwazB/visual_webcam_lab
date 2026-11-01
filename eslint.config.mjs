@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Vendored upstream code has its own security regression tests.
+    "security/braces-depthguard/**",
   ]),
 ]);
 

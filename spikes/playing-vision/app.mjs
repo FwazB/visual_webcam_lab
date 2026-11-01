@@ -49,7 +49,7 @@ $('file').onchange=guard(async e=>{
  status('Local file ready. No data uploaded. Recalibrate whenever the neck moves.');
 });
 $('camera').onclick=guard(async()=>{
- await stopSource();const epoch=generation;
+ const epoch=generation+1;await stopSource();if(epoch!==generation)return;
  const acquired=await navigator.mediaDevices.getUserMedia({video:{width:{ideal:1920},height:{ideal:1080}},audio:false});
  if(epoch!==generation){acquired.getTracks().forEach(t=>t.stop());return;}
  stream=acquired;video=document.createElement('video');video.muted=true;video.playsInline=true;video.srcObject=stream;source=video;await video.play();frame();draw();status('Camera active. Audio remains off until Connect audio.');
@@ -58,8 +58,11 @@ $('audio').onclick=guard(async()=>{
  if(audioContext)return;if(!video)throw Error('Audio requires a video or live camera source.');
  const epoch=generation;let acquired=null;
  if(stream)acquired=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:false},video:false});
- if(epoch!==generation){acquired?.getTracks().forEach(t=>t.stop());return;}
- audioStream=acquired;const localContext=new AudioContext();audioContext=localContext;
+ if(epoch!==generation||audioContext){acquired?.getTracks().forEach(t=>t.stop());return;}
+ // Analysis never monitors sound. A silent sink also keeps its rendering clock
+ // independent of an unavailable/stalled OS output device (where supported).
+ const audioOptions='sinkId' in AudioContext.prototype?{sinkId:{type:'none'}}:undefined;
+ audioStream=acquired;const localContext=new AudioContext(audioOptions);audioContext=localContext;
  try{await localContext.audioWorklet.addModule('/pitch-processor.js');}catch(e){acquired?.getTracks().forEach(t=>t.stop());if(localContext.state!=='closed')await localContext.close();if(epoch!==generation)return;audioContext=null;throw e;}
  if(epoch!==generation||localContext.state==='closed'){acquired?.getTracks().forEach(t=>t.stop());if(localContext.state!=='closed')await localContext.close();return;}
  const input=acquired?audioContext.createMediaStreamSource(acquired):audioContext.createMediaElementSource(video);
@@ -115,4 +118,4 @@ $('export').onclick=guard(()=>{
  const record={schema:1,session,split:'unassigned',label:{author:'human',string,fret,tuning:[28,33,38,43]},frame:{width:raw.width,height:raw.height,png:raw.toDataURL('image/png')},observation:last,model:'RTMPose-Hand/hand5-256x256',note:'Geometric candidates are not training labels; contact remains unverified.'};
  const url=URL.createObjectURL(new Blob([JSON.stringify(record)],{type:'application/json'})),a=document.createElement('a');a.href=url;a.download=`playing-frame-${Date.now()}.json`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);status('Labeled frame downloaded locally. Nothing uploaded.');
 });
-window.addEventListener('pagehide',()=>{running=false;stream?.getTracks().forEach(t=>t.stop());audioStream?.getTracks().forEach(t=>t.stop());audioContext?.close();});
+window.addEventListener('pagehide',()=>{generation++;runId++;running=false;stream?.getTracks().forEach(t=>t.stop());audioStream?.getTracks().forEach(t=>t.stop());audioContext?.close();});

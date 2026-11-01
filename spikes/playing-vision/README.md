@@ -61,7 +61,17 @@ npm test
 python3 prepare_fixtures.py  # requires FFmpeg; public image + synthetic 55-Hz tone
 # With npm start in another terminal:
 node tests/browser-smoke.mjs
+node tests/audio-clock.mjs  # native decoded-video/worklet clock + MIDI 33 regression
+node tests/media-lifecycle.mjs  # fake-device overlap and pending-permission cleanup
 ```
+
+Tests use the locally installed Chrome channel through Playwright; no real
+camera or microphone is activated. The focused audio-clock test observes native
+contexts without substituting PCM, pitch events or clocks. The analysis context
+requests a silent (`sinkId: {type: 'none'}`) output when the browser supports it,
+so processing does not depend on an OS speaker/output clock. Other browsers
+retain the zero-gain default-output path; that fallback is not a guarantee against
+an unavailable output device. Silent analysis does not require speaker access.
 
 Seven core tests cover geometry, invalid/weak observations, SimCC decoding, input
 channel normalization, blank frames and independent audio evidence. The 1080p

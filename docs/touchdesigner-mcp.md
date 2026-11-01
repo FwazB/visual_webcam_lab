@@ -21,8 +21,12 @@ the server on every interface.
    under the project: `/project1/mcp_webserver_base`. It starts a Web Server
    DAT on port 9981. Set that DAT's **Local Address** to `127.0.0.1` and
    restart it before using the MCP; verify it is not listening on `*`.
-3. Run `npm ci` from the repo root to install the lockfile's exact packages and
-   verify their integrity. The MCP server is pinned to version `2.0.0`.
+3. Use Node `^22.18.0 || ^24.0.0 || >=26.0.0`, as declared in `package.json`;
+   Node 22.16 is not supported by this MCP package. Run `npm ci` from the repo
+   root to install the lockfile's exact packages and verify their integrity.
+   The MCP server is pinned to `2.1.0`; its Zod dependency is overridden to
+   patched `4.6.6`. Use the same supported Node on the launching process's PATH.
+   No machine-specific executable path is stored in `.mcp.json`.
 4. Start Claude Code from the repo root so it loads `.mcp.json`. The launcher
    runs `node ./node_modules/touchdesigner-mcp-server/dist/cli.js`, using only
    the installed local package. If it is missing, startup fails instead of

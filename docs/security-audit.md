@@ -54,6 +54,38 @@ Safe export steps are in [the Fuzz README](../touchdesigner/fuzz/README.md#rebui
 TouchDesigner documents the [startup storage behavior](https://docs.derivative.ca/OP_Class)
 and the [expand/collapse workflow](https://docs.derivative.ca/Toecollapse).
 
+## Development dependency remediation (2026-11-01)
+
+The retained MCP `2.1.0` package is used by `.mcp.json` and is not unused.
+Its locked SDK/core/server, HTTP parser, redirects and query-parser dependencies
+were updated within their declared ranges; Zod is narrowly overridden to
+`4.6.6`. The modern minimatch dependency used by TypeScript-ESLint is overridden
+to `11.0.3`. Production packages and lint rules were not removed or downgraded.
+The complete development installation requires the Node range in `package.json`.
+
+**The all-dependency audit is not clean:** the verification still reports 15
+moderate package entries, all propagated from the single minimatch
+GHSA-g3hv-75wg-m249 advisory, and zero high/critical entries. Production and the
+isolated vision lab audits report zero known vulnerabilities. These are registry
+results at the verification date, not a guarantee of harmless dependencies.
+
+The remaining instance is legacy minimatch `3.1.5`, required by ESLint 9 and its
+plugins. The advisory describes `firstPhasePreProcess` amplification when
+`optimizationLevel >= 2`; that function and option are absent from installed
+3.1.5, though the published affected range is broadly `<11.0.1`. This is evidence
+of an applicability mismatch, **not an upstream withdrawal or a clean audit**.
+A blanket override to 11 produced a zero-count audit and passed ordinary lint,
+but failed the explicit compatibility regression: legacy plugins require a
+callable CommonJS export and `makeRe`, both absent from 11's module API. That
+unsafe override was rejected. `tests/dev-dependencies.test.cjs` preserves this
+compatibility check alongside the patched modern parser and Zod checks.
+
+Do not suppress the audit, remove useful lint checks, invent a patched version,
+or publish on the strength of the zero production count. A future coordinated
+lint-toolchain migration or corrected upstream advisory is still needed for a
+zero all-dependency report. No provider settings or deployment triggers were
+changed; the README's `main` auto-deployment warning still applies.
+
 ## Remaining limits
 
 - CSP is **report-only**. Other security headers are enforced; CSP reports

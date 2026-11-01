@@ -124,13 +124,12 @@ export default function FretLab({ profile }: FretLabProps) {
       sendChord(activeSongChordId);
     }
   }, [touchDesigner.status, mode, activeSongChordId, sendChord]);
-  if (!scorerRef.current) scorerRef.current = new SongScorer(chart, profile);
+  if (scorerRef.current === null) scorerRef.current = new SongScorer(chart, profile);
   useEffect(() => {
     scorerRef.current?.reset(chart);
-    setSongSummary(null);
   }, [chart]);
   const stepRef = useRef<StepMachine | null>(null);
-  if (!stepRef.current) stepRef.current = new StepMachine();
+  if (stepRef.current === null) stepRef.current = new StepMachine();
   const stepViewRef = useRef<StepView | null>(null);
   const pulseRef = useRef<PlayedPulse | null>(null);
   const lastPlayedRef = useRef<FretPosition | null>(null);
@@ -586,6 +585,7 @@ export default function FretLab({ profile }: FretLabProps) {
                       key={n}
                       onClick={() => {
                         if (transport.playing) transport.stop();
+                        if (barsPerChord !== n) setSongSummary(null);
                         setBarsPerChord(n);
                       }}
                       className={`px-2 py-1 rounded ${barsPerChord === n ? "bg-white text-black" : "bg-white/10 hover:bg-white/20"}`}

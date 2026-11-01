@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: [main, 'safety/**', 'review/**']
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  app:
+    name: Body synth checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      NEXT_TELEMETRY_DISABLED: '1'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4, verified upstream
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4, verified upstream
+        with:
+          node-version: '24'
+      - run: npm ci --ignore-scripts
+      - run: npm ls --all
+      - run: npm run lint
+      - run: npm test
+      - run: npm run test:fuzz
+      - run: node --test security/braces-depthguard/security.test.cjs
+      - run: npm run build
+      - name: Fail on every production advisory
+        run: npm audit --omit=dev --audit-level=low
+      - name: Enforce the narrow accepted development exception
+        run: node scripts/audit-policy.cjs

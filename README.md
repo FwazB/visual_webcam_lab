@@ -7,6 +7,23 @@ MediaPipe hand tracking for the camera mirror.
 
 Live: the body-synth project on Vercel deploys `main`.
 
+## Current verification and accepted dependency exception — 2026-11-01
+
+The maintainer has accepted a **documented development-dependency exception** for the current publication candidate. This does not waive other security checks or authorize a deployment.
+
+- `npm audit` still reports **15 moderate aggregate entries**, all tracing to `GHSA-g3hv-75wg-m249` through legacy `minimatch@3.1.5`. No findings were suppressed. Production-only and isolated playing-vision dependency audits report **zero**.
+- The reviewed global advisory lists `<11.0.1` as affected, while the publisher repository advisory lists `10.2.6`. The described preprocessing function/options are absent from the installed legacy implementation. This is an applicability discrepancy, **not proof of safety or an official withdrawal**.
+- Compatible lint-toolchain updates retain the finding. A forced minimatch 11 replacement breaks legacy callable CommonJS/`makeRe` APIs; an ESLint 10 experiment produces invalid peer dependencies. Those incompatible changes were rejected, preserving existing lint checks.
+- Revisit the exception when advisory metadata, a compatible legacy release or consumer dependencies change; reassess sooner if untrusted glob-pattern processing is introduced. Do not describe the all-dependency audit as clean.
+
+Verification of the retained candidate passed: **99 app tests on Node 24 and 26**, 50 Python tests (1 optional skip), 7 spike core tests, 4 fork regressions, lint, production build, clean installation/dependency tree, HTTP/privacy checks and secret scans.
+
+The complete playing-vision browser smoke now passes native decoded synthetic-video audio through the AudioWorklet to **55 Hz / MIDI 33**, along with model inference/export and capture-lifecycle regressions. Analysis-only audio uses a feature-detected silent sink to avoid a reproduced default-output clock stall. Unsupported-browser fallback and physical bass accuracy remain unverified; synthetic fixtures are not real playing validation.
+
+These are **local source results**, not a production deployment. This project documents a `main`-branch Vercel integration; confirm deployment behavior before pushing. The accepted dependency exception does not approve automatic deployment.
+
+See [security audit](docs/security-audit.md) and [playing-vision experiment](spikes/playing-vision/README.md).
+
 ## Routes
 
 - `/guitar` and `/bass`: fretboard trainer. Listens to the instrument over a
@@ -24,6 +41,11 @@ Live: the body-synth project on Vercel deploys `main`.
   card for every project, including the TouchDesigner ones.
 
 ## Quick start
+
+Use Node `^22.18.0 || ^24.0.0 || >=26.0.0` for the complete development
+installation, including the optional TouchDesigner MCP tool. Ensure the same
+supported runtime is on the launching shell's PATH; no global runtime changes
+are required by the repository.
 
 ```bash
 npm ci

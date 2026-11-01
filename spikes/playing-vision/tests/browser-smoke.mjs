@@ -1,7 +1,7 @@
 // Run after npm start. All media is a public fixture or synthetic test signal.
 import { chromium } from '@playwright/test';
 import assert from 'node:assert/strict';
-const browser = await chromium.launch({executablePath:'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true,args:['--use-fake-device-for-media-stream','--use-fake-ui-for-media-stream']});
+const browser = await chromium.launch({channel:'chrome',headless:true,args:['--use-fake-device-for-media-stream','--use-fake-ui-for-media-stream']});
 try {
  const page=await browser.newPage({viewport:{width:1920,height:1080}});
  const outside=[];page.on('request',r=>{if(!r.url().startsWith('http://127.0.0.1:4381')&&!r.url().startsWith('blob:'))outside.push(r.url());});
