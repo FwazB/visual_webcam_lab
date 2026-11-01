@@ -31,6 +31,11 @@ jobs:
       - run: npm ls --all
       - run: npm run lint
       - run: npm test
+      - name: Install Fuzz test dependencies
+        run: |
+          python3 -m venv "$RUNNER_TEMP/fuzz-venv"
+          "$RUNNER_TEMP/fuzz-venv/bin/python" -m pip install -r touchdesigner/fuzz/requirements-test.txt
+          echo "$RUNNER_TEMP/fuzz-venv/bin" >> "$GITHUB_PATH"
       - run: npm run test:fuzz
       - run: node --test security/braces-depthguard/security.test.cjs
       - run: npm run build

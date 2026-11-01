@@ -249,11 +249,22 @@ messages. The mapper is optional for local Fuzz use and guitar pairing.
 
 ## Validation
 
-Run Python regression tests with NumPy available (included with TouchDesigner):
+The standalone Python regression tests require **Python 3.12+** and NumPy.
+From the repository root, install the pinned test dependency in a virtual
+environment rather than relying on globally installed packages:
 
 ```sh
-python3 -m unittest discover -s touchdesigner/fuzz -p 'test_*.py' -v
+python3 -m venv "$HOME/.cache/body-synth-fuzz-venv"
+. "$HOME/.cache/body-synth-fuzz-venv/bin/activate"
+python -m pip install -r touchdesigner/fuzz/requirements-test.txt
+npm run test:fuzz
 ```
+
+CI uses Ubuntu 24.04's Python 3.12 and an isolated virtual environment with
+the same requirements file. TouchDesigner's embedded Python already includes
+NumPy; do not install these standalone dependencies into TouchDesigner.
+The existing native Apple Vision smoke test runs only on macOS with the helper
+built; the pitch, bridge, and subprocess/lifecycle regressions run on Linux too.
 
 Last verified in TouchDesigner **2025.33230**: all Python tests pass; E2 and
 A2 tint yellow and green; missing or empty masks leave the camera unchanged

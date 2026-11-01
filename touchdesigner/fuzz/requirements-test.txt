@@ -1,0 +1,3 @@
+# Standalone Fuzz regression tests on Python 3.12+ (CI uses Ubuntu 24.04).
+# TouchDesigner's embedded Python already supplies its own NumPy.
+numpy==2.5.4
