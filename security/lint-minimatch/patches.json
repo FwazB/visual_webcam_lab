@@ -1,0 +1,225 @@
+{
+  "packages": {
+    "@eslint/config-array": "0.21.2",
+    "@eslint/eslintrc": "3.3.5",
+    "eslint-plugin-react": "7.37.5",
+    "eslint-plugin-import": "2.32.0",
+    "eslint-plugin-jsx-a11y": "6.10.2",
+    "eslint": "9.39.4"
+  },
+  "files": [
+    {
+      "path": "@eslint/config-array/dist/esm/index.js",
+      "beforeSha256": "0e9b40905950dc84f4e69d53833a354787a4558e06aaf5446ac0dd5cf0788c24",
+      "afterSha256": "569cf86212b3aea43eec256dcc923a9581277e40a050c3ea635981c9ab75ee5f",
+      "replacements": [
+        {
+          "from": "import minimatch from 'minimatch';",
+          "to": "import * as minimatch from 'minimatch';",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "path": "@eslint/eslintrc/lib/config-array/override-tester.js",
+      "beforeSha256": "2aef71cc401e776a9a9f531619ff6a7dbd90cfbbf46afad1c9bdeb566879e69c",
+      "afterSha256": "f4cf1f4e03de78918ee2f81ccc5d0fa330409e9161ed06226ab8f105f31a8cf5",
+      "replacements": [
+        {
+          "from": "import minimatch from \"minimatch\";",
+          "to": "import * as minimatch from \"minimatch\";",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "path": "eslint-plugin-react/lib/rules/forbid-component-props.js",
+      "beforeSha256": "2f928750174f7c93846598ba7939cdc0844ebda46954be2c990b056c9ec662b6",
+      "afterSha256": "e1f0a7212ac018f4e7397621b308189c18ecfe751dee39bcdce69f7835817b13",
+      "replacements": [
+        {
+          "from": "const minimatch = require('minimatch');",
+          "to": "const { minimatch } = require('minimatch');",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "path": "eslint-plugin-react/lib/rules/jsx-handler-names.js",
+      "beforeSha256": "2a0ffd32c997da581b9b7acecfec800b126774902fd06c09e08a8803e44155ca",
+      "afterSha256": "fc5845254b1dfc62295c880c7915da28eca7387f4a7a9baa3918e12391150575",
+      "replacements": [
+        {
+          "from": "const minimatch = require('minimatch');",
+          "to": "const { minimatch } = require('minimatch');",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "path": "eslint-plugin-react/lib/rules/jsx-pascal-case.js",
+      "beforeSha256": "dc9cdba6bd5897142976cf0ce68bc3cb134c45da8c2883c88c1db9ba933f0f17",
+      "afterSha256": "d1d48f828c01bca90bf4558931db2aeaf6e0fc9b8c27c89128484820a907c7cd",
+      "replacements": [
+        {
+          "from": "const minimatch = require('minimatch');",
+          "to": "const { minimatch } = require('minimatch');",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "path": "eslint-plugin-react/lib/rules/no-danger.js",
+      "beforeSha256": "61f9fd97581e959d75bfb7ef030e9fb7b74c2df224980bed89f6463d05d2734a",
+      "afterSha256": "b87af897c6aba046e5dccd4ba9f085979c2c78f796aa1e114910de348c29f302",
+      "replacements": [
+        {
+          "from": "const minimatch = require('minimatch');",
+          "to": "const { minimatch } = require('minimatch');",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "path": "eslint-plugin-react/lib/rules/no-unstable-nested-components.js",
+      "beforeSha256": "5ae81f553263438f6fc9e059872fb617519fa8de08777a78a06a738db12313e8",
+      "afterSha256": "c8c6b1c7dae28c91158458fe12398987d703ef6e528808a8004636f5879369e3",
+      "replacements": [
+        {
+          "from": "const minimatch = require('minimatch');",
+          "to": "const { minimatch } = require('minimatch');",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "path": "eslint-plugin-import/lib/rules/extensions.js",
+      "beforeSha256": "fe98adecf33a02952d842227014535fc390f4d18c96a4944f4c90783d4af3945",
+      "afterSha256": "3e408b095b8986e78f77261c2c5a3cc39e9194a81cc9099112333d00c68f70f4",
+      "replacements": [
+        {
+          "from": "var _minimatch = require('minimatch');",
+          "to": "var _minimatch = require('minimatch').minimatch;",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "path": "eslint-plugin-import/lib/rules/no-extraneous-dependencies.js",
+      "beforeSha256": "58e174298161b31c7dc4f345543cb2707346f3072a9145f78a0fd5e914484b19",
+      "afterSha256": "e833104f23cdcd6d98b8c24e574e5f4c188f5771d595dc228512526c2962db88",
+      "replacements": [
+        {
+          "from": "var _minimatch = require('minimatch');",
+          "to": "var _minimatch = require('minimatch').minimatch;",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "path": "eslint-plugin-import/lib/rules/no-import-module-exports.js",
+      "beforeSha256": "d83581c24ae4fb0fc00dce02f3deec9e0bdf4cc624bf1b7e374e2aee79d3ba66",
+      "afterSha256": "b6e666932f0623711504d65efc3e2b664c360ab1a842d795c95a80685f1f9155",
+      "replacements": [
+        {
+          "from": "var _minimatch = require('minimatch');",
+          "to": "var _minimatch = require('minimatch').minimatch;",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "path": "eslint-plugin-import/lib/rules/no-namespace.js",
+      "beforeSha256": "39d2140a547b9825ef630e922b680dc938786258af5029b02f47eea625013d84",
+      "afterSha256": "ad2cae576c241a4c88d0713c7318028343341ae0d63229c7bcfae6e6685d189d",
+      "replacements": [
+        {
+          "from": "var _minimatch = require('minimatch');",
+          "to": "var _minimatch = require('minimatch').minimatch;",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "path": "eslint-plugin-import/lib/rules/no-unassigned-import.js",
+      "beforeSha256": "e565350ae91b62d9c104c51c73ae88d58f4a2ef7caafc83755cf2887bb86d58c",
+      "afterSha256": "4af9d1677c409d74b1f201420f467c04a1a4ef6e0062095722caa73570e3dab3",
+      "replacements": [
+        {
+          "from": "var _minimatch = require('minimatch');",
+          "to": "var _minimatch = require('minimatch').minimatch;",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "path": "eslint-plugin-import/lib/rules/order.js",
+      "beforeSha256": "83fd2c12da1f437288b006abe4f0a9ffc68eca385964e4c1ea014a053730cfe6",
+      "afterSha256": "bed741750e6b05b131a14b395f89b6e4a97bd3e9d8f69bac1eb0b0d7ba07fdb9",
+      "replacements": [
+        {
+          "from": "var _minimatch = require('minimatch');",
+          "to": "var _minimatch = require('minimatch').minimatch;",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "path": "eslint-plugin-import/lib/rules/no-internal-modules.js",
+      "beforeSha256": "f36ab9b9b97cc2d8a49f8fe474c4200875db4fa357c5061fe71538b01db696a4",
+      "afterSha256": "34a611fe1ee692faee24f890a4ae90ab33d2e80db87497185191dabb1439cc62",
+      "replacements": [
+        {
+          "from": "var _minimatch = require('minimatch');var _minimatch2 = _interopRequireDefault(_minimatch);",
+          "to": "var _minimatch = require('minimatch');",
+          "count": 1
+        },
+        {
+          "from": "_minimatch2['default'].makeRe(p)",
+          "to": "new _minimatch.Minimatch(p)",
+          "count": 2
+        },
+        {
+          "from": "allowRegexps",
+          "to": "allowMatchers",
+          "count": 2
+        },
+        {
+          "from": "forbidRegexps",
+          "to": "forbidMatchers",
+          "count": 2
+        },
+        {
+          "from": "function (re) {return re.test(importPath);}",
+          "to": "function (matcher) {return matcher.match(importPath);}",
+          "count": 2
+        }
+      ]
+    },
+    {
+      "path": "eslint-plugin-jsx-a11y/lib/util/mayContainChildComponent.js",
+      "beforeSha256": "d2a7fd3e513a42ab781543d6529776950f240249f9367f94899dbc9258e198d0",
+      "afterSha256": "f6b15d0d9d9d3958bcbe95426e93d53cdc657915f2b83c049c206b8c144ab595",
+      "replacements": [
+        {
+          "from": "_interopRequireDefault(require(\"minimatch\"))",
+          "to": "_interopRequireDefault(require(\"minimatch\").minimatch)",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "path": "eslint-plugin-jsx-a11y/lib/util/mayHaveAccessibleLabel.js",
+      "beforeSha256": "e765378d87cca48ac64e76967edfb33c52a9423c6822fd048024c88296ba9a2b",
+      "afterSha256": "903fcc41c4712b87f7c92bb3989591ebb2285b6fbfef7c3ab5da41fdc2fd4839",
+      "replacements": [
+        {
+          "from": "_interopRequireDefault(require(\"minimatch\"))",
+          "to": "_interopRequireDefault(require(\"minimatch\").minimatch)",
+          "count": 1
+        }
+      ]
+    }
+  ],
+  "minimatchVersion": "11.0.3"
+}

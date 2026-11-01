@@ -3,32 +3,42 @@
 A browser guitar and bass trainer that listens to your instrument, a small
 multitrack recording studio, and TouchDesigner for visuals. Next.js app,
 AudioWorklet pitch detection and recording, Tone.js click and backing, and
-MediaPipe hand tracking for the camera mirror.
+MediaPipe hand tracking with a real-fretboard detection and tracking preview.
 
 Live: the body-synth project on Vercel deploys `main`.
 
-## Current verification and accepted dependency exception — 2026-11-01
+## Current security checks — 2026-11-01
 
-The maintainer has accepted a **documented development-dependency exception** for the current publication candidate. This does not waive other security checks or authorize a deployment.
+Production and development dependency audits now require **zero findings**.
+The former minimatch exception is removed: actual registry `minimatch@11.0.3`
+runs behind small, version- and hash-checked updates to its legacy lint
+consumers. Lint rules remain enabled. See the
+[compatibility patch maintenance notes](security/lint-minimatch/README.md).
 
-- `npm audit` still reports **15 moderate aggregate entries**, all tracing to `GHSA-g3hv-75wg-m249` through legacy `minimatch@3.1.5`. No findings were suppressed. Production-only and isolated playing-vision dependency audits report **zero**.
-- The reviewed global advisory lists `<11.0.1` as affected, while the publisher repository advisory lists `10.2.6`. The described preprocessing function/options are absent from the installed legacy implementation. This is an applicability discrepancy, **not proof of safety or an official withdrawal**.
-- Compatible lint-toolchain updates retain the finding. A forced minimatch 11 replacement breaks legacy callable CommonJS/`makeRe` APIs; an ESLint 10 experiment produces invalid peer dependencies. Those incompatible changes were rejected, preserving existing lint checks.
-- Revisit the exception when advisory metadata, a compatible legacy release or consumer dependencies change; reassess sooner if untrusted glob-pattern processing is introduced. Do not describe the all-dependency audit as clean.
+CSP is enforced, with the JavaScript evaluation exception restricted to the
+OpenCV worker. The Fuzz bridge bounds connections and expires unpaired clients.
 
-Verification of the retained candidate passed: **99 app tests on Node 24 and 26**, 50 Python tests (1 optional skip), 7 spike core tests, 4 fork regressions, lint, production build, clean installation/dependency tree, HTTP/privacy checks and secret scans.
+The current fretboard candidate and broader security review are documented in
+[the candidate audit](docs/security-audit.md#real-fretboard-candidate-review-2026-11-01),
+including media cleanup fixes, regression results and remaining limits.
 
-The complete playing-vision browser smoke now passes native decoded synthetic-video audio through the AudioWorklet to **55 Hz / MIDI 33**, along with model inference/export and capture-lifecycle regressions. Analysis-only audio uses a feature-detected silent sink to avoid a reproduced default-output clock stall. Unsupported-browser fallback and physical bass accuracy remain unverified; synthetic fixtures are not real playing validation.
+An earlier baseline browser check passed native decoded synthetic-video audio
+through the AudioWorklet to **55 Hz / MIDI 33**, along with model inference/export
+and capture-lifecycle regressions. That browser check was not repeated for this
+candidate. Analysis-only audio uses a feature-detected silent sink to avoid a
+reproduced default-output clock stall. Unsupported-browser fallback and physical
+bass accuracy remain unverified; synthetic fixtures are not real playing validation.
 
-These are **local source results**, not a production deployment. This project documents a `main`-branch Vercel integration; confirm deployment behavior before pushing. The accepted dependency exception does not approve automatic deployment.
+These are **local source results**, not a production deployment. Vercel is
+configured to deploy `main`; other branches have deployment disabled.
 
 See [security audit](docs/security-audit.md) and [playing-vision experiment](spikes/playing-vision/README.md).
 
 ## Routes
 
-- `/guitar` and `/bass`: fretboard trainer. Listens to the instrument over a
-  USB interface (Positive Grid Spark), shows targets and the notes you play
-  on a fretboard diagram, and scores lessons and songs.
+- `/guitar` and `/bass`: camera-first fretboard trainer. Finds a neck outline,
+  tracks an accepted reference, maps estimated fingertips, and compares visible positions with
+  USB instrument audio (Positive Grid Spark), and scores lessons by pitch.
 - `/studio`: multitrack recorder for the guitar: record takes over a click,
   arrange and trim them, export a WAV.
 - `/for-you`: practice picks, with an optional read-only Spotify connection.
@@ -72,8 +82,51 @@ Details and hardware limits: [Spark PEDAL guide](docs/spark-pedal.md).
 
 ## Trainer
 
-Everything is scored from the pitch the trainer hears. The fretboard diagram
-under the camera shows the targets, and each note you play pulses on it:
+The main view shows your real instrument. **Find fretboard** searches a frozen
+camera frame for a likely outline using string and fret-line geometry. Check
+the outline, low/high string sides and actual first/last fret numbers once,
+then choose **Use this outline**. A cropped neck does not establish absolute
+fret numbering; use 0 only when the selected wire is the nut. The detector is
+experimental and can miss a neck or propose the wrong region.
+
+**Mark manually** is the fallback. Choose two visible fret wires and mark four
+intersections on the frozen image in the displayed order: low string / first
+wire, high string / first wire, low string / last wire, high string / last wire.
+Arrow keys move the crosshair (Shift for fine movement); Enter marks a point.
+Both setup paths use physical, unequal fret spacing for standard six-string
+guitar or four-string bass.
+
+After setup, an OpenCV worker matches features against the original neck image
+and estimates a perspective transform as the guitar moves. Hand regions are
+excluded from the feature search when fresh hand observations are available.
+The immutable reference limits cumulative drift. Weak or stale matches hide
+the overlay; tracking keeps searching for the same reference and can reacquire
+it without another setup. Blur, strong viewpoint changes and low-detail necks
+can still lose tracking. Camera source, track or resolution changes require a
+new reference. There is no stationary-calibration fallback on tracking loss.
+
+The ring is the lesson target;
+numbered dots are estimated fingertips. **Seen** and **Heard** remain separate:
+matching pitch means compatibility, not verified string contact or pressure.
+Ambiguous positions remain uncertain, stale hand/neck/audio frames expire, and an
+absent finger never establishes an open string. Use single notes. Accuracy and
+latency on real guitar playing still need physical validation; synthetic
+geometry, actual-WASM synthetic motion tests and component tests do not establish
+recognition quality. Neck and finger observations must also be close in time.
+
+The reference image lives in page memory and disappears on reset/reload. Frames
+are processed locally in a Web Worker, one at a time; camera images are not
+uploaded or saved. The pinned Apache-2.0 OpenCV runtime is copied from the
+lockfile dependency into same-origin `/vision/` assets by the `predev`,
+`prebuild` and `pretest` scripts. No external inference service or trained neck
+model is used. The generated runtime and its license are Git-ignored build
+assets. Authored worker/detector/tracker code remains in source control.
+
+Implementation references: [OpenCV feature matching and homography](https://docs.opencv.org/4.13.0/d1/de0/tutorial_py_feature_homography.html)
+and the [OpenCV.js distribution](https://github.com/TechStark/opencv-js).
+
+Lessons and songs are still scored from pitch alone. The collapsible **Lesson
+map** shows targets and estimated played positions. Each note pulses on it:
 green when it was right, white otherwise. When a pitch exists in several
 places on the neck, the pulse is drawn at the matching target, or at the
 position nearest the current target.
@@ -237,6 +290,7 @@ needed.
 ```bash
 npm run lint
 npm test
+node --test spikes/playing-vision/tests/*.test.mjs
 npm run test:fuzz
 npm run build
 npm audit
@@ -244,5 +298,5 @@ npm audit
 npm run smoke -- http://127.0.0.1:3000
 ```
 
-Security headers, including a report-only Content-Security-Policy, are set in
+Security headers, including an enforced Content-Security-Policy, are set in
 `next.config.ts`. Audit scope and limits: [docs/security-audit.md](docs/security-audit.md).

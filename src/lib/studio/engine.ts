@@ -45,6 +45,7 @@ export class StudioEngine {
   private countInEnd = -Infinity;
   private take: { chunks: Float32Array[][]; start: number; from: number } | null = null;
   private onStopped: (() => void) | null = null;
+  private closed = false;
 
   private constructor(ctx: AudioContext, recorder: AudioWorkletNode) {
     this.ctx = ctx;
@@ -90,17 +91,31 @@ export class StudioEngine {
   }
 
   attachInput(stream: MediaStream): void {
+    if (this.closed || this.ctx.state === "closed") {
+      stream.getTracks().forEach((track) => track.stop());
+      throw new Error("Studio is no longer open.");
+    }
     this.detachInput();
-    this.stream = stream;
-    this.input = this.ctx.createMediaStreamSource(stream);
-    this.input.connect(this.recorder);
+    let input: MediaStreamAudioSourceNode | null = null;
+    try {
+      input = this.ctx.createMediaStreamSource(stream);
+      input.connect(this.recorder);
+      this.stream = stream;
+      this.input = input;
+    } catch (error) {
+      try { input?.disconnect(); } catch { /* The failed graph may already be disconnected. */ }
+      stream.getTracks().forEach((track) => track.stop());
+      throw error;
+    }
   }
 
   detachInput(): void {
-    this.input?.disconnect();
+    const input = this.input;
+    const stream = this.stream;
     this.input = null;
-    this.stream?.getTracks().forEach((track) => track.stop());
     this.stream = null;
+    try { input?.disconnect(); } catch { /* Release capture even if the graph is already closed. */ }
+    stream?.getTracks().forEach((track) => track.stop());
   }
 
   /** Output latency plus the input latency the browser reports (s). */
@@ -203,10 +218,15 @@ export class StudioEngine {
   }
 
   close(): void {
-    this.halt();
-    this.detachInput();
-    this.recorder.disconnect();
-    this.ctx.close().catch(() => {});
+    if (this.closed) return;
+    this.closed = true;
+    try {
+      this.halt();
+    } finally {
+      this.detachInput();
+      try { this.recorder.disconnect(); }
+      finally { this.ctx.close().catch(() => {}); }
+    }
   }
 
   private halt(): void {

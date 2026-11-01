@@ -31,6 +31,8 @@ jobs:
       - run: npm ls --all
       - run: npm run lint
       - run: npm test
+      - name: Check isolated vision geometry and media lifecycle
+        run: node --test spikes/playing-vision/tests/*.test.mjs
       - name: Install Fuzz test dependencies
         run: |
           python3 -m venv "$RUNNER_TEMP/fuzz-venv"
@@ -41,5 +43,5 @@ jobs:
       - run: npm run build
       - name: Fail on every production advisory
         run: npm audit --omit=dev --audit-level=low
-      - name: Enforce the narrow accepted development exception
+      - name: Fail on every production and development advisory
         run: node scripts/audit-policy.cjs

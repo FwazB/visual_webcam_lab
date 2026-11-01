@@ -179,7 +179,7 @@ that shared file:
    Storage appears as hex-encoded pickle
    payloads in `.n` files; inspect opcodes with `pickletools`, never execute
    an unknown pickle. The `dict` and `idict` pairing values must be `None`,
-   and `fuzzClients` must be empty. Raw text searches alone miss storage.
+   and `fuzzClients` and `fuzzPending` must be empty. Raw text searches alone miss storage.
 5. Reopen and verify output, fresh pairing, loopback binding, and operator
    errors before copying the checked artifact to `fuzz.toe`. Check both views
    after building the local helper; do not include `.build` binaries or raw
@@ -221,7 +221,14 @@ before commands. Welcome and a complete state snapshot confirm connection.
 
 Only Amount, Feedback, Blackout, song chord/hit events, transport, and heartbeat
 messages are accepted. The bridge validates types, finite numbers, ranges,
-and an 8 KB message limit. It never evaluates app-supplied Python, files, or
+and an 8 KB message limit. It allows at most 8 pending handshakes and 16 total
+connections. A connection must pair within 5 seconds; an independent wall-clock
+timer expires silent clients even while the project timeline is paused.
+Malformed messages before pairing close the connection immediately. A scheduler
+failure also closes pending connections; a native socket-close failure stops
+the listener. These bounds protect the application
+callback state; they do not replace native HTTP/WebSocket connection limits.
+It never evaluates app-supplied Python, files, or
 operator paths. HTTP requests expose no state. This runtime bridge is separate
 from the development MCP on port 9981.
 The Lights-page controls are local TouchDesigner parameters.
@@ -266,14 +273,19 @@ NumPy; do not install these standalone dependencies into TouchDesigner.
 The existing native Apple Vision smoke test runs only on macOS with the helper
 built; the pitch, bridge, and subprocess/lifecycle regressions run on Linux too.
 
-Last verified in TouchDesigner **2025.33230**: all Python tests pass; E2 and
+The previous shared artifact was verified in TouchDesigner **2025.33230**:
+the then-current Python tests passed; E2 and
 A2 tint yellow and green; missing or empty masks leave the camera unchanged
 and the light-only output black; a live person mask drives nonzero light
 output; the mapper receives both Syphon senders; the Spark USB input routes
-to the MacBook speakers when **Monitor guitar** is on. The shared `fuzz.toe`
-reopens at 1280×720 without operator errors, with fresh pairing and the bridge
-on `127.0.0.1`, and passes the credential and cache scans above.
+to the MacBook speakers when **Monitor guitar** is on. That `fuzz.toe`
+reopened at 1280×720 without operator errors, with fresh pairing and the bridge
+on `127.0.0.1`, and passed the credential and cache scans above.
 
 Artifact hashes are in [the security audit](../../docs/security-audit.md).
+The 2026-11-01 bridge update was synchronized into the shared artifact with
+`toeexpand`/`toecollapse`, re-expanded, and checked for source equality and clean
+storage/caches. Its timeout and capacity behavior passed standalone regression
+tests; this update was not reopened in the native application.
 Real-note pitch accuracy, moving-person alignment and physical projector
 alignment remain hardware tests.

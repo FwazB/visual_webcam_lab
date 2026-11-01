@@ -258,6 +258,7 @@ callbacks = ensure(base, "textDAT", "bridge_callbacks")
 callbacks.text = callback_source
 setpar(bridge, "callbacks", "bridge_callbacks")
 bridge.store("fuzzClients", {})
+bridge.store("fuzzPending", {})
 startup = ensure(base, "executeDAT", "startup")
 startup.text = '''def onStart():
     me.parent().op("pitch_callbacks").module.reset()

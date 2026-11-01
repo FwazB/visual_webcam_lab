@@ -12,6 +12,12 @@ import time
 
 PROTOCOL_VERSION = 1
 MAX_MESSAGE_BYTES = 8192
+MAX_PENDING_CLIENTS = 8
+MAX_CLIENTS = 16
+HELLO_TIMEOUT_SECONDS = 5.0
+# Run handles stay in module memory, never in serialized operator storage.
+# One job per bridge also bounds timer allocation during connection churn.
+_expiry_jobs = {}
 CHORD_INDEX = {"c9sus4": 0, "dm7": 1, "gm": 2}
 DEFAULT_PARAMETERS = {
     "visual.fuzz.amount": 0.2,
@@ -31,6 +37,55 @@ CAPABILITIES = {
 
 def _clients(server):
     return server.fetch("fuzzClients", {}, storeDefault=True)
+
+
+def _pending(server):
+    return server.fetch("fuzzPending", {}, storeDefault=True)
+
+
+def _cancel_expiry(server):
+    entry = _expiry_jobs.pop(server, None)
+    if entry is not None:
+        try:
+            entry[1].kill()
+        except Exception:
+            # Native handles may already have left the queue. The removed
+            # token still makes any delayed callback harmless.
+            pass
+
+
+def _expire_pending(server):
+    now = time.monotonic()
+    for client, deadline in list(_pending(server).items()):
+        if now >= deadline:
+            _close(server, client)
+
+
+def _expiry_tick(server, token):
+    entry = _expiry_jobs.get(server)
+    if entry is None or entry[0] is not token:
+        return
+    _expiry_jobs.pop(server)
+    _expire_pending(server)
+    _schedule_expiry(server)
+
+
+def _schedule_expiry(server):
+    pending = _pending(server)
+    if not pending or server in _expiry_jobs:
+        return
+    token = object()
+    delay = max(1, math.ceil((min(pending.values()) - time.monotonic()) * 1000))
+    try:
+        # TDResources continues while the project timeline is paused. This is
+        # a fixed local callable; no received text is evaluated as Python.
+        job = run(_expiry_tick, server, token, delayMilliSeconds=delay,
+                  wallTime=True, delayRef=op.TDResources)
+        _expiry_jobs[server] = (token, job)
+    except Exception:
+        # A scheduler failure must not leave an unbounded-lifetime handshake.
+        for client in list(pending):
+            _close(server, client)
 
 
 def _state(server):
@@ -54,8 +109,15 @@ def _error(server, client, code, message, recoverable=True):
 
 
 def _close(server, client):
-    server.webSocketClose(client)
-    onWebSocketClose(server, client)
+    try:
+        server.webSocketClose(client)
+    except Exception:
+        # If native socket teardown fails, stop the listener rather than
+        # retaining an untracked connection or abandoning the expiry sweep.
+        server.par.active = False
+        onServerStop(server)
+    finally:
+        onWebSocketClose(server, client)
 
 
 def _snapshot(server, client):
@@ -98,12 +160,24 @@ def onHTTPRequest(webServerDAT, request, response):
 
 def onWebSocketOpen(webServerDAT, client, uri):
     if uri != "/body-synth":
-        webServerDAT.webSocketClose(client)
+        _close(webServerDAT, client)
         return
-    _clients(webServerDAT)[client] = False
+    _expire_pending(webServerDAT)
+    clients, pending = _clients(webServerDAT), _pending(webServerDAT)
+    if client in clients:
+        return  # Duplicate callbacks cannot extend the original deadline.
+    if len(clients) >= MAX_CLIENTS or len(pending) >= MAX_PENDING_CLIENTS:
+        _close(webServerDAT, client)
+        return
+    clients[client] = False
+    pending[client] = time.monotonic() + HELLO_TIMEOUT_SECONDS
+    _schedule_expiry(webServerDAT)
 
 
 def onWebSocketClose(webServerDAT, client):
+    _pending(webServerDAT).pop(client, None)
+    if not _pending(webServerDAT):
+        _cancel_expiry(webServerDAT)
     was_authenticated = _clients(webServerDAT).pop(client, False)
     if was_authenticated and not any(_clients(webServerDAT).values()):
         _reset_hit(webServerDAT)
@@ -112,7 +186,9 @@ def onWebSocketClose(webServerDAT, client):
 
 
 def onServerStop(webServerDAT):
+    _cancel_expiry(webServerDAT)
     webServerDAT.store("fuzzClients", {})
+    webServerDAT.store("fuzzPending", {})
     _reset_hit(webServerDAT)
     _state(webServerDAT)["running"] = False
 
@@ -131,6 +207,7 @@ def _mark_runtime_storage(server):
     server.parent().storeStartupValue("pairingCode", None)
     server.parent().storeStartupValue("lastHitAt", -1000.0)
     server.storeStartupValue("fuzzClients", {})
+    server.storeStartupValue("fuzzPending", {})
 
 
 def onServerStart(webServerDAT):
@@ -169,8 +246,11 @@ def prepare_for_export(server):
 
 
 def onWebSocketReceiveText(webServerDAT, client, data):
+    # Enforce the deadline here too if the native event loop delivered a
+    # message before dispatching its overdue timer.
+    _expire_pending(webServerDAT)
     if client not in _clients(webServerDAT):
-        webServerDAT.webSocketClose(client)
+        _close(webServerDAT, client)
         return
     try:
         valid_size = isinstance(data, str) and len(data.encode("utf-8")) <= MAX_MESSAGE_BYTES
@@ -183,10 +263,16 @@ def onWebSocketReceiveText(webServerDAT, client, data):
     try:
         message = json.loads(data)
     except (ValueError, TypeError, RecursionError):
-        _error(webServerDAT, client, "invalid_message", "Expected a JSON object.")
+        authenticated = _clients(webServerDAT)[client]
+        _error(webServerDAT, client, "invalid_message", "Expected a JSON object.", authenticated)
+        if not authenticated:
+            _close(webServerDAT, client)
         return
     if not isinstance(message, dict) or not isinstance(message.get("type"), str):
-        _error(webServerDAT, client, "invalid_message", "Expected a typed JSON object.")
+        authenticated = _clients(webServerDAT)[client]
+        _error(webServerDAT, client, "invalid_message", "Expected a typed JSON object.", authenticated)
+        if not authenticated:
+            _close(webServerDAT, client)
         return
 
     kind = message["type"]
@@ -209,6 +295,9 @@ def onWebSocketReceiveText(webServerDAT, client, data):
             _close(webServerDAT, client)
             return
         _clients(webServerDAT)[client] = True
+        _pending(webServerDAT).pop(client, None)
+        if not _pending(webServerDAT):
+            _cancel_expiry(webServerDAT)
         _send(webServerDAT, client, {
             "type": "welcome", "protocolVersion": PROTOCOL_VERSION,
             "engineVersion": "fuzz-1", "capabilities": CAPABILITIES,

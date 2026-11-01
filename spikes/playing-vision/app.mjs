@@ -9,16 +9,21 @@ const status=text=>$('status').textContent=text;
 function guard(fn){return async(...args)=>{try{await fn(...args);}catch(e){running=false;status(e.message);console.error(e);}};}
 function clearEvidence(){last=null;heard=null;$('seen').textContent='No frame analyzed';$('heard').textContent='Audio disconnected';$('matched').textContent='Unconfirmed';$('output').textContent='No observations yet.';$('output').dataset.hands='0';}
 async function stopAudio(){
- audioStream?.getTracks().forEach(t=>t.stop());audioStream=null;
- audioNode?.disconnect();audioNode=null;
- if(audioContext&&audioContext.state!=='closed')await audioContext.close();audioContext=null;heard=null;
+ const ownedStream=audioStream,ownedNode=audioNode,ownedContext=audioContext;
+ audioStream=null;audioNode=null;audioContext=null;heard=null;
+ ownedStream?.getTracks().forEach(t=>t.stop());
+ if(ownedNode){ownedNode.port.onmessage=null;try{ownedNode.disconnect();}catch{}}
+ if(ownedContext&&ownedContext.state!=='closed')try{await ownedContext.close();}catch{}
 }
 async function stopSource(){
- generation++;runId++;running=false;stream?.getTracks().forEach(t=>t.stop());stream=null;
- video?.pause();await stopAudio();if(video){video.srcObject=null;video.removeAttribute('src');video.load();}
- source=null;video=null;$('video-controls').replaceChildren();
- if(objectURL)URL.revokeObjectURL(objectURL);objectURL=null;
+ generation++;runId++;running=false;
+ const ownedStream=stream,ownedVideo=video,ownedURL=objectURL;
+ stream=null;source=null;video=null;objectURL=null;
+ ownedStream?.getTracks().forEach(t=>t.stop());
+ if(ownedVideo){ownedVideo.pause();ownedVideo.srcObject=null;ownedVideo.removeAttribute('src');ownedVideo.load();}
+ $('video-controls').replaceChildren();if(ownedURL)URL.revokeObjectURL(ownedURL);
  grid=null;corners=[];calibrating=false;clearEvidence();$('calibration').textContent='No calibration — hand observations only.';
+ await stopAudio();
 }
 function frame(){
  if(!source)throw Error('Open a local image/video or start the camera first.');
@@ -50,33 +55,68 @@ $('file').onchange=guard(async e=>{
 });
 $('camera').onclick=guard(async()=>{
  const epoch=generation+1;await stopSource();if(epoch!==generation)return;
- const acquired=await navigator.mediaDevices.getUserMedia({video:{width:{ideal:1920},height:{ideal:1080}},audio:false});
- if(epoch!==generation){acquired.getTracks().forEach(t=>t.stop());return;}
- stream=acquired;video=document.createElement('video');video.muted=true;video.playsInline=true;video.srcObject=stream;source=video;await video.play();frame();draw();status('Camera active. Audio remains off until Connect audio.');
+ let acquired=null,localVideo=null,started=false;
+ try{
+  acquired=await navigator.mediaDevices.getUserMedia({video:{width:{ideal:1920},height:{ideal:1080}},audio:false});
+  if(epoch!==generation)return;
+  localVideo=document.createElement('video');localVideo.muted=true;localVideo.playsInline=true;localVideo.srcObject=acquired;
+  stream=acquired;video=localVideo;source=localVideo;
+  await localVideo.play();
+  if(epoch!==generation||video!==localVideo||stream!==acquired)return;
+  frame();draw();started=true;status('Camera active. Audio remains off until Connect audio.');
+ }catch(error){
+  if(epoch===generation)throw error;
+ }finally{
+  if(!started){
+   acquired?.getTracks().forEach(t=>t.stop());
+   if(localVideo)try{localVideo.pause();localVideo.srcObject=null;localVideo.removeAttribute('src');localVideo.load();}catch{}
+   if(localVideo&&video===localVideo){
+    source=null;video=null;if(stream===acquired)stream=null;
+    await stopAudio();
+   }
+  }
+ }
 });
 $('audio').onclick=guard(async()=>{
  if(audioContext)return;if(!video)throw Error('Audio requires a video or live camera source.');
- const epoch=generation;let acquired=null;
- if(stream)acquired=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:false},video:false});
- if(epoch!==generation||audioContext){acquired?.getTracks().forEach(t=>t.stop());return;}
- // Analysis never monitors sound. A silent sink also keeps its rendering clock
- // independent of an unavailable/stalled OS output device (where supported).
- const audioOptions='sinkId' in AudioContext.prototype?{sinkId:{type:'none'}}:undefined;
- audioStream=acquired;const localContext=new AudioContext(audioOptions);audioContext=localContext;
- try{await localContext.audioWorklet.addModule('/pitch-processor.js');}catch(e){acquired?.getTracks().forEach(t=>t.stop());if(localContext.state!=='closed')await localContext.close();if(epoch!==generation)return;audioContext=null;throw e;}
- if(epoch!==generation||localContext.state==='closed'){acquired?.getTracks().forEach(t=>t.stop());if(localContext.state!=='closed')await localContext.close();return;}
- const input=acquired?audioContext.createMediaStreamSource(acquired):audioContext.createMediaElementSource(video);
- audioNode=new AudioWorkletNode(audioContext,'pitch-processor');
- audioNode.port.postMessage({type:'config',profile:{fMin:30,fMax:800,windowMs:93,hopMs:23.2,clarityThreshold:0.85,gateDb:-45}});
- const silence=audioContext.createGain();silence.gain.value=0;input.connect(audioNode);audioNode.connect(silence);silence.connect(audioContext.destination);
- audioNode.port.onmessage=e=>{
-  const d=e.data;if(d.type!=='frame'||!audioContext)return;
-  const at=performance.now()-(audioContext.currentTime-d.t)*1000;
-  heard=d.hz>0&&d.clarity>=0.85?{midi:Math.round(69+12*Math.log2(d.hz/440)),hz:d.hz,clarity:d.clarity,at}:null;
-  $('heard').textContent=heard?`MIDI ${heard.midi} · ${heard.hz.toFixed(1)} Hz`:'No clear sounded pitch';
- };
- await audioContext.resume();if(!acquired){video.muted=false;await video.play();}
- status(acquired?'Microphone active; monitored silently.':'Video audio active; monitored silently.');
+ const epoch=generation,sourceVideo=video;
+ let acquired=null,localContext=null,localNode=null,input=null,silence=null,started=false;
+ const current=()=>epoch===generation&&video===sourceVideo;
+ try{
+  if(stream)acquired=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:false},video:false});
+  if(!current()||audioContext)return;
+  // Own every acquired resource before any setup operation can throw. Analysis
+  // stays silent, including browsers that support an independent silent sink.
+  const audioOptions='sinkId' in AudioContext.prototype?{sinkId:{type:'none'}}:undefined;
+  localContext=new AudioContext(audioOptions);audioContext=localContext;audioStream=acquired;
+  await localContext.audioWorklet.addModule('/pitch-processor.js');
+  if(!current()||audioContext!==localContext||localContext.state==='closed')return;
+  input=acquired?localContext.createMediaStreamSource(acquired):localContext.createMediaElementSource(sourceVideo);
+  localNode=new AudioWorkletNode(localContext,'pitch-processor');audioNode=localNode;
+  localNode.port.postMessage({type:'config',profile:{fMin:30,fMax:800,windowMs:93,hopMs:23.2,clarityThreshold:0.85,gateDb:-45}});
+  silence=localContext.createGain();silence.gain.value=0;input.connect(localNode);localNode.connect(silence);silence.connect(localContext.destination);
+  localNode.port.onmessage=e=>{
+   const d=e.data;if(d.type!=='frame'||!current()||audioContext!==localContext)return;
+   const at=performance.now()-(localContext.currentTime-d.t)*1000;
+   heard=d.hz>0&&d.clarity>=0.85?{midi:Math.round(69+12*Math.log2(d.hz/440)),hz:d.hz,clarity:d.clarity,at}:null;
+   $('heard').textContent=heard?`MIDI ${heard.midi} · ${heard.hz.toFixed(1)} Hz`:'No clear sounded pitch';
+  };
+  await localContext.resume();
+  if(!current()||audioContext!==localContext||localContext.state==='closed')return;
+  if(!acquired){sourceVideo.muted=false;await sourceVideo.play();}
+  if(!current()||audioContext!==localContext||localContext.state==='closed')return;
+  started=true;status(acquired?'Microphone active; monitored silently.':'Video audio active; monitored silently.');
+ }catch(error){
+  if(current())throw error;
+ }finally{
+  if(!started){
+   acquired?.getTracks().forEach(t=>t.stop());
+   if(localNode)localNode.port.onmessage=null;
+   for(const node of [input,localNode,silence])if(node)try{node.disconnect();}catch{}
+   if(localContext&&audioContext===localContext){audioContext=null;audioNode=null;audioStream=null;heard=null;}
+   if(localContext&&localContext.state!=='closed')try{await localContext.close();}catch{}
+  }
+ }
 });
 async function analyze(){
  if(busy)return;if(!models)throw Error('Load RTMPose first.');if(calibrating)throw Error('Finish or clear calibration first.');

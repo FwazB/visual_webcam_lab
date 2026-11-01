@@ -79,12 +79,15 @@ export function useGuitarPitch(profile: InstrumentProfile): GuitarPitch {
   const noteCbs = useRef(new Set<(e: NoteEvent) => void>());
   const tuningRef = useRef(tuning);
   const startAttemptRef = useRef(0);
+  const discoveryAbortRef = useRef<AbortController | null>(null);
   useEffect(() => {
     tuningRef.current = tuning;
   });
 
   const stop = useCallback(() => {
     startAttemptRef.current++;
+    discoveryAbortRef.current?.abort();
+    discoveryAbortRef.current = null;
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
     nodeRef.current?.port.close();
@@ -219,8 +222,10 @@ export function useGuitarPitch(profile: InstrumentProfile): GuitarPitch {
     const attempt = startAttemptRef.current;
     setStatus("starting");
     setError(null);
+    const discovery = new AbortController();
+    discoveryAbortRef.current = discovery;
     try {
-      const list = await listAudioInputs();
+      const list = await listAudioInputs(discovery.signal);
       if (attempt !== startAttemptRef.current) return;
       setDevices(list);
       const preferred = pickPreferredDevice(list);
@@ -235,6 +240,8 @@ export function useGuitarPitch(profile: InstrumentProfile): GuitarPitch {
       if (attempt !== startAttemptRef.current) return;
       setError(err instanceof Error ? err.message : String(err));
       setStatus("error");
+    } finally {
+      if (discoveryAbortRef.current === discovery) discoveryAbortRef.current = null;
     }
   }, [startWithDevice, stop]);
 
@@ -264,13 +271,23 @@ export function useGuitarPitch(profile: InstrumentProfile): GuitarPitch {
     };
     window.addEventListener("focus", onFocus);
     document.addEventListener("visibilitychange", onFocus);
-    const onDeviceChange = () => listAudioInputs().then(setDevices).catch(() => {});
+    let refresh = 0;
+    const onDeviceChange = () => {
+      if (ctxRef.current !== ctx) return;
+      const request = ++refresh;
+      // A device notification refreshes metadata only; it must never prompt
+      // for or open another microphone in the background.
+      void navigator.mediaDevices.enumerateDevices().then((list) => {
+        if (request === refresh && ctxRef.current === ctx) setDevices(list.filter((device) => device.kind === "audioinput"));
+      }).catch(() => {});
+    };
     navigator.mediaDevices.addEventListener("devicechange", onDeviceChange);
     return () => {
       window.clearInterval(id);
       window.removeEventListener("focus", onFocus);
       document.removeEventListener("visibilitychange", onFocus);
       navigator.mediaDevices.removeEventListener("devicechange", onDeviceChange);
+      refresh++;
     };
   }, [context]);
 

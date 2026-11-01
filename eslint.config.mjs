@@ -1,6 +1,9 @@
 import { defineConfig, globalIgnores } from "eslint/config";
 import nextVitals from "eslint-config-next/core-web-vitals";
 import nextTs from "eslint-config-next/typescript";
+import lintPreparation from "./scripts/patch-lint-minimatch.cjs";
+
+lintPreparation.prepare({ checkOnly: true });
 
 const eslintConfig = defineConfig([
   ...nextVitals,
@@ -14,6 +17,7 @@ const eslintConfig = defineConfig([
     "next-env.d.ts",
     // Vendored upstream code has its own security regression tests.
     "security/braces-depthguard/**",
+    "public/vision/opencv-*.js",
   ]),
 ]);
 

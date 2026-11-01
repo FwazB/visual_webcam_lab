@@ -75,10 +75,40 @@ class Server(Storage):
         self.closed.append(client)
 
 
+class ScheduledRun:
+    def __init__(self, callback, args, options):
+        self.callback, self.args, self.options = callback, args, options
+        self.killed = False
+
+    def kill(self):
+        self.killed = True
+
+    def fire(self):
+        # Can simulate an obsolete native callback even after cancellation.
+        self.callback(*self.args)
+
+
 class BridgeTests(unittest.TestCase):
     def setUp(self):
+        self.jobs = []
+        self.clock = patch.object(bridge.time, "monotonic", return_value=100)
+        self.clock.start()
+        self.addCleanup(self.clock.stop)
+        self.run_patch = patch.object(bridge, "run", self.schedule, create=True)
+        self.run_patch.start()
+        self.addCleanup(self.run_patch.stop)
+        self.td_resources = object()
+        self.op_patch = patch.object(bridge, "op", SimpleNamespace(TDResources=self.td_resources), create=True)
+        self.op_patch.start()
+        self.addCleanup(self.op_patch.stop)
         self.server = Server()
+        self.addCleanup(bridge.onServerStop, self.server)
         bridge.onWebSocketOpen(self.server, "client", "/body-synth")
+
+    def schedule(self, callback, *args, **options):
+        job = ScheduledRun(callback, args, options)
+        self.jobs.append(job)
+        return job
 
     def send(self, message, client="client"):
         bridge.onWebSocketReceiveText(self.server, client, json.dumps(message))
@@ -100,6 +130,165 @@ class BridgeTests(unittest.TestCase):
         self.assertIn("other", self.server.closed)
         self.assertNotIn("other", bridge._clients(self.server))
 
+    def test_pending_client_flood_is_bounded_with_one_timer(self):
+        for index in range(1000):
+            bridge.onWebSocketOpen(self.server, "pending-" + str(index), "/body-synth")
+        self.assertEqual(len(bridge._clients(self.server)), bridge.MAX_PENDING_CLIENTS)
+        self.assertEqual(len(bridge._pending(self.server)), bridge.MAX_PENDING_CLIENTS)
+        self.assertEqual(len(self.server.closed), 1001 - bridge.MAX_PENDING_CLIENTS)
+        self.assertEqual(len(self.jobs), 1)
+        self.assertEqual(bridge._state(self.server)["revision"], 0)
+
+    def test_paired_clients_release_pending_slots_but_total_is_bounded(self):
+        self.pair()
+        for index in range(1, bridge.MAX_CLIENTS):
+            client = "paired-" + str(index)
+            bridge.onWebSocketOpen(self.server, client, "/body-synth")
+            self.pair(client)
+        bridge.onWebSocketOpen(self.server, "overflow", "/body-synth")
+        self.assertIn("overflow", self.server.closed)
+        self.assertEqual(len(bridge._clients(self.server)), bridge.MAX_CLIENTS)
+        self.assertEqual(bridge._pending(self.server), {})
+        self.assertNotIn(self.server, bridge._expiry_jobs)
+        self.assertTrue(all(job.killed for job in self.jobs))
+
+    def test_silent_clients_expire_on_wall_clock_without_messages(self):
+        job = self.jobs[0]
+        self.assertEqual(job.options["delayMilliSeconds"], 5000)
+        self.assertTrue(job.options["wallTime"])
+        self.assertIs(job.options["delayRef"], self.td_resources)
+        with patch.object(bridge.time, "monotonic", return_value=105):
+            job.fire()
+        self.assertIn("client", self.server.closed)
+        self.assertEqual(bridge._clients(self.server), {})
+        self.assertEqual(bridge._pending(self.server), {})
+        self.assertNotIn(self.server, bridge._expiry_jobs)
+
+    def test_early_timer_does_not_close_client_and_rearms_remaining_delay(self):
+        with patch.object(bridge.time, "monotonic", return_value=104):
+            self.jobs[0].fire()
+        self.assertNotIn("client", self.server.closed)
+        self.assertEqual(self.jobs[-1].options["delayMilliSeconds"], 1000)
+        self.pair()
+        self.assertTrue(bridge._clients(self.server)["client"])
+        self.assertTrue(self.jobs[-1].killed)
+
+    def test_late_hello_rejected_even_before_native_timer_dispatch(self):
+        with patch.object(bridge.time, "monotonic", return_value=105):
+            self.pair()
+        self.assertNotIn("client", bridge._clients(self.server))
+        self.assertFalse(any(message["type"] == "welcome" for _, message in self.server.sent))
+
+    def test_expiry_preserves_paired_clients_and_rearms_for_later_handshake(self):
+        with patch.object(bridge.time, "monotonic", return_value=101):
+            bridge.onWebSocketOpen(self.server, "paired", "/body-synth")
+            self.pair("paired")
+            bridge.onWebSocketOpen(self.server, "later", "/body-synth")
+        with patch.object(bridge.time, "monotonic", return_value=105):
+            self.jobs[0].fire()
+        self.assertEqual(bridge._clients(self.server), {"paired": True, "later": False})
+        self.assertEqual(self.jobs[-1].options["delayMilliSeconds"], 1000)
+        with patch.object(bridge.time, "monotonic", return_value=106):
+            self.jobs[-1].fire()
+        self.assertEqual(bridge._clients(self.server), {"paired": True})
+
+    def test_duplicate_open_cannot_extend_hello_deadline(self):
+        with patch.object(bridge.time, "monotonic", return_value=104):
+            bridge.onWebSocketOpen(self.server, "client", "/body-synth")
+        self.assertEqual(bridge._pending(self.server)["client"], 105)
+        self.assertEqual(len(self.jobs), 1)
+
+    def test_expired_connections_free_capacity_before_next_open(self):
+        for index in range(bridge.MAX_PENDING_CLIENTS - 1):
+            bridge.onWebSocketOpen(self.server, str(index), "/body-synth")
+        with patch.object(bridge.time, "monotonic", return_value=105):
+            bridge.onWebSocketOpen(self.server, "fresh", "/body-synth")
+        self.assertEqual(bridge._clients(self.server), {"fresh": False})
+        self.assertEqual(bridge._pending(self.server), {"fresh": 110})
+
+    def test_stale_timer_cannot_close_reused_client_after_restart(self):
+        obsolete = self.jobs[0]
+        bridge.onServerStart(self.server)
+        self.assertTrue(obsolete.killed)
+        with patch.object(bridge.time, "monotonic", return_value=110):
+            bridge.onWebSocketOpen(self.server, "client", "/body-synth")
+            obsolete.fire()
+        self.assertEqual(bridge._clients(self.server), {"client": False})
+        self.assertEqual(bridge._pending(self.server), {"client": 115})
+        self.assertIs(bridge._expiry_jobs[self.server][1], self.jobs[-1])
+
+    def test_disconnect_churn_does_not_accumulate_active_timers(self):
+        for _ in range(100):
+            bridge.onWebSocketClose(self.server, "client")
+            bridge.onWebSocketOpen(self.server, "client", "/body-synth")
+        self.assertEqual(sum(not job.killed for job in self.jobs), 1)
+        self.assertEqual(len(bridge._pending(self.server)), 1)
+
+    def test_scheduler_failure_fails_closed(self):
+        bridge.onWebSocketClose(self.server, "client")
+        with patch.object(bridge, "run", side_effect=RuntimeError("scheduler unavailable")):
+            bridge.onWebSocketOpen(self.server, "client", "/body-synth")
+        self.assertEqual(bridge._clients(self.server), {})
+        self.assertEqual(bridge._pending(self.server), {})
+        self.assertNotIn(self.server, bridge._expiry_jobs)
+
+    def test_native_close_failure_stops_listener_and_clears_all_pending(self):
+        bridge.onWebSocketOpen(self.server, "second", "/body-synth")
+        self.server.par.active = True
+        with patch.object(self.server, "webSocketClose", side_effect=RuntimeError("native close failed")):
+            with patch.object(bridge.time, "monotonic", return_value=105):
+                self.jobs[0].fire()
+        self.assertFalse(self.server.par.active.eval())
+        self.assertEqual(bridge._clients(self.server), {})
+        self.assertEqual(bridge._pending(self.server), {})
+        self.assertNotIn(self.server, bridge._expiry_jobs)
+
+    def test_native_close_failure_rejecting_overflow_stops_listener(self):
+        for index in range(bridge.MAX_PENDING_CLIENTS - 1):
+            bridge.onWebSocketOpen(self.server, str(index), "/body-synth")
+        self.server.par.active = True
+        with patch.object(self.server, "webSocketClose", side_effect=RuntimeError("native close failed")):
+            bridge.onWebSocketOpen(self.server, "overflow", "/body-synth")
+        self.assertFalse(self.server.par.active.eval())
+        self.assertEqual(bridge._clients(self.server), {})
+        self.assertEqual(bridge._pending(self.server), {})
+        self.assertNotIn(self.server, bridge._expiry_jobs)
+
+    def test_scheduler_and_native_close_failure_still_clear_pending(self):
+        bridge.onWebSocketClose(self.server, "client")
+        self.server.par.active = True
+        with patch.object(bridge, "run", side_effect=RuntimeError("scheduler unavailable")):
+            with patch.object(self.server, "webSocketClose", side_effect=RuntimeError("native close failed")):
+                bridge.onWebSocketOpen(self.server, "client", "/body-synth")
+        self.assertFalse(self.server.par.active.eval())
+        self.assertEqual(bridge._clients(self.server), {})
+        self.assertEqual(bridge._pending(self.server), {})
+        self.assertNotIn(self.server, bridge._expiry_jobs)
+
+    def test_native_cancel_failure_cannot_keep_or_revive_pending_state(self):
+        obsolete = self.jobs[0]
+        with patch.object(obsolete, "kill", side_effect=RuntimeError("run already finished")):
+            bridge.onServerStop(self.server)
+        self.assertEqual(bridge._clients(self.server), {})
+        self.assertEqual(bridge._pending(self.server), {})
+        with patch.object(bridge.time, "monotonic", return_value=110):
+            bridge.onWebSocketOpen(self.server, "client", "/body-synth")
+            obsolete.fire()
+        self.assertEqual(bridge._pending(self.server), {"client": 115})
+        self.assertIs(bridge._expiry_jobs[self.server][1], self.jobs[-1])
+
+    def test_malformed_preauth_messages_close_and_release_pending_slot(self):
+        for raw in ("null", "[]", "1", '"text"', "{", "{}", '{"type":null}', "[" * 1500 + "]" * 1500):
+            with self.subTest(raw=raw[:20]):
+                bridge.onWebSocketOpen(self.server, "client", "/body-synth")
+                bridge.onWebSocketReceiveText(self.server, "client", raw)
+                self.assertEqual(self.server.sent[-1][1]["code"], "invalid_message")
+                self.assertFalse(self.server.sent[-1][1]["recoverable"])
+                self.assertNotIn("client", bridge._clients(self.server))
+                self.assertEqual(bridge._pending(self.server), {})
+                self.assertNotIn(self.server, bridge._expiry_jobs)
+        self.assertEqual(bridge._state(self.server)["revision"], 0)
+
     def test_commands_before_pairing_never_mutate(self):
         self.send({"type": "parameter.set", "parameter": "output.blackout", "value": True})
         self.assertEqual(self.server.sent[-1][1]["code"], "authentication")
@@ -120,7 +309,9 @@ class BridgeTests(unittest.TestCase):
         for raw in ("null", "[]", "1", '"text"', "{", "[" * 1500 + "]" * 1500):
             bridge.onWebSocketReceiveText(self.server, "client", raw)
             self.assertEqual(self.server.sent[-1][1]["code"], "invalid_message")
+            self.assertTrue(self.server.sent[-1][1]["recoverable"])
         self.assertEqual(bridge._state(self.server)["revision"], 0)
+        self.assertTrue(bridge._clients(self.server)["client"])
 
     def test_oversized_and_invalid_unicode_closed(self):
         for raw in (" " * 8193, "\ud800"):
@@ -197,6 +388,7 @@ class BridgeTests(unittest.TestCase):
 
     def test_export_clears_only_known_runtime_values_and_stops_listener(self):
         self.pair()
+        bridge.onWebSocketOpen(self.server, "pending", "/body-synth")
         self.server.base.store("unrelatedUserSetting", "preserve")
         self.send({"type": "transport.set", "playing": True})
         self.send({"type": "event", "name": "note.hit", "payload": {"chordTone": True, "strength": 1}})
@@ -205,7 +397,11 @@ class BridgeTests(unittest.TestCase):
         self.assertIsNone(self.server.base.fetch("pairingCode"))
         self.assertIsNone(self.server.base.startup["pairingCode"])
         self.assertEqual(self.server.startup["fuzzClients"], {})
+        self.assertEqual(self.server.startup["fuzzPending"], {})
         self.assertEqual(bridge._clients(self.server), {})
+        self.assertEqual(bridge._pending(self.server), {})
+        self.assertNotIn(self.server, bridge._expiry_jobs)
+        self.assertTrue(all(job.killed for job in self.jobs))
         self.assertEqual(self.server.base.fetch("lastHitAt"), -1000)
         self.assertEqual(self.server.base.op("CHORD").par.value1.eval(), 0)
         self.assertFalse(self.server.par.active.eval())

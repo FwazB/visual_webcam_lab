@@ -1,18 +1,18 @@
 "use client";
 
-// Fretboard trainer: lessons and song practice scored from the guitar's
-// pitch and shown on a fretboard diagram. The camera is a mirror with
-// fingertip dots from hand tracking.
+// Audio-scored practice with a calibrated, physical fretboard overlay.
+// Visual position candidates stay independent of the lesson's target.
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { FINGERTIPS, useHandTracking } from "@/hooks/useHandTracking";
+import { useHandTracking } from "@/hooks/useHandTracking";
 import { useGuitarPitch } from "@/hooks/useGuitarPitch";
 import { useSongTransport } from "@/hooks/useSongTransport";
 import { useTouchDesigner } from "@/hooks/useTouchDesigner";
 import AudioDevicePicker from "@/components/AudioDevicePicker";
 import PitchDebugPanel from "@/components/PitchDebugPanel";
 import TouchDesignerPanel from "@/components/TouchDesignerPanel";
+import RealFretboardOverlay, { type CameraTarget } from "@/components/RealFretboardOverlay";
 import { midiToName, NOTE_NAMES, pitchClassOf } from "@/lib/instrument/pitch";
 import { midiAt, type InstrumentProfile } from "@/lib/instrument/profile";
 import { nearestPosition, type FretPosition } from "@/lib/instrument/positions";
@@ -21,8 +21,6 @@ import { KEYS, SHAPES, resolveShape, type MatchState } from "@/lib/lesson/shapes
 import { chartPositionAt, SongScorer, voicingFor, type SongScoreSummary } from "@/lib/lesson/songPlayer";
 import { SONGS, withBarsPerChord, type FingerName, type SongChart } from "@/lib/lesson/songs";
 import { StepMachine, type StepView } from "@/lib/lesson/stepMachine";
-
-const FINGERTIP_COLORS = ["#00FF88", "#00DDFF", "#FF88DD", "#FFCC00"];
 
 const TRAFFIC_COLORS: Record<MatchState, string> = {
   green: "#22dd55",
@@ -81,8 +79,7 @@ interface FretLabProps {
 
 export default function FretLab({ profile }: FretLabProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
-  const cameraCanvasRef = useRef<HTMLCanvasElement>(null);
-  const cameraContainerRef = useRef<HTMLDivElement>(null);
+  const cameraTargetRef = useRef<CameraTarget | null>(null);
   const boardCanvasRef = useRef<HTMLCanvasElement>(null);
   const boardContainerRef = useRef<HTMLDivElement>(null);
   const [webcamReady, setWebcamReady] = useState(false);
@@ -108,7 +105,7 @@ export default function FretLab({ profile }: FretLabProps) {
   const scorerRef = useRef<SongScorer | null>(null);
   const lastSongNoteRef = useRef<{ chordTone: boolean; at: number } | null>(null);
 
-  const { handsRef, isLoading: handsLoading, error: handsError } = useHandTracking(videoRef);
+  const { handsRef, handsUpdatedAtRef, isLoading: handsLoading, error: handsError } = useHandTracking(videoRef);
   const pitch = useGuitarPitch(profile);
   const transport = useSongTransport(chart, pitch.context);
   const touchDesigner = useTouchDesigner();
@@ -204,14 +201,14 @@ export default function FretLab({ profile }: FretLabProps) {
     });
   }, [pitch, profile, sendNoteHit]);
 
-  // Camera mirror.
+  // Shared camera for hand inference and the calibrated overlay.
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
     let stream: MediaStream | null = null;
     let cancelled = false;
     navigator.mediaDevices
-      .getUserMedia({ video: { width: 960, height: 540, facingMode: "user" }, audio: false })
+      .getUserMedia({ video: { width: { ideal: 1920 }, height: { ideal: 1080 }, facingMode: "user" }, audio: false })
       .then((granted) => {
         if (cancelled) {
           granted.getTracks().forEach((track) => track.stop());
@@ -224,7 +221,7 @@ export default function FretLab({ profile }: FretLabProps) {
       .catch((err) => {
         if (cancelled) return;
         setCameraError(err instanceof Error && err.name === "NotAllowedError"
-          ? "Camera permission is blocked. Allow it in site settings to see yourself; audio practice still works."
+          ? "Camera permission is blocked. Allow it in site settings to map your fretboard; audio practice still works."
           : "Camera unavailable. Audio practice and the fretboard still work.");
       });
     return () => {
@@ -234,7 +231,7 @@ export default function FretLab({ profile }: FretLabProps) {
     };
   }, []);
 
-  // Render loop: song clock, step timers, traffic light, camera dots, diagram.
+  // Render loop: song clock, step timers, audio score, lesson target and diagram.
   useEffect(() => {
     let rafId = 0;
     let lastMatch: MatchState = "yellow";
@@ -301,33 +298,6 @@ export default function FretLab({ profile }: FretLabProps) {
       return covered;
     }
 
-    function drawCamera(ctx: CanvasRenderingContext2D, w: number, h: number) {
-      ctx.clearRect(0, 0, w, h);
-      const video = videoRef.current;
-      if (!video || video.readyState < 2 || !video.videoWidth) return;
-      // The video is shown with object-cover and mirrored.
-      const scale = Math.max(w / video.videoWidth, h / video.videoHeight);
-      const ox = (w - video.videoWidth * scale) / 2;
-      const oy = (h - video.videoHeight * scale) / 2;
-      for (const hand of handsRef.current) {
-        FINGERTIPS.forEach((index, i) => {
-          const lm = hand.landmarks[index];
-          if (!lm) return;
-          const x = w - (lm.x * video.videoWidth * scale + ox);
-          const y = lm.y * video.videoHeight * scale + oy;
-          ctx.strokeStyle = FINGERTIP_COLORS[i];
-          ctx.fillStyle = FINGERTIP_COLORS[i];
-          ctx.lineWidth = 2;
-          ctx.beginPath();
-          ctx.arc(x, y, 10, 0, Math.PI * 2);
-          ctx.stroke();
-          ctx.beginPath();
-          ctx.arc(x, y, 3.5, 0, Math.PI * 2);
-          ctx.fill();
-        });
-      }
-    }
-
     function tick(nowMs: number) {
       rafId = requestAnimationFrame(tick);
       if (nowMs - lastFrameMs < FRAME_INTERVAL_MS) return;
@@ -340,6 +310,7 @@ export default function FretLab({ profile }: FretLabProps) {
       const tAudio = pitch.context ? pitch.context.currentTime : nowPerf / 1000;
       const view = stepRef.current!.onFrame(tAudio);
       stepViewRef.current = view;
+      cameraTargetRef.current = targetsRef.current[Math.min(view.targetIndex, targetsRef.current.length - 1)] ?? null;
       let light: MatchState = view.light;
       if (songMode && transportRef.current.playing) {
         const last = lastSongNoteRef.current;
@@ -373,15 +344,13 @@ export default function FretLab({ profile }: FretLabProps) {
         };
       });
 
-      const camera = sizeCanvas(cameraCanvasRef.current, cameraContainerRef.current);
-      if (camera) drawCamera(camera.ctx, camera.w, camera.h);
       const board = sizeCanvas(boardCanvasRef.current, boardContainerRef.current);
       if (board) drawFretboard(board.ctx, board.w, board.h, profile, targets, pulseRef.current);
     }
 
     rafId = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(rafId);
-  }, [handsRef, profile, pitch.context]);
+  }, [profile, pitch.context]);
 
   const status = cameraError
     ? "Audio practice · camera unavailable"
@@ -401,7 +370,7 @@ export default function FretLab({ profile }: FretLabProps) {
 
   return (
     <div className="fixed inset-0 bg-black text-white overflow-y-auto flex flex-col">
-      <div className="relative z-10 p-3 sm:p-4 flex items-start justify-between flex-shrink-0 gap-3">
+      <div className="relative z-10 p-3 sm:p-4 flex flex-wrap items-start justify-between flex-shrink-0 gap-3">
         <div className="min-w-0">
           <h1 className="text-lg sm:text-xl font-bold tracking-tight"><Link href="/" className="hover:text-zinc-300">{profile.name.toLowerCase()}.lab</Link></h1>
           <p className="text-zinc-400 text-xs truncate">{status}</p>
@@ -437,7 +406,8 @@ export default function FretLab({ profile }: FretLabProps) {
             </span>
           )}
         </div>
-        <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/5 border border-white/10">
+        <div aria-label={`Audio score: ${matchState}`} className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/5 border border-white/10">
+          <span className="text-[10px] text-zinc-400">Pitch</span>
           {(["red", "yellow", "green"] as MatchState[]).map((s) => (
             <div
               key={s}
@@ -464,28 +434,23 @@ export default function FretLab({ profile }: FretLabProps) {
         </nav>
       </div>
 
-      <div ref={cameraContainerRef} className="relative flex-1 min-h-[200px]">
-        <video
-          ref={videoRef}
-          autoPlay
-          playsInline
-          muted
-          className="absolute inset-0 w-full h-full object-cover -scale-x-100"
+      <div className="relative bg-zinc-950">
+        <RealFretboardOverlay
+          profile={profile} videoRef={videoRef} handsRef={handsRef} handsUpdatedAtRef={handsUpdatedAtRef}
+          targetRef={cameraTargetRef} pitch={pitch} ready={webcamReady}
+          trackingLoading={handsLoading} trackingError={handsError}
         />
-        <canvas ref={cameraCanvasRef} className="absolute inset-0 w-full h-full pointer-events-none" />
-
-        {handsError && (
-          <p role="status" className="absolute top-3 right-3 max-w-xs rounded border border-amber-200/20 bg-black/80 px-2 py-1 text-xs text-amber-200">
-            {handsError}
-          </p>
-        )}
 
         {debug && (
-          <div className="absolute top-3 left-3">
+          <div className="absolute top-3 right-3">
             <PitchDebugPanel pitch={pitch} profile={profile} getStep={() => stepViewRef.current} />
           </div>
         )}
-        <div className="absolute bottom-3 left-3 max-w-md bg-black/60 backdrop-blur-sm rounded-lg px-3 py-2 border border-white/10">
+      </div>
+
+      <div className="bg-zinc-950/95 border-t border-white/10 flex-shrink-0">
+        {cameraError && <p role="status" className="px-3 pt-2 text-xs text-amber-200">{cameraError}</p>}
+        <div className="px-3 py-2 border-b border-white/10">
           {mode === "song" ? (
             <>
               <div className="text-[10px] text-zinc-500 uppercase tracking-wider">Song</div>
@@ -513,13 +478,12 @@ export default function FretLab({ profile }: FretLabProps) {
             </>
           )}
         </div>
-      </div>
-
-      <div className="bg-zinc-950/95 border-t border-white/10 flex-shrink-0">
-        {cameraError && <p role="status" className="px-3 pt-2 text-xs text-amber-200">{cameraError}</p>}
-        <div ref={boardContainerRef} className="relative h-44 sm:h-56">
-          <canvas ref={boardCanvasRef} className="absolute inset-0 w-full h-full" />
-        </div>
+        <details>
+          <summary className="cursor-pointer px-3 py-2 text-xs text-zinc-400">Lesson map · pitch scoring, estimated positions</summary>
+          <div ref={boardContainerRef} className="relative h-44 sm:h-56">
+            <canvas ref={boardCanvasRef} className="absolute inset-0 w-full h-full" />
+          </div>
+        </details>
         <div className="border-t border-white/5 px-3 py-2 space-y-2">
           <div className="flex flex-wrap items-center gap-1.5">
             {(["shapes", "song"] as const).map((m) => (

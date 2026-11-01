@@ -4,12 +4,16 @@ import { readFile } from "node:fs/promises";
 
 const base = new URL(process.argv[2] ?? "http://127.0.0.1:3000");
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
-const localWorklets = {
-  "/worklets/pitch-processor.js": await readFile(new URL("../public/worklets/pitch-processor.js", import.meta.url)),
-  "/worklets/recorder-processor.js": await readFile(new URL("../public/worklets/recorder-processor.js", import.meta.url)),
-};
+const publicScripts = [
+  "/worklets/pitch-processor.js", "/worklets/recorder-processor.js",
+  "/vision/fretboard-worker.js", "/vision/neck-tracker.js",
+  "/vision/neck-detector.js", "/vision/opencv-4.12.0.js",
+];
+const localScripts = new Map(await Promise.all(publicScripts.map(async (path) => [
+  path, await readFile(new URL(`../public${path}`, import.meta.url)),
+])));
 
-for (const path of ["/", "/guitar", "/bass", "/studio", "/for-you", "/worklets/pitch-processor.js", "/worklets/recorder-processor.js"]) {
+for (const path of ["/", "/guitar", "/bass", "/studio", "/for-you", "/for-you/privacy", "/ascii", ...publicScripts]) {
   const response = await fetch(new URL(path, base), { signal: AbortSignal.timeout(15000) });
   assert.equal(response.status, 200, `${path} must load`);
   assert.equal(response.headers.get("x-content-type-options"), "nosniff");
@@ -17,17 +21,30 @@ for (const path of ["/", "/guitar", "/bass", "/studio", "/for-you", "/worklets/p
   assert.equal(response.headers.get("referrer-policy"), "strict-origin-when-cross-origin");
   assert.match(response.headers.get("permissions-policy") ?? "", /camera=\(self\), microphone=\(self\)/);
   assert.match(response.headers.get("strict-transport-security") ?? "", /max-age=63072000/);
-  const csp = response.headers.get("content-security-policy-report-only") ?? "";
-  assert.match(csp, /connect-src[^;]*ws:\/\/127\.0\.0\.1:9980/);
+  assert.equal(response.headers.get("content-security-policy-report-only"), null, "policy must be enforced, not report-only");
+  const csp = response.headers.get("content-security-policy") ?? "";
+  if (path === "/vision/fretboard-worker.js") {
+    assert.match(csp, /(?:^|; )script-src 'self' 'unsafe-eval'(?:;|$)/);
+    assert.match(csp, /connect-src 'none'/);
+    assert.match(csp, /worker-src 'none'/);
+    assert.doesNotMatch(csp, /https?:|blob:|'unsafe-inline'/);
+  } else {
+    assert.match(csp, /connect-src[^;]*ws:\/\/127\.0\.0\.1:9980/);
+    assert.match(csp, /script-src[^;]*blob:[^;]*'wasm-unsafe-eval'/);
+    assert.match(csp, /script-src-attr 'none'/);
+    assert.match(csp, /frame-src 'none'/);
+    assert.doesNotMatch(csp, /'unsafe-eval'|(?:^| )wss?:[ ;]/, "production page must not use development exceptions");
+  }
   assert.match(csp, /object-src 'none'/);
   const body = await response.text();
-  if (path.includes("worklets")) {
+  if (localScripts.has(path)) {
     assert.match(response.headers.get("content-type") ?? "", /javascript/);
     assert.match(response.headers.get("cache-control") ?? "", /max-age=0/);
-    assert.equal(sha256(body), sha256(localWorklets[path]), "deployed processor must match this checkout");
+    assert.match(response.headers.get("cache-control") ?? "", /must-revalidate/);
+    assert.equal(sha256(body), sha256(localScripts.get(path)), "served script must match this checkout");
   } else {
     // Most pages use next/dynamic with SSR disabled. HTTP checks can verify
-    // their shell/assets; rendered controls are checked in the browser.
+    // their shell/assets; this does not exercise rendered controls or devices.
     assert.match(body, /<title>body\.synth<\/title>/);
     if (path === "/") {
       // The homepage is server-rendered: every project link is in the HTML.
@@ -39,4 +56,10 @@ for (const path of ["/", "/guitar", "/bass", "/studio", "/for-you", "/worklets/p
     assert.equal(asset.status, 200, `${path} application script must load`);
   }
   console.log(`PASS ${base.origin}${path}: content and security headers`);
+}
+
+for (const path of ["/.env", "/.env.local", "/.git/config", "/.mcp.json", "/package-lock.json", "/src/hooks/useNeckTracking.ts"]) {
+  const response = await fetch(new URL(path, base), { signal: AbortSignal.timeout(15000) });
+  assert.equal(response.status, 404, `${path} must not expose project files`);
+  console.log(`PASS ${base.origin}${path}: project file not served`);
 }

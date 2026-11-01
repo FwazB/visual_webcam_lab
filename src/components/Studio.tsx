@@ -132,6 +132,21 @@ export default function Studio() {
   const fileRef = useRef<HTMLInputElement>(null);
   const liveRef = useRef({ project, selectedClipId, armedTrackId });
   const keyRef = useRef<(e: KeyboardEvent) => void>(() => {});
+  const mountedRef = useRef(true);
+  const projectGenerationRef = useRef(0);
+  const transportRequestRef = useRef(0);
+  const restoreRef = useRef<Promise<void> | null>(null);
+
+  const isCurrentProject = (generation: number) => mountedRef.current && generation === projectGenerationRef.current;
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      projectGenerationRef.current = projectGenerationRef.current + 1;
+      transportRequestRef.current = transportRequestRef.current + 1;
+    };
+  }, []);
 
   function setZoom(value: number) {
     const next = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, value));
@@ -142,9 +157,10 @@ export default function Studio() {
   // Restore the autosaved project.
   useEffect(() => {
     let cancelled = false;
-    loadStudio()
+    const generation = projectGenerationRef.current;
+    restoreRef.current = loadStudio()
       .then((saved) => {
-        if (cancelled || !saved) return;
+        if (cancelled || !isCurrentProject(generation) || !saved) return;
         for (const b of saved.buffers) {
           registerBuffer(buffersRef.current, peaksRef.current, b.id, toAudioBuffer(b.channels, b.sampleRate));
         }
@@ -152,10 +168,10 @@ export default function Studio() {
         dispatch({ type: "load", project: { ...saved.project, clips: saved.project.clips.filter((c) => known.has(c.bufferId)) } });
       })
       .catch(() => {
-        if (!cancelled) setNotice("Autosave is unavailable in this browser; export a WAV to keep your work.");
+        if (!cancelled && isCurrentProject(generation)) setNotice("Autosave is unavailable in this browser; export a WAV to keep your work.");
       })
       .finally(() => {
-        if (!cancelled) setLoaded(true);
+        if (!cancelled && isCurrentProject(generation)) setLoaded(true);
       });
     return () => {
       cancelled = true;
@@ -164,8 +180,10 @@ export default function Studio() {
 
   useEffect(() => {
     if (!loaded) return;
+    const generation = projectGenerationRef.current;
     const id = window.setTimeout(() => {
-      saveProject(project).catch(() => setNotice("Could not autosave the project."));
+      if (!isCurrentProject(generation)) return;
+      saveProject(project).catch(() => { if (isCurrentProject(generation)) setNotice("Could not autosave the project."); });
     }, 400);
     return () => window.clearTimeout(id);
   }, [project, loaded]);
@@ -181,35 +199,45 @@ export default function Studio() {
   const options = (p: Project) => ({ bpm: p.bpm, beatsPerBar: p.beatsPerBar, metronome });
 
   async function play(from = playheadRef.current) {
+    const generation = projectGenerationRef.current;
+    const request = ++transportRequestRef.current;
     try {
       const engine = await ensureEngine();
+      if (!isCurrentProject(generation) || request !== transportRequestRef.current) return;
       engine.play(from, project, buffersRef.current, options(project));
       setMode("playing");
     } catch (err) {
-      setNotice(`Audio could not start: ${message(err)}`);
+      if (isCurrentProject(generation) && request === transportRequestRef.current) setNotice(`Audio could not start: ${message(err)}`);
     }
   }
 
-  async function stop() {
+  async function stop(discardTake = false) {
+    const generation = projectGenerationRef.current;
+    transportRequestRef.current++;
     const engine = engineRef.current;
     if (!engine || engine.mode === "stopped") return;
     const rec = recordingRef.current;
     recordingRef.current = null;
     const take = await engine.stop();
+    if (!isCurrentProject(generation)) return;
     playheadRef.current = engine.position();
     setMode("stopped");
-    if (take && rec) addTake(take, rec.trackId);
+    if (take && rec && !discardTake) addTake(take, rec.trackId);
   }
 
   async function record() {
+    const generation = projectGenerationRef.current;
+    const request = ++transportRequestRef.current;
     let engine;
     try {
       engine = await ensureEngine();
     } catch (err) {
-      setNotice(`Audio could not start: ${message(err)}`);
+      if (isCurrentProject(generation) && request === transportRequestRef.current) setNotice(`Audio could not start: ${message(err)}`);
       return;
     }
+    if (!isCurrentProject(generation) || request !== transportRequestRef.current) return;
     if (!engine.hasInput) await studio.connect();
+    if (!isCurrentProject(generation) || request !== transportRequestRef.current) return;
     if (!engine.hasInput) {
       setNotice("Connect an input to record.");
       return;
@@ -232,12 +260,14 @@ export default function Studio() {
   }
 
   function addTake(take: RecordedTake, trackId: string) {
+    if (!mountedRef.current) return;
+    const generation = projectGenerationRef.current;
     const bufferId = newId();
     const buffer = toAudioBuffer(take.channels, take.sampleRate);
     registerBuffer(buffersRef.current, peaksRef.current, bufferId, buffer);
-    saveBuffer({ id: bufferId, sampleRate: take.sampleRate, channels: take.channels }).catch(() =>
-      setNotice("Could not autosave the take; export a WAV to keep it."),
-    );
+    saveBuffer({ id: bufferId, sampleRate: take.sampleRate, channels: take.channels }).catch(() => {
+      if (isCurrentProject(generation)) setNotice("Could not autosave the take; export a WAV to keep it.");
+    });
     const placed = placeTake(take.start, buffer.duration);
     if (placed.duration < MIN_CLIP) return;
     const clipId = newId();
@@ -255,31 +285,38 @@ export default function Studio() {
   }
 
   async function importFile(file: File) {
+    const generation = projectGenerationRef.current;
     setBusy(true);
     try {
       const engine = await ensureEngine();
-      const buffer = await engine.decode(await file.arrayBuffer());
+      if (!isCurrentProject(generation)) return;
+      const data = await file.arrayBuffer();
+      if (!isCurrentProject(generation)) return;
+      const buffer = await engine.decode(data);
+      if (!isCurrentProject(generation)) return;
       const bufferId = newId();
       registerBuffer(buffersRef.current, peaksRef.current, bufferId, buffer);
-      saveBuffer({ id: bufferId, sampleRate: buffer.sampleRate, channels: channelsOf(buffer) }).catch(() =>
-        setNotice("Could not autosave the imported audio."),
-      );
+      saveBuffer({ id: bufferId, sampleRate: buffer.sampleRate, channels: channelsOf(buffer) }).catch(() => {
+        if (isCurrentProject(generation)) setNotice("Could not autosave the imported audio.");
+      });
       const name = file.name.replace(/\.[^.]+$/, "") || "Audio";
       const trackId = newId();
       const clip = { id: newId(), trackId, bufferId, name, start: playheadRef.current, offset: 0, duration: buffer.duration };
       dispatch({ type: "edit", fn: (p) => addClip(addTrack(p, { ...makeTrack(p, name), id: trackId }), clip) });
       setSelectedClipId(clip.id);
     } catch (err) {
-      setNotice(`Could not import ${file.name}: ${message(err)}`);
+      if (isCurrentProject(generation)) setNotice(`Could not import ${file.name}: ${message(err)}`);
     } finally {
-      setBusy(false);
+      if (isCurrentProject(generation)) setBusy(false);
     }
   }
 
   async function exportMix() {
+    const generation = projectGenerationRef.current;
     setBusy(true);
     try {
       const mix = await renderMix(project, buffersRef.current, engineRef.current?.ctx.sampleRate ?? 48000);
+      if (!isCurrentProject(generation)) return;
       if (!mix) {
         setNotice("Nothing to export yet.");
         return;
@@ -291,24 +328,38 @@ export default function Studio() {
       a.click();
       window.setTimeout(() => URL.revokeObjectURL(url), 1000);
     } catch (err) {
-      setNotice(`Export failed: ${message(err)}`);
+      if (isCurrentProject(generation)) setNotice(`Export failed: ${message(err)}`);
     } finally {
-      setBusy(false);
+      if (isCurrentProject(generation)) setBusy(false);
     }
   }
 
   async function newProject() {
+    const generation = ++projectGenerationRef.current;
     setConfirmNew(false);
-    await stop();
-    buffersRef.current.clear();
-    peaksRef.current.clear();
-    playheadRef.current = 0;
-    scrollXRef.current = 0;
-    engineRef.current?.seek(0);
-    setSelectedClipId(null);
-    setArmedTrackId(null);
-    dispatch({ type: "load", project: emptyProject() });
-    clearStudio().catch(() => setNotice("Could not clear the saved project."));
+    setBusy(true);
+    studio.cancelPendingInput();
+    try {
+      await stop(true);
+      // Let the old restore/cleanup transaction finish before deleting the saved project.
+      await restoreRef.current;
+      if (!isCurrentProject(generation)) return;
+      await clearStudio();
+      if (!isCurrentProject(generation)) return;
+      buffersRef.current.clear();
+      peaksRef.current.clear();
+      playheadRef.current = 0;
+      scrollXRef.current = 0;
+      engineRef.current?.seek(0);
+      setSelectedClipId(null);
+      setArmedTrackId(null);
+      dispatch({ type: "load", project: emptyProject() });
+      setLoaded(true);
+    } catch {
+      if (isCurrentProject(generation)) setNotice("Could not clear the saved project. Try New again to discard it.");
+    } finally {
+      if (isCurrentProject(generation)) setBusy(false);
+    }
   }
 
   function seek(t: number) {
@@ -648,11 +699,11 @@ export default function Studio() {
           {confirmNew ? (
             <span className="flex items-center gap-1 text-[11px] font-mono text-zinc-300">
               discard everything?
-              <button onClick={() => void newProject()} className={`${btn} bg-red-500 text-white`}>Yes</button>
+              <button onClick={() => void newProject()} disabled={busy} className={`${btn} bg-red-500 text-white`}>Yes</button>
               <button onClick={() => setConfirmNew(false)} className={btnIdle}>No</button>
             </span>
           ) : (
-            <button onClick={() => setConfirmNew(true)} disabled={recording} className={btnIdle}>New</button>
+            <button onClick={() => setConfirmNew(true)} disabled={recording || busy || !loaded} className={btnIdle}>New</button>
           )}
         </div>
       </div>

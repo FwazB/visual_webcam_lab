@@ -12,15 +12,22 @@ test('MCP constrained-collection validator uses the patched Zod release', () => 
   assert.equal(z.array(z.string()).max(2).safeParse(['a', 'b', 'c']).success, false);
 });
 
-test('legacy lint plugins retain callable minimatch and makeRe APIs', () => {
-  for (const plugin of ['eslint-plugin-react', 'eslint-plugin-import', 'eslint-plugin-jsx-a11y']) {
+test('every lint consumer resolves the actual patched registry minimatch release', () => {
+  for (const plugin of ['eslint', '@eslint/config-array', '@eslint/eslintrc', 'eslint-plugin-react', 'eslint-plugin-import', 'eslint-plugin-jsx-a11y']) {
     const fromPlugin = createRequire(require.resolve(plugin));
-    const match = fromPlugin('minimatch');
-    assert.equal(typeof match, 'function', `${plugin} requires a callable CommonJS export`);
-    assert.equal(match('Widget', 'Wid*'), true);
-    assert.equal(match('Other', 'Wid*'), false);
-    assert.equal(match.makeRe('src/**/*.ts').test('src/lib/test.ts'), true);
-    assert.equal(new match.Minimatch('*.ts', { matchBase: true }).match('src/test.ts'), true);
+    assert.equal(fromPlugin('minimatch/package.json').version, '11.0.3', plugin);
+    const { minimatch, Minimatch } = fromPlugin('minimatch');
+    assert.equal(minimatch('Widget', 'Wid*'), true);
+    assert.equal(minimatch('Other', 'Wid*'), false);
+    assert.equal(new Minimatch('*.ts', { matchBase: true }).match('src/test.ts'), true);
+  }
+  const lock = require('../package-lock.json');
+  for (const [name, pkg] of Object.entries(lock.packages)) {
+    if (name.endsWith('/minimatch')) {
+      assert.equal(pkg.version, '11.0.3');
+      assert.equal(pkg.resolved, 'https://registry.npmjs.org/minimatch/-/minimatch-11.0.3.tgz');
+      assert.match(pkg.integrity, /^sha512-/);
+    }
   }
 });
 
