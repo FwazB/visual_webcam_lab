@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { HandLandmarker, FilesetResolver } from "@mediapipe/tasks-vision";
 import { MEDIAPIPE_WASM_URL } from "@/lib/mediapipe";
 
@@ -27,6 +27,8 @@ const MAX_OBSERVATION_AGE_MS = 250;
 export function useHandTracking(videoRef: React.RefObject<HTMLVideoElement | null>) {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [delegate, setDelegate] = useState<"GPU" | "CPU">("GPU");
+  const [attempt, setAttempt] = useState(0);
   const handLandmarkerRef = useRef<HandLandmarker | null>(null);
   const handsRef = useRef<HandDetection[]>([]);
   /** Observation time before inference on performance.now(); -Infinity when unavailable. */
@@ -60,7 +62,7 @@ export function useHandTracking(videoRef: React.RefObject<HTMLVideoElement | nul
           baseOptions: {
             modelAssetPath:
               "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
-            delegate: "GPU",
+            delegate,
           },
           runningMode: "VIDEO",
           numHands: 2,
@@ -75,7 +77,10 @@ export function useHandTracking(videoRef: React.RefObject<HTMLVideoElement | nul
       } catch {
         release();
         if (cancelled) return;
-        setError("Hand tracking could not start. Reload to retry; audio practice still works.");
+        // GPU support can disappear independently of camera access. Try the
+        // CPU once, then expose a retry instead of entering an endless loop.
+        if (delegate === "GPU") { setDelegate("CPU"); return; }
+        setError("Hand tracking could not start. Retry hand tracking; audio practice still works.");
         setIsLoading(false);
       }
     }
@@ -86,7 +91,7 @@ export function useHandTracking(videoRef: React.RefObject<HTMLVideoElement | nul
       cancelled = true;
       release();
     };
-  }, []);
+  }, [delegate, attempt]);
 
   useEffect(() => {
     if (isLoading || error) return;
@@ -133,7 +138,10 @@ export function useHandTracking(videoRef: React.RefObject<HTMLVideoElement | nul
         } catch {
           clearHands();
           stopped = true;
-          setError("Hand tracking stopped. Reload to retry; audio practice still works.");
+          if (delegate === "GPU") {
+            setIsLoading(true);
+            setDelegate("CPU");
+          } else setError("Hand tracking stopped. Retry hand tracking; audio practice still works.");
           return;
         }
       } else if (now - handsUpdatedAtRef.current > MAX_OBSERVATION_AGE_MS) {
@@ -148,7 +156,14 @@ export function useHandTracking(videoRef: React.RefObject<HTMLVideoElement | nul
       cancelAnimationFrame(rafId);
       clearHands();
     };
-  }, [isLoading, error, videoRef]);
+  }, [isLoading, error, videoRef, delegate]);
 
-  return { handsRef, handsUpdatedAtRef, isLoading, error };
+  const retry = useCallback(() => {
+    setIsLoading(true);
+    setError(null);
+    setDelegate("GPU");
+    setAttempt(previous => previous + 1);
+  }, []);
+
+  return { handsRef, handsUpdatedAtRef, isLoading, error, retry };
 }

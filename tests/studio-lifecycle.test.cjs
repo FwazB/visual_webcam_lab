@@ -9,24 +9,35 @@ const projectModel = require("../src/lib/studio/project");
 const compile = source => ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
 const flush = () => new Promise(setImmediate);
 function deferred() { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; }
-function stream() { let stopped = 0; return { getTracks: () => [{ stop: () => { stopped++; } }], stopped: () => stopped }; }
+function stream() {
+  let stopped = 0;
+  const track = { readyState: "live", enabled: true, muted: false, stop() { stopped++; this.readyState = "ended"; } };
+  return { getTracks: () => [track], getAudioTracks: () => [track], stopped: () => stopped };
+}
 
 function hookHarness(options = {}) {
-  const effects = [], states = [], requests = [], enumerationSignals = [];
+  const effects = [], states = [], requests = [], enumerationSignals = [], timers = new Map();
   let creates = 0, updates = 0;
   const engine = {
-    hasInput: false, attached: [], closed: 0,
+    hasInput: false, inputMuted: false, level: null, attached: [], closed: 0,
+    ctx: { state: options.paused ? "suspended" : "running" },
+    resume() {
+      if (options.paused) return Promise.reject(new Error("Audio paused"));
+      this.ctx.state = "running";
+      return Promise.resolve();
+    },
+    getInputLevel() { return this.hasInput && !this.inputMuted && this.ctx.state === "running" ? this.level : null; },
     attachInput(input) { if (options.attachThrows) throw new Error("Attachment failed"); this.attached.push(input); this.current = input; this.hasInput = true; },
     estimatedLatency: () => 0,
     close() { this.closed++; this.current?.getTracks().forEach(track => track.stop()); },
   };
   const react = {
     useRef: current => ({ current }), useCallback: fn => fn, useEffect: fn => effects.push(fn),
-    useState: initial => { const i = states.length; states.push(initial); return [initial, value => { updates++; states[i] = value; }]; },
+    useState: initial => { const i = states.length; states.push(initial); return [initial, value => { updates++; states[i] = typeof value === "function" ? value(states[i]) : value; }]; },
   };
   const loaded = { exports: {} };
   const source = fs.readFileSync(require.resolve("../src/hooks/useStudioEngine.ts"), "utf8");
-  new Function("require", "module", "exports", "navigator", compile(source))(
+  new Function("require", "module", "exports", "navigator", "window", compile(source))(
     name => name === "react" ? react : name === "@/lib/studio/engine" ? {
       StudioEngine: { create: () => { creates++; return options.creation?.promise ?? Promise.resolve(engine); } },
     } : {
@@ -35,10 +46,11 @@ function hookHarness(options = {}) {
       pickPreferredDevice: list => list[0] ?? null,
     }, loaded, loaded.exports,
     { mediaDevices: { getUserMedia: constraints => { const request = deferred(); requests.push({ ...request, id: constraints.id }); return request.promise; } } },
+    { setInterval(fn) { const id = timers.size + 1; timers.set(id, fn); return id; }, clearInterval(id) { timers.delete(id); } },
   );
   const hook = loaded.exports.useStudioEngine();
   const cleanup = effects[0]();
-  return { hook, cleanup, states, engine, requests, enumerationSignals, get creates() { return creates; }, get updates() { return updates; } };
+  return { hook, cleanup, states, engine, requests, enumerationSignals, timers, tick: () => timers.forEach(fn => fn()), get creates() { return creates; }, get updates() { return updates; } };
 }
 
 test("Studio releases microphone permission granted after unmount", async () => {
@@ -57,17 +69,20 @@ test("Studio releases microphone permission granted after unmount", async () => 
   assert.equal(run.updates, updates);
 });
 
-test("Studio does not create an engine or request capture after late device enumeration", async () => {
+test("Studio creates audio in the click before discovery and rejects late enumeration after unmount", async () => {
   const enumeration = deferred();
   const run = hookHarness({ enumeration });
   const pending = run.hook.connect();
+  assert.equal(run.creates, 1, "audio activation starts before asynchronous device discovery");
   run.cleanup();
   assert.equal(run.enumerationSignals[0].aborted, true);
   enumeration.resolve([{ deviceId: "synthetic-input" }]);
   await pending;
-  assert.equal(run.creates, 0);
+  assert.equal(run.creates, 1);
+  assert.equal(run.engine.closed, 1);
   assert.equal(run.requests.length, 0);
   await assert.rejects(run.hook.ensureEngine(), /no longer open/);
+  assert.equal(run.timers.size, 0);
 });
 
 test("Studio aborts a temporary permission probe on cancel and a newer device selection", async () => {
@@ -133,11 +148,114 @@ test("cancelling input or an attachment failure releases the newly granted strea
   }
 });
 
+test("Studio distinguishes paused capture, right-channel signal, muting, and disconnection", async () => {
+  const options = { paused: true };
+  const run = hookHarness(options);
+  const connecting = run.hook.connect();
+  await flush();
+  run.requests[0].resolve(stream());
+  await connecting;
+  assert.equal(run.states[0], "suspended", "connected does not imply the audio clock is running");
+  assert.equal(run.states[5], null);
+  assert.equal(run.states[6], true);
+
+  options.paused = false;
+  await run.hook.resumeAudio();
+  assert.equal(run.states[0], "ready");
+  assert.equal(run.states[6], false);
+  run.engine.level = { peaks: [0, 0.7], rms: [0, 0.35] };
+  run.tick();
+  assert.deepEqual(run.states[5], { peak: 0.7, rms: 0.35, channels: 2 });
+
+  run.engine.inputMuted = true;
+  run.tick();
+  assert.equal(run.states[0], "muted");
+  assert.equal(run.states[5], null);
+  run.engine.inputMuted = false;
+  run.tick();
+  assert.equal(run.states[0], "ready");
+  run.engine.hasInput = false;
+  run.tick();
+  assert.equal(run.states[0], "error");
+  assert.match(run.states[1], /disconnected/);
+  assert.equal(run.states[5], null);
+  run.cleanup();
+  assert.equal(run.timers.size, 0);
+});
+
+test("the attached input identity is available before the selected-device rerender", async () => {
+  const run = hookHarness();
+  const pending = run.hook.connect();
+  await flush();
+  run.requests[0].resolve(stream());
+  await pending;
+  assert.equal(run.hook.deviceId, null, "this harness has not rerendered the hook");
+  assert.equal(run.hook.getConnectedDeviceId(), "synthetic-input");
+  run.engine.hasInput = false;
+  assert.equal(run.hook.getConnectedDeviceId(), null);
+  run.cleanup();
+});
+
+test("a superseded audio activation cannot overwrite the next input or a newer activation", async () => {
+  for (const replacement of ["input", "activation"]) {
+    const run = hookHarness();
+    run.hook.selectDevice("first-input");
+    await flush();
+    run.requests[0].resolve(stream());
+    await flush();
+    const oldResume = deferred();
+    run.engine.resume = () => oldResume.promise;
+    const previous = run.hook.resumeAudio();
+    run.engine.resume = () => Promise.resolve();
+    if (replacement === "input") {
+      run.hook.selectDevice("new-input");
+      await flush();
+      run.requests[1].resolve(stream());
+      await flush();
+      assert.equal(run.states[3], "new-input");
+    } else await run.hook.resumeAudio();
+    oldResume.reject(new Error("Previous activation failed"));
+    await previous;
+    assert.equal(run.states[0], "ready");
+    assert.equal(run.states[1], null);
+    run.cleanup();
+  }
+});
+
+test("a replacement audio engine clears the old connection while preserving an active reconnect", async () => {
+  for (const reconnect of [false, true]) {
+    const options = {};
+    const run = hookHarness(options);
+    run.hook.selectDevice("old-input");
+    await flush();
+    run.requests[0].resolve(stream());
+    await flush();
+    run.engine.level = { peaks: [0.4], rms: [0.2] };
+    run.tick();
+    run.engine.ctx.state = "closed";
+    run.tick();
+    assert.equal(run.states[0], "error", "closed audio is not merely paused or ready");
+    const replacement = { ...run.engine, ctx: { state: "running" }, hasInput: false, level: null, current: null, attached: [], closed: 0 };
+    options.creation = { promise: Promise.resolve(replacement) };
+    const pending = reconnect ? run.hook.connect() : run.hook.ensureEngine();
+    await flush();
+    assert.equal(run.states[3], null);
+    assert.equal(run.states[5], null);
+    assert.equal(run.states[0], reconnect ? "connecting" : "off");
+    if (reconnect) run.requests[1].resolve(stream());
+    await pending;
+    run.tick();
+    assert.equal(run.states[0], reconnect ? "ready" : "off");
+    assert.equal(replacement.hasInput, reconnect);
+    run.cleanup();
+  }
+});
+
 test("the actual Studio engine releases input when graph creation or connection fails", () => {
   for (const failure of ["closed", "create", "connect"]) {
     const engine = Object.create(StudioEngine.prototype);
     let disconnected = 0;
-    Object.assign(engine, { input: null, stream: null, closed: failure === "closed", recorder: {}, ctx: {
+    Object.assign(engine, { input: null, stream: null, inputGeneration: 0, closed: failure === "closed", recorder: { port: { postMessage() {} } }, ctx: {
       state: failure === "closed" ? "closed" : "running",
       createMediaStreamSource() {
         if (failure === "create") throw new Error("Create failed");
@@ -174,16 +292,18 @@ function componentHarness(options = {}) {
   const events = [], notices = [], stored = [], actions = [];
   const decoding = deferred(), loading = options.loading ?? deferred();
   const engine = { mode: "stopped", hasInput: true, ctx: { sampleRate: 48000 },
+    resume: () => options.resume?.promise ?? Promise.resolve(),
     decode: () => decoding.promise, seek() {}, stop: async () => null, position: () => 0,
     play() { events.push("play"); }, record() { events.push("record"); },
   };
   const values = {
     ...projectModel,
     mountedRef: { current: true }, projectGenerationRef: { current: 0 }, transportRequestRef: { current: 0 }, restoreRef: { current: null },
-    project: projectModel.emptyProject(), armedTrackId: null, latencyMs: null, countIn: false,
+    project: projectModel.emptyProject(), armedTrackId: null,
+    getLatencyMs: id => options.getLatencyMs ? options.getLatencyMs(id) : options.latency?.value ?? null, countIn: false,
     recordingRef: { current: null }, engineRef: { current: engine },
     buffersRef: { current: new Map() }, peaksRef: { current: new Map() }, playheadRef: { current: 0 }, scrollXRef: { current: 0 },
-    studio: { connect: async () => {}, cancelPendingInput() { events.push("cancel-input"); }, refreshLatency: () => 0 },
+    studio: { connect: async () => {}, cancelPendingInput() { events.push("cancel-input"); }, refreshLatency: () => 0, getConnectedDeviceId: () => "synthetic-input" },
     ensureEngine: () => options.creation?.promise ?? Promise.resolve(engine),
     options: () => ({ bpm: 96, beatsPerBar: 4, metronome: false }),
     setBusy(value) { events.push(`busy:${value}`); }, setConfirmNew() {}, setSelectedClipId() {}, setArmedTrackId() {}, setMode() {}, setLoaded() {},
@@ -296,6 +416,49 @@ test("New cancels delayed record permission and offline export completion", asyn
   await Promise.all([recording, exporting]);
   assert.equal(run.events.includes("record"), false);
   assert.equal(run.events.includes("download"), false);
+  run.unmount();
+});
+
+test("play and record wait for a running audio clock and honor cancellation during resume", async () => {
+  for (const action of ["play", "record"]) {
+    const resume = deferred();
+    const run = componentHarness({ resume });
+    const pending = run[action]();
+    await flush();
+    assert.equal(run.events.includes(action), false, "transport must not pretend to run while audio is paused");
+    await run.newProject();
+    resume.resolve();
+    await pending;
+    assert.equal(run.events.includes(action), false, "late resume must not restart a discarded transport request");
+    run.unmount();
+  }
+});
+
+test("recording reads the current input compensation after audio resume", async () => {
+  const resume = deferred(), latency = { value: 69 };
+  const run = componentHarness({ resume, latency });
+  let recordedLatency;
+  run.engine.record = (_from, _project, _buffers, _options, value) => { recordedLatency = value; };
+  const pending = run.record();
+  await flush();
+  latency.value = null; // A newly selected, uncalibrated input uses automatic compensation.
+  resume.resolve();
+  await pending;
+  assert.equal(recordedLatency, 0);
+  run.unmount();
+});
+
+test("recording uses the newly connected input's calibration before a UI rerender", async () => {
+  const saved = new Map([["microphone", 69], ["Spark", 12]]);
+  const run = componentHarness({ getLatencyMs: id => saved.get(id) ?? null });
+  let attached = "microphone", recordedLatency;
+  run.engine.hasInput = false;
+  run.values.studio.deviceId = "microphone"; // The old rendered selection.
+  run.values.studio.getConnectedDeviceId = () => attached;
+  run.values.studio.connect = async () => { attached = "Spark"; run.engine.hasInput = true; };
+  run.engine.record = (_from, _project, _buffers, _options, value) => { recordedLatency = value; };
+  await run.record();
+  assert.equal(recordedLatency, 0.012);
   run.unmount();
 });
 

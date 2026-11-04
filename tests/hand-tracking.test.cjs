@@ -22,6 +22,7 @@ function setup(vision, video = null) {
   let nextFrameId = 1;
   let value;
   const react = {
+    useCallback(callback) { return callback; },
     useRef(initial) {
       const i = refIndex++;
       return refs[i] ??= { current: initial };
@@ -130,6 +131,7 @@ test("failed WASM loading clears the spinner and exposes a safe error", async ()
     HandLandmarker: { createFromOptions: async () => { creates++; } },
   });
   await run.flush();
+  await run.flush();
   assert.equal(run.value.isLoading, false);
   assert.match(run.value.error, /Hand tracking could not start/);
   assert.doesNotMatch(run.value.error, /private|token/);
@@ -138,12 +140,15 @@ test("failed WASM loading clears the spinner and exposes a safe error", async ()
   run.cleanup();
 });
 
-test("failed GPU/model initialization clears loading instead of rejecting unhandled", async () => {
+test("failed GPU and CPU initialization clears loading instead of rejecting unhandled", async () => {
+  const delegates = [];
   const run = setup({
     FilesetResolver: { forVisionTasks: async () => ({}) },
-    HandLandmarker: { createFromOptions: async () => { throw new Error("GPU unavailable"); } },
+    HandLandmarker: { createFromOptions: async (_, options) => { delegates.push(options.baseOptions.delegate); throw new Error("Backend unavailable"); } },
   });
   await run.flush();
+  await run.flush();
+  assert.deepEqual(delegates, ["GPU", "CPU"]);
   assert.equal(run.value.isLoading, false);
   assert.match(run.value.error, /audio practice still works/);
   assertCleared(run);
@@ -311,13 +316,103 @@ test("runtime inference failure clears fingers, stops scheduling and preserves u
   video.currentTime = 1 / 30;
   assert.doesNotThrow(() => run.frame(130));
   assertCleared(run);
+  assert.equal(run.value.isLoading, true);
+  await run.flush();
+  run.frame(160);
   assert.equal(run.value.isLoading, false);
   assert.match(run.value.error, /Hand tracking stopped.*audio practice still works/);
   assert.doesNotMatch(run.value.error, /private|GPU/);
   assert.equal(run.pendingFrames, 0);
   video.currentTime = 2 / 30;
-  run.frame(160);
-  assert.equal(calls, 2);
+  run.frame(190);
+  assert.equal(calls, 3);
   run.cleanup();
+  assert.equal(closed, 2);
+});
+
+test("GPU initialization failure falls back to live CPU MediaPipe hands", async () => {
+  const delegates = [];
+  const run = setup({
+    FilesetResolver: { forVisionTasks: async () => ({}) },
+    HandLandmarker: { createFromOptions: async (_, options) => {
+      delegates.push(options.baseOptions.delegate);
+      if (options.baseOptions.delegate === "GPU") throw new Error("GPU unavailable");
+      return { detectForVideo: handResult, close() {} };
+    } },
+  }, makeVideo());
+  await run.flush();
+  await run.flush();
+  run.frame(100);
+  assert.deepEqual(delegates, ["GPU", "CPU"]);
+  assert.equal(run.value.error, null);
+  assert.equal(run.value.isLoading, false);
+  assert.equal(run.value.handsRef.current.length, 1);
+  run.cleanup();
+});
+
+test("lost GPU inference releases its detector and recovers once on CPU", async () => {
+  let closed = 0;
+  const delegates = [];
+  const run = setup({
+    FilesetResolver: { forVisionTasks: async () => ({}) },
+    HandLandmarker: { createFromOptions: async (_, options) => {
+      const delegate = options.baseOptions.delegate;
+      delegates.push(delegate);
+      return { detectForVideo() { if (delegate === "GPU") throw new Error("lost context"); return handResult(); }, close() { closed++; } };
+    } },
+  }, makeVideo());
+  await run.flush();
+  run.frame(100);
+  assertCleared(run);
   assert.equal(closed, 1);
+  await run.flush();
+  run.frame(150);
+  assert.deepEqual(delegates, ["GPU", "CPU"]);
+  assert.equal(run.value.handsRef.current.length, 1);
+  assert.equal(run.value.error, null);
+  run.cleanup();
+  assert.equal(closed, 2);
+});
+
+test("explicit retry recovers after both backends fail without reloading the camera", async () => {
+  let available = false;
+  const run = setup({
+    FilesetResolver: { forVisionTasks: async () => ({}) },
+    HandLandmarker: { createFromOptions: async () => {
+      if (!available) throw new Error("model unavailable");
+      return { detectForVideo: handResult, close() {} };
+    } },
+  }, makeVideo());
+  await run.flush();
+  await run.flush();
+  assert.ok(run.value.error);
+  available = true;
+  const source = run.videoRef.current;
+  run.value.retry();
+  await run.flush();
+  await run.flush();
+  run.frame(100);
+  assert.equal(run.videoRef.current, source);
+  assert.equal(run.value.error, null);
+  assert.equal(run.value.handsRef.current.length, 1);
+  run.cleanup();
+});
+
+test("a CPU fallback resolving after unmount releases its model without restarting capture", async () => {
+  let finish, closed = 0;
+  const run = setup({
+    FilesetResolver: { forVisionTasks: async () => ({}) },
+    HandLandmarker: { createFromOptions: async (_, options) => {
+      if (options.baseOptions.delegate === "GPU") throw new Error("GPU unavailable");
+      return new Promise(resolve => { finish = resolve; });
+    } },
+  }, makeVideo());
+  await run.flush();
+  await run.flush();
+  run.cleanup();
+  finish({ close() { closed++; } });
+  await run.flush();
+  assert.equal(closed, 1);
+  assertCleared(run);
+  assert.equal(run.pendingFrames, 0);
 });

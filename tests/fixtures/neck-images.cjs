@@ -1,5 +1,5 @@
 // Generated test imagery only: no camera footage or claims of real-guitar accuracy.
-function makeNeckImage({ width = 640, height = 400, lastFret = 10, stringCount = 6, texture = true, seed = 12345 } = {}) {
+function makeNeckImage({ width = 640, height = 400, lastFret = 10, stringCount = 6, stringColor = [224, 220, 205], texture = true, seed = 12345 } = {}) {
   const rgba = new Uint8ClampedArray(width * height * 4);
   const pixel = (x, y, color) => {
     x = Math.round(x); y = Math.round(y);
@@ -42,7 +42,7 @@ function makeNeckImage({ width = 640, height = 400, lastFret = 10, stringCount =
   }
   for (let string = 0; string < stringCount; string++) {
     const y = top + (bottom - top) * string / (stringCount - 1);
-    line(left, y, right, y, [224, 220, 205]);
+    line(left, y, right, y, stringColor);
   }
   const points = [{ x: left, y: top }, { x: left, y: bottom }, { x: right, y: top }, { x: right, y: bottom }];
   return { rgba, width, height, points, normalizedPoints: points.map((p) => ({ x: p.x / width, y: p.y / height })), lastFret };

@@ -18,7 +18,7 @@ async function initialize() {
     tracker = new NeckTracker(runtime);
     self.postMessage({ type: "ready" });
   } catch {
-    self.postMessage({ type: "error", message: "Fretboard tracking could not load. Reload to retry; audio practice still works." });
+    self.postMessage({ type: "error", message: "Fretboard tracking could not load. Try finding the fretboard again; audio practice still works." });
   }
 }
 
@@ -42,7 +42,7 @@ self.onmessage = ({ data }) => {
     } else if (data.type === "seed") {
       const result = tracker.seed(rgba, width, height, data.points, data.exclusions ?? []);
       if (result.status === "lost") {
-        self.postMessage({ ...meta, type: "error", message: "Not enough visible neck detail to track. Move closer, improve the light, and mark the neck again." });
+        self.postMessage({ ...meta, type: "error", message: "Not enough visible neck detail to track. Move closer, improve the light, and try Find fretboard again." });
         return;
       }
       self.postMessage({ ...meta, type: "seeded", ...result });
@@ -52,7 +52,7 @@ self.onmessage = ({ data }) => {
     }
   } catch {
     tracker.reset();
-    self.postMessage({ ...meta, type: "error", message: "Fretboard tracking stopped. Find or mark the neck again; audio practice still works." });
+    self.postMessage({ ...meta, type: "error", message: "Fretboard tracking stopped. Try Find fretboard again; audio practice still works." });
   }
 };
 

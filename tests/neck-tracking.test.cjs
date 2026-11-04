@@ -5,6 +5,16 @@ const fs = require("node:fs");
 const ts = require("typescript");
 
 const points = [{ x: 0.1, y: 0.2 }, { x: 0.1, y: 0.5 }, { x: 0.9, y: 0.3 }, { x: 0.9, y: 0.6 }];
+function observedProposal(count = 16) {
+  const frets = Array.from({ length: count }, (_, i) => {
+    const t = (1 - 0.95 ** i) / (1 - 0.95 ** (count - 1));
+    const at = side => ({ x: points[side].x + (points[side + 2].x - points[side].x) * t,
+      y: points[side].y + (points[side + 2].y - points[side].y) * t });
+    return { a: at(0), b: at(1) };
+  });
+  return { points: structuredClone(points), wireCount: count, frets };
+}
+const proposal = observedProposal();
 const source = fs.readFileSync(require.resolve("../src/hooks/useNeckTracking.ts"), "utf8");
 const { outputText } = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } });
 
@@ -76,9 +86,9 @@ function setup(options = {}) {
     get hook() { hook = render(); return hook; }, video, videoRef, tracks, handsRef, handsUpdatedAtRef, workers, canvases, timers, frames,
     get now() { return now; }, get updates() { return updates; },
     advance, tick, cleanup,
-    ready() { workers[0].emit({ type: "ready" }); },
-    operations() { return workers[0].messages.filter(message => message.type !== "reset"); },
-    reply(request, data) { const { epoch, frameId, capturedAt, mediaTime } = request; workers[0].emit({ epoch, frameId, capturedAt, mediaTime, ...data }); },
+    ready() { workers.at(-1).emit({ type: "ready" }); },
+    operations() { return workers.at(-1).messages.filter(message => message.type !== "reset"); },
+    reply(request, data) { const { epoch, frameId, capturedAt, mediaTime } = request; workers.at(-1).emit({ epoch, frameId, capturedAt, mediaTime, ...data }); },
     startTracking() {
       workers[0].emit({ type: "ready" });
       assert.equal(render().freeze(), true);
@@ -116,11 +126,66 @@ test("only the latest request survives asynchronous worker startup", () => {
   const request = run.operations()[0];
   assert.equal(request.mediaTime, 2);
   run.advance(500);
-  run.reply(request, { type: "detected", proposal: { points, wireCount: 8 } });
+  run.reply(request, { type: "detected", proposal: proposal });
   assert.equal(run.hook.status, "proposal");
-  assert.deepEqual(run.hook.proposal, { points, wireCount: 8 });
+  assert.deepEqual(run.hook.proposal, proposal);
   assert.equal(run.hook.poseRef.current, null);
   run.cleanup();
+});
+
+test("observed fret segments are copied intact beyond seven without mirroring sensor coordinates", () => {
+  const run = setup();
+  run.ready();
+  run.hook.find();
+  const data = observedProposal(21);
+  data.points = data.points.map(p => ({ x: 1 - p.x, y: p.y }));
+  data.frets = data.frets.map(({ a, b }) => ({ a: { x: 1 - a.x, y: a.y }, b: { x: 1 - b.x, y: b.y } }));
+  const expected = structuredClone(data);
+  run.reply(run.operations().at(-1), { type: "detected", proposal: data });
+  assert.equal(run.hook.status, "proposal");
+  assert.deepEqual(run.hook.proposal, expected);
+  data.frets[4].a.x = 0;
+  data.points[0].x = 0;
+  assert.deepEqual(run.hook.proposal, expected, "worker-owned objects cannot change the accepted geometry later");
+  run.cleanup();
+});
+
+test("malformed, unbounded and unordered worker fret segments never become a proposal", () => {
+  const cases = [
+    p => { delete p.frets; },
+    p => { p.wireCount--; },
+    p => { p.wireCount = 2.5; },
+    p => Object.assign(p, observedProposal(41)),
+    p => { p.frets[3] = null; },
+    p => { p.frets[3].a.x = NaN; },
+    p => { p.frets[3].b.y = Infinity; },
+    p => { p.frets[3].a.x = -0.1; },
+    p => { p.frets[3].a.y = 1.1; },
+    p => { p.frets[3].b = p.frets[3].a; },
+    p => { p.frets[3].a.y += 0.01; },
+    p => { [p.frets[3], p.frets[4]] = [p.frets[4], p.frets[3]]; },
+    p => { p.frets[3] = p.frets[2]; },
+    p => { p.points[0].x += 0.01; },
+    p => { p.frets.reverse(); },
+    p => {
+      [p.points[2], p.points[3]] = [p.points[3], p.points[2]];
+      p.frets = p.frets.map(({ a, b }, i) => ({ a: { ...a, y: a.y + 0.3 * i / (p.wireCount - 1) },
+        b: { ...b, y: b.y - 0.3 * i / (p.wireCount - 1) } }));
+    },
+  ];
+  for (const corrupt of cases) {
+    const run = setup();
+    run.ready();
+    run.hook.find();
+    const data = observedProposal();
+    corrupt(data);
+    run.reply(run.operations().at(-1), { type: "detected", proposal: data });
+    assert.equal(run.hook.proposal, null);
+    assert.equal(run.hook.poseRef.current, null);
+    assert.equal(run.hook.status, "searching");
+    assert.equal(run.hook.error, null);
+    run.cleanup();
+  }
 });
 
 test("a pending seed supersedes detection during startup, while a source change cancels it", () => {
@@ -233,14 +298,14 @@ test("a new explicit find waits for an obsolete in-flight request and keeps only
   run.video.currentTime = 2;
   run.hook.find();
   assert.equal(run.operations().length, 1);
-  run.reply(first, { type: "detected", proposal: { points, wireCount: 8 } });
+  run.reply(first, { type: "detected", proposal: proposal });
   assert.equal(run.hook.proposal, null);
   assert.equal(run.operations().length, 2);
   const second = run.operations()[1];
   assert.notEqual(first.epoch, second.epoch);
   run.reply(second, { type: "detected", proposal: null });
-  assert.match(run.hook.error, /No clear fretboard/);
-  assert.equal(run.hook.status, "idle");
+  assert.equal(run.hook.error, null);
+  assert.equal(run.hook.status, "searching");
   run.cleanup();
 });
 
@@ -259,7 +324,7 @@ test("source objects, track identities, dimensions, and ended tracks invalidate 
     assert.equal(run.hook.poseRef.current, null);
     assert.equal(run.hook.snapshotRef.current, null);
     assert.equal(run.hook.status, "idle");
-    assert.match(run.hook.error, /camera changed or stopped/i);
+    assert.equal(run.hook.error, null);
     run.cleanup();
   }
 });
@@ -313,6 +378,107 @@ test("operation failures can retry, while setup failures and timeouts terminate 
   unavailable.cleanup();
 });
 
+for (const failure of ["constructor", "load error", "worker error", "load timeout"]) {
+  test(`Find restarts after ${failure} and queues detection until the replacement is ready`, () => {
+    const options = { workerThrows: failure === "constructor" };
+    const run = setup(options);
+    if (failure === "load error") run.workers[0].emit({ type: "error", message: "Vision runtime failed." });
+    if (failure === "worker error") run.workers[0].onerror();
+    if (failure === "load timeout") run.advance(15000);
+    assert.equal(run.hook.status, "error");
+    const oldWorker = run.workers.at(-1);
+    if (oldWorker) assert.equal(oldWorker.terminated, true);
+    options.workerThrows = false;
+
+    run.hook.find();
+    const replacement = run.workers.at(-1);
+    assert.notEqual(replacement, oldWorker);
+    assert.equal(run.hook.status, "detecting");
+    assert.equal(run.hook.error, null);
+    assert.equal(run.operations().length, 0, "detection waits for initialization");
+    oldWorker?.emit({ type: "ready" });
+    oldWorker?.emit({ type: "error", message: "Late old-worker failure." });
+    oldWorker?.onerror();
+    assert.equal(run.hook.status, "detecting");
+    assert.equal(replacement.terminated, false);
+    assert.equal(run.operations().length, 0, "old ready messages cannot initialize the replacement");
+
+    run.ready();
+    const request = run.operations().at(-1);
+    assert.equal(request.type, "detect");
+    run.reply(request, { type: "detected", proposal: proposal });
+    assert.equal(run.hook.status, "proposal");
+    run.cleanup();
+  });
+}
+
+test("Find recovers from an operation timeout without accepting the old worker's callbacks", () => {
+  const run = setup();
+  run.ready();
+  run.hook.find();
+  const oldWorker = run.workers[0];
+  const oldRequest = run.operations().at(-1);
+  run.advance(5000);
+  assert.equal(oldWorker.terminated, true);
+  run.video.currentTime = 2;
+  run.hook.find();
+  run.ready();
+  const replacement = run.workers.at(-1);
+  const request = run.operations().at(-1);
+  assert.equal(request.type, "detect");
+  assert.equal(request.mediaTime, 2);
+  assert.notEqual(request.epoch, oldRequest.epoch);
+  oldWorker.emit({ ...oldRequest, type: "detected", proposal: proposal });
+  oldWorker.emit({ type: "error", message: "Late old-worker failure." });
+  oldWorker.onerror();
+  assert.equal(replacement.terminated, false);
+  assert.equal(run.hook.status, "detecting");
+  assert.equal(run.hook.proposal, null);
+  run.reply(request, { type: "detected", proposal: proposal });
+  assert.equal(run.hook.status, "proposal");
+  run.cleanup();
+});
+
+test("manual freezing restarts a failed worker and preserves the new snapshot for seeding", () => {
+  const run = setup();
+  run.ready();
+  run.workers[0].onerror();
+  assert.equal(run.hook.freeze(), true);
+  assert.equal(run.workers.length, 2);
+  assert.equal(run.hook.error, null);
+  const snapshot = run.hook.snapshotRef.current;
+  run.hook.seed(points);
+  assert.equal(run.operations().length, 0);
+  run.ready();
+  const request = run.operations().at(-1);
+  assert.equal(request.type, "seed");
+  assert.equal(request.capturedAt, snapshot.capturedAt);
+  assert.equal(run.hook.snapshotRef.current, snapshot);
+  run.reply(request, { type: "seeded", status: "tracking", points, inliers: 20 });
+  assert.equal(run.hook.status, "searching");
+  run.cleanup();
+});
+
+test("a worker failure discards its reference and cannot restart through a late seed", () => {
+  for (const sourceChanged of [false, true]) {
+    const run = setup();
+    run.ready();
+    run.hook.freeze();
+    run.workers[0].onerror();
+    if (sourceChanged) run.video.srcObject = { getVideoTracks: () => run.tracks };
+    run.hook.seed(points);
+    assert.equal(run.workers.length, 1);
+    assert.equal(run.hook.snapshotRef.current, null);
+    run.hook.resume();
+    assert.equal(run.workers.length, 2);
+    run.ready();
+    assert.equal(run.operations().length, 0);
+    run.tick(1, 2);
+    assert.equal(run.operations().at(-1).type, "detect");
+    run.cleanup();
+  }
+});
+
 test("unmount terminates the worker, clears resources and ignores late callbacks", () => {
   const run = setup();
   const frame = run.startTracking();
@@ -327,4 +493,176 @@ test("unmount terminates the worker, clears resources and ignores late callbacks
   assert.equal(run.hook.poseRef.current, null);
   assert.equal(run.hook.snapshotRef.current, null);
   assert.equal(run.hook.freeze(), false);
+});
+
+test("a fresh camera automatically detects, binds its snapshot source, and only publishes a later live pose", () => {
+  const run = setup();
+  run.video.paused = true;
+  run.ready();
+  run.tick(100, 2);
+  assert.equal(run.operations().length, 0);
+  run.video.paused = false;
+  run.tick(1, 2.1);
+  const detect = run.operations().at(-1);
+  assert.equal(detect.type, "detect", "no Find or freeze call is required");
+  assert.equal(run.hook.status, "detecting");
+  assert.deepEqual(run.hook.snapshotRef.current.camera, { video: run.video, source: run.video.srcObject,
+    track: run.tracks[0], width: 1920, height: 1080 });
+  run.reply(detect, { type: "detected", proposal });
+  run.tick(2000, 4.1);
+  assert.equal(run.operations().length, 1, "a proposal awaiting the component never starts another search");
+  run.hook.seed(run.hook.proposal.points);
+  const seed = run.operations().at(-1);
+  assert.equal(seed.type, "seed");
+  assert.equal(seed.capturedAt, detect.capturedAt);
+  run.reply(seed, { type: "seeded", status: "tracking", points });
+  assert.equal(run.hook.poseRef.current, null, "an old detection or seed is never displayed as live geometry");
+  const frame = run.operations().at(-1);
+  assert.equal(frame.type, "frame");
+  assert.equal(frame.mediaTime, 4.1);
+  run.reply(frame, { type: "pose", status: "tracking", points });
+  assert.deepEqual(run.hook.poseRef.current.points, points);
+  run.cleanup();
+});
+
+test("automatic misses retry after completion with bounded work and no repeat of an unchanged camera image", () => {
+  const run = setup();
+  run.ready();
+  run.tick();
+  const first = run.operations().at(-1);
+  for (let i = 1; i <= 10; i++) run.tick(50, 1 + i / 10);
+  assert.equal(run.operations().length, 1, "busy detection cannot accumulate frames");
+  run.reply(first, { type: "detected", proposal: null });
+  assert.equal(run.hook.snapshotRef.current, null);
+  assert.equal(run.hook.status, "searching");
+  run.tick(1499, 3);
+  assert.equal(run.operations().length, 1, "cooldown starts when detection completes");
+  run.tick(1, 3.1);
+  assert.equal(run.operations().length, 2);
+  run.reply(run.operations().at(-1), { type: "detected", proposal: null });
+  run.tick(10000, 3.1);
+  assert.equal(run.operations().length, 2, "a stalled image is not detected repeatedly");
+  run.tick(1, 3.2);
+  assert.equal(run.operations().length, 3);
+  run.cleanup();
+});
+
+test("fresh tracking avoids repeated detection and sustained loss automatically replaces the reference", () => {
+  const run = setup();
+  let request = run.startTracking();
+  for (let i = 0; i < 35; i++) {
+    run.reply(request, { type: "pose", status: "tracking", points });
+    run.tick(100, 2 + i / 10);
+    request = run.operations().at(-1);
+    assert.equal(request.type, "frame", "healthy tracking does not rerun the expensive detector");
+  }
+  run.reply(request, { type: "pose", status: "lost" });
+  assert.equal(run.hook.poseRef.current, null);
+  run.tick(2999, 6);
+  request = run.operations().at(-1);
+  assert.equal(request.type, "frame", "the original reference can reacquire during the grace period");
+  run.reply(request, { type: "pose", status: "lost" });
+  run.tick(1, 6.1);
+  request = run.operations().at(-1);
+  assert.equal(request.type, "detect");
+  assert.equal(run.hook.status, "detecting");
+  assert.equal(run.hook.poseRef.current, null);
+  run.reply(request, { type: "detected", proposal });
+  run.hook.seed(run.hook.proposal.points);
+  assert.equal(run.operations().at(-1).type, "seed");
+  run.cleanup();
+});
+
+test("a fresh reacquired pose clears the loss timer before another loss", () => {
+  const run = setup();
+  let request = run.startTracking();
+  run.reply(request, { type: "pose", status: "lost" });
+  run.tick(2900, 2);
+  request = run.operations().at(-1);
+  run.reply(request, { type: "pose", status: "reacquired", points });
+  run.tick(100, 2.1);
+  request = run.operations().at(-1);
+  assert.equal(request.type, "frame");
+  run.reply(request, { type: "pose", status: "lost" });
+  run.tick(2999, 5.1);
+  assert.equal(run.operations().at(-1).type, "frame");
+  run.reply(run.operations().at(-1), { type: "pose", status: "lost" });
+  run.tick(1, 5.2);
+  assert.equal(run.operations().at(-1).type, "detect");
+  run.cleanup();
+});
+
+test("pause invalidates late detection and seed replies without disabling the camera", () => {
+  for (const pauseAt of ["detect", "seed"]) {
+    const run = setup();
+    run.ready();
+    run.tick();
+    let request = run.operations().at(-1);
+    if (pauseAt === "seed") {
+      run.reply(request, { type: "detected", proposal });
+      run.hook.seed(points);
+      request = run.operations().at(-1);
+    }
+    run.hook.pause();
+    run.reply(request, pauseAt === "detect" ? { type: "detected", proposal } : { type: "seeded", status: "tracking", points });
+    const count = run.operations().length;
+    run.tick(20000, 21);
+    assert.equal(run.operations().length, count);
+    assert.equal(run.hook.status, "paused");
+    assert.equal(run.hook.proposal, null);
+    assert.equal(run.hook.poseRef.current, null);
+    assert.equal(run.tracks[0].enabled, true);
+    run.hook.resume();
+    run.tick(1, 21.1);
+    assert.equal(run.operations().at(-1).type, "detect");
+    assert.equal(run.workers.length, 1);
+    run.cleanup();
+  }
+});
+
+test("camera changes restart acquisition on the new source but preserve explicit pause", () => {
+  for (const paused of [false, true]) {
+    const run = setup();
+    run.ready();
+    run.tick();
+    run.reply(run.operations().at(-1), { type: "detected", proposal: null });
+    if (paused) run.hook.pause();
+    run.video.srcObject = { getVideoTracks: () => run.tracks };
+    run.tick(1, 1);
+    assert.equal(run.operations().length, paused ? 1 : 2);
+    if (paused) assert.equal(run.hook.status, "paused");
+    else assert.equal(run.hook.snapshotRef.current.camera.source, run.video.srcObject);
+    run.cleanup();
+  }
+});
+
+test("terminal failures do not create an automatic worker restart loop", () => {
+  const run = setup();
+  run.ready();
+  run.tick();
+  run.workers[0].onerror();
+  for (let i = 0; i < 10; i++) run.tick(5000, i + 2);
+  assert.equal(run.workers.length, 1);
+  assert.equal(run.hook.status, "error");
+  assert.equal(run.hook.snapshotRef.current, null);
+  run.hook.resume();
+  assert.equal(run.workers.length, 2);
+  run.ready();
+  run.tick(1, 13);
+  assert.equal(run.operations().at(-1).type, "detect");
+  run.cleanup();
+});
+
+test("a timeout after pause cannot resume acquisition or replace the paused UI", () => {
+  const run = setup();
+  run.ready();
+  run.tick();
+  run.hook.pause();
+  run.tick(5001, 7);
+  assert.equal(run.hook.status, "paused");
+  assert.equal(run.hook.error, null);
+  assert.equal(run.workers[0].terminated, true);
+  run.hook.resume();
+  assert.equal(run.workers.length, 2);
+  run.cleanup();
 });

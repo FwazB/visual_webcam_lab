@@ -3,7 +3,7 @@ const { test } = require("node:test");
 const assert = require("node:assert/strict");
 const { GUITAR_STANDARD, BASS_STANDARD } = require("../src/lib/instrument/profile");
 const {
-  createNeckCalibration, imageToNeck, neckToImage, fretCoordinate, positionOnNeck, locateFingers,
+  createNeckGeometry, createNeckCalibration, imageToNeck, neckToImage, fretCoordinate, positionOnNeck, locateFingers,
 } = require("../src/lib/instrument/neckMapping");
 
 const unitCorners = [{ x: 0, y: 0 }, { x: 0, y: 1 }, { x: 1, y: 0 }, { x: 1, y: 1 }];
@@ -18,6 +18,28 @@ function hand(tips) {
   for (const [index, point] of Object.entries(tips)) landmarks[Number(index)] = point;
   return { landmarks };
 }
+
+test("unanchored geometry preserves every observed fret through mirrored perspective motion", () => {
+  const original = createNeckGeometry(unitCorners.map(project));
+  const movedPoint = ({ x, y }) => ({ x: 0.9 - 0.65 * x + 0.03 * y, y: 0.25 + 0.08 * x + 0.3 * y });
+  const moved = createNeckGeometry(unitCorners.map(movedPoint));
+  assert.equal("firstFret" in original, false);
+  assert.equal("lastFret" in original, false);
+  // A full visible 22-fret neck is not restricted to the former seven-fret span.
+  const observed = Array.from({ length: 23 }, (_, fret) => {
+    const x = (1 - 2 ** (-fret / 12)) / (1 - 2 ** (-22 / 12));
+    return [project({ x, y: 0 }), project({ x, y: 1 })];
+  });
+  const transferred = observed.map(segment => segment.map(point => neckToImage(moved, imageToNeck(original, point))));
+  assert.equal(transferred.length, 23);
+  for (let fret = 0; fret < transferred.length; fret++) {
+    const x = (1 - 2 ** (-fret / 12)) / (1 - 2 ** (-22 / 12));
+    nearPoint(transferred[fret][0], movedPoint({ x, y: 0 }));
+    nearPoint(transferred[fret][1], movedPoint({ x, y: 1 }));
+  }
+  assert.equal(imageToNeck(original, { x: 0.95, y: 0.95 }), null);
+  assert.throws(() => createNeckGeometry([unitCorners[0], unitCorners[1], unitCorners[3], unitCorners[2]]));
+});
 
 test("perspective and horizontally mirrored necks round-trip known physical points", () => {
   for (const mirror of [false, true]) {

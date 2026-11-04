@@ -19,11 +19,17 @@ export interface PlayOptions {
   metronome: boolean;
 }
 
+export interface InputLevel {
+  peaks: number[];
+  rms: number[];
+}
+
 const RECORDER_URL = "/worklets/recorder-processor.js";
 /** Delay between a transport command and the first scheduled sound (s). */
 const START_DELAY = 0.08;
 /** How far ahead the metronome is scheduled (s). */
 const LOOKAHEAD = 0.15;
+const LEVEL_MAX_AGE_MS = 500;
 
 export class StudioEngine {
   readonly ctx: AudioContext;
@@ -35,6 +41,8 @@ export class StudioEngine {
   private sources: AudioBufferSourceNode[] = [];
   private input: MediaStreamAudioSourceNode | null = null;
   private stream: MediaStream | null = null;
+  private inputGeneration = 0;
+  private inputLevel: (InputLevel & { receivedAt: number; frame: number }) | null = null;
   private anchorCtx = 0;
   private anchorTimeline = 0;
   private stoppedAt = 0;
@@ -55,15 +63,27 @@ export class StudioEngine {
     this.clickOut = ctx.createGain();
     this.clickOut.gain.value = 0.5;
     this.clickOut.connect(ctx.destination);
-    recorder.port.onmessage = (e: MessageEvent<{ type: string; channels?: Float32Array[] }>) => {
+    recorder.port.onmessage = (e: MessageEvent<{ type: string; channels?: Float32Array[]; generation?: number; peaks?: number[]; rms?: number[]; frame?: number }>) => {
+      if (this.closed) return;
       if (e.data.type === "data" && e.data.channels) this.take?.chunks.push(e.data.channels);
       else if (e.data.type === "stopped") this.onStopped?.();
+      else if (e.data.type === "level" && e.data.generation === this.inputGeneration) {
+        const { peaks, rms, frame } = e.data;
+        if (peaks && rms && peaks.length > 0 && peaks.length <= 32 && peaks.length === rms.length
+          && [...peaks, ...rms].every((value) => Number.isFinite(value) && value >= 0)
+          && Number.isFinite(frame)) {
+          this.inputLevel = { peaks: [...peaks], rms: [...rms], frame: frame!, receivedAt: performance.now() };
+        } else this.inputLevel = null;
+      }
     };
   }
 
   static async create(): Promise<StudioEngine> {
     const ctx = new AudioContext({ latencyHint: "interactive" });
     try {
+      // Request activation in the caller's gesture before loading the worklet.
+      // Autoplay may leave this promise pending; creation must still finish.
+      void ctx.resume().catch(() => {});
       await ctx.audioWorklet.addModule(RECORDER_URL);
       const recorder = new AudioWorkletNode(ctx, "recorder-processor", {
         numberOfInputs: 1,
@@ -78,7 +98,27 @@ export class StudioEngine {
   }
 
   get hasInput(): boolean {
-    return this.input !== null;
+    return !this.closed && this.input !== null && this.stream?.getAudioTracks()[0]?.readyState === "live";
+  }
+
+  get inputMuted(): boolean {
+    const track = this.stream?.getAudioTracks()[0];
+    return this.hasInput && !!track && (track.muted || !track.enabled);
+  }
+
+  getInputLevel(): InputLevel | null {
+    const level = this.inputLevel;
+    if (!this.hasInput || this.inputMuted || this.ctx.state !== "running" || !level
+      || performance.now() - level.receivedAt > LEVEL_MAX_AGE_MS
+      || this.ctx.currentTime - level.frame / this.ctx.sampleRate > LEVEL_MAX_AGE_MS / 1000) return null;
+    return { peaks: [...level.peaks], rms: [...level.rms] };
+  }
+
+  /** Invoke directly from a user gesture, before any unrelated awaits. */
+  async resume(): Promise<void> {
+    if (this.closed || this.ctx.state === "closed") throw new Error("Studio is no longer open.");
+    await this.ctx.resume();
+    if (this.closed || this.ctx.state !== "running") throw new Error("Studio audio is paused. Resume audio to continue.");
   }
 
   /** Timeline position now (s); negative during a count-in from 0. */
@@ -98,6 +138,7 @@ export class StudioEngine {
     this.detachInput();
     let input: MediaStreamAudioSourceNode | null = null;
     try {
+      if (stream.getAudioTracks()[0]?.readyState !== "live") throw new Error("The audio input disconnected. Connect it again.");
       input = this.ctx.createMediaStreamSource(stream);
       input.connect(this.recorder);
       this.stream = stream;
@@ -114,6 +155,9 @@ export class StudioEngine {
     const stream = this.stream;
     this.input = null;
     this.stream = null;
+    this.inputLevel = null;
+    this.inputGeneration++;
+    if (!this.closed) this.recorder.port.postMessage({ type: "reset-meter", generation: this.inputGeneration });
     try { input?.disconnect(); } catch { /* Release capture even if the graph is already closed. */ }
     stream?.getTracks().forEach((track) => track.stop());
   }
@@ -138,8 +182,9 @@ export class StudioEngine {
 
   /** Start playback at timeline `from`, after `preroll` seconds of count-in. */
   play(from: number, project: Project, buffers: Map<string, AudioBuffer>, opts: PlayOptions, preroll = 0): number {
+    if (this.closed || this.ctx.state === "closed") throw new Error("Studio is no longer open.");
+    if (this.ctx.state !== "running") throw new Error("Studio audio is paused. Resume audio to continue.");
     this.halt();
-    if (this.ctx.state === "suspended") void this.ctx.resume();
     this.opts = opts;
     this.countInEnd = -Infinity;
     const startCtx = this.ctx.currentTime + START_DELAY;
@@ -170,7 +215,7 @@ export class StudioEngine {
    * `latency` (s) shifts the take earlier so it lines up with what was heard.
    */
   record(from: number, project: Project, buffers: Map<string, AudioBuffer>, opts: PlayOptions, latency: number, countIn: boolean): void {
-    if (!this.input) throw new Error("Connect an input before recording.");
+    if (!this.hasInput) throw new Error("Connect an input before recording.");
     const preroll = countIn ? (opts.beatsPerBar * 60) / opts.bpm : 0;
     const startCtx = this.play(from, project, buffers, opts, preroll);
     this.countInEnd = from;
@@ -224,6 +269,11 @@ export class StudioEngine {
       this.halt();
     } finally {
       this.detachInput();
+      this.onStopped?.();
+      this.onStopped = null;
+      this.take = null;
+      this.recorder.port.onmessage = null;
+      this.recorder.port.close();
       try { this.recorder.disconnect(); }
       finally { this.ctx.close().catch(() => {}); }
     }

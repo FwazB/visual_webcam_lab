@@ -127,6 +127,7 @@ test("the recorder worklet captures from the requested frame and flushes on stop
   let Processor;
   const context = {
     currentFrame: 0,
+    sampleRate: 48000,
     AudioWorkletProcessor: class { constructor() { this.port = { postMessage: (m) => messages.push(m) }; } },
     registerProcessor: (_, ctor) => { Processor = ctor; },
   };
@@ -154,4 +155,80 @@ test("the recorder worklet captures from the requested frame and flushes on stop
   assert.ok(data.length >= 2);
   run(4);
   assert.equal(messages.filter((m) => m.type === "data").length, data.length);
+});
+
+function recorderHarness(quantum = 128) {
+  const messages = [];
+  let Processor;
+  const context = {
+    currentFrame: 0, sampleRate: 48000, renderQuantumSize: quantum,
+    AudioWorkletProcessor: class { constructor() { this.port = { postMessage: (message) => messages.push(message) }; } },
+    registerProcessor: (_, ctor) => { Processor = ctor; },
+  };
+  vm.runInNewContext(fs.readFileSync(require.resolve("../public/worklets/recorder-processor.js"), "utf8"), context);
+  const recorder = new Processor();
+  return {
+    messages,
+    send: (data) => recorder.port.onmessage({ data }),
+    run(input, count = 1) {
+      for (let i = 0; i < count; i++) {
+        recorder.process([input]);
+        context.currentFrame += quantum;
+      }
+    },
+  };
+}
+
+test("input meters preserve right-only stereo before, during and after recording at bounded frequency", () => {
+  const run = recorderHarness();
+  const input = [new Float32Array(128), Float32Array.from({ length: 128 }, (_, i) => i % 2 ? -0.5 : 0.5)];
+  run.send({ type: "reset-meter", generation: 7 });
+  run.run(input, 375);
+  let levels = run.messages.filter((message) => message.type === "level");
+  assert.ok(levels.length >= 9 && levels.length <= 10);
+  assert.equal(run.messages.some((message) => message.type === "data"), false);
+  for (const level of levels) {
+    assert.equal(level.generation, 7);
+    assert.deepEqual(Array.from(level.peaks), [0, 0.5]);
+    assert.deepEqual(Array.from(level.rms), [0, 0.5]);
+  }
+  run.send({ type: "start", frame: 48000 });
+  run.run(input, 80);
+  run.send({ type: "stop" });
+  const chunks = run.messages.filter((message) => message.type === "data");
+  assert.ok(chunks.length > 0);
+  assert.ok(chunks.every((chunk) => chunk.channels.length === 2 && chunk.channels[1][0] === 0.5));
+  const before = run.messages.filter((message) => message.type === "level").length;
+  run.run(input, 40);
+  levels = run.messages.filter((message) => message.type === "level");
+  assert.ok(levels.length > before);
+  run.send({ type: "reset-meter", generation: 8 });
+  run.run([new Float32Array(128), new Float32Array(128)], 38);
+  const silent = run.messages.at(-1);
+  assert.equal(silent.type, "level");
+  assert.equal(silent.generation, 8);
+  assert.deepEqual(Array.from(silent.peaks), [0, 0]);
+  assert.deepEqual(Array.from(silent.rms), [0, 0]);
+  run.run([], 38);
+  assert.equal(run.messages.at(-1).peaks.length, 0);
+});
+
+test("recording keeps disconnected quanta as silence and preserves a newly arriving stereo channel", () => {
+  for (const quantum of [128, 256]) {
+    const run = recorderHarness(quantum);
+    run.send({ type: "start", frame: quantum / 2 });
+    run.run([new Float32Array(quantum).fill(0.25)]);
+    run.run([], 2);
+    run.run([new Float32Array(quantum), new Float32Array(quantum).fill(0.5)]);
+    run.send({ type: "stop" });
+    const { channels } = run.messages.find((message) => message.type === "data");
+    assert.equal(channels.length, 2);
+    for (const channel of channels) {
+      assert.equal(channel.length, quantum * 3.5);
+      assert.ok(channel.slice(0, quantum / 2).every((sample) => sample === 0.25));
+      assert.ok(channel.slice(quantum / 2, quantum * 2.5).every((sample) => sample === 0));
+    }
+    assert.ok(channels[0].slice(quantum * 2.5).every((sample) => sample === 0));
+    assert.ok(channels[1].slice(quantum * 2.5).every((sample) => sample === 0.5));
+  }
 });

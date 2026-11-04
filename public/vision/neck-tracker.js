@@ -57,6 +57,7 @@
     constructor(cv) {
       this.cv = cv;
       this.reference = null;
+      this.lastPose = null;
       this.wasLost = true;
       this.disposed = false;
       this.orb = null;
@@ -157,6 +158,7 @@
         };
         retained = true;
         this.wasLost = false;
+        this.lastPose = pointsNormalized.map((p) => ({ ...p }));
         return { status: "tracking", points: this.reference.points.map((p) => ({ ...p })), inliers: found.coordinates.length };
       } finally {
         source?.delete(); destination?.delete(); mapping?.delete();
@@ -183,6 +185,30 @@
     }
 
     update(rgba, width, height, exclusions = []) {
+      // Whole-frame ORB can spend its feature budget on a textured room rather
+      // than the narrow neck. Search near the last verified pose first, while
+      // continuing to match against the immutable original descriptors.
+      if (this.lastPose) {
+        const xs = this.lastPose.map((p) => p.x), ys = this.lastPose.map((p) => p.y);
+        const left = Math.max(0, Math.min(...xs) - 0.06), right = Math.min(1, Math.max(...xs) + 0.06);
+        const top = Math.max(0, Math.min(...ys) - 0.06), bottom = Math.min(1, Math.max(...ys) + 0.06);
+        const region = [{ x: left, y: top }, { x: left, y: bottom }, { x: right, y: top }, { x: right, y: bottom }];
+        const previouslyLost = this.wasLost;
+        const nearby = this.matchFrame(rgba, width, height, exclusions, region);
+        if (nearby.status !== "lost") {
+          this.lastPose = nearby.points.map((p) => ({ ...p }));
+          return nearby;
+        }
+        // A failed local search is internal to this frame, not a published
+        // tracking loss. A large move can still match anywhere in the image.
+        this.wasLost = previouslyLost;
+      }
+      const anywhere = this.matchFrame(rgba, width, height, exclusions, null);
+      if (anywhere.status !== "lost") this.lastPose = anywhere.points.map((p) => ({ ...p }));
+      return anywhere;
+    }
+
+    matchFrame(rgba, width, height, exclusions, searchRegion) {
       const reference = this.reference;
       if (this.disposed || !reference || !validFrame(rgba, width, height) || reference.width !== width || reference.height !== height) {
         this.wasLost = true;
@@ -192,7 +218,7 @@
       let current, source, destination, inlierMask, homography;
       let accepted = false;
       try {
-        current = this.features(rgba, width, height, null, exclusions);
+        current = this.features(rgba, width, height, searchRegion, exclusions);
         if (current.coordinates.length < MIN_MATCHES || current.descriptors.empty()) return lost();
         const forward = this.ratioMatches(reference.descriptors, current.descriptors);
         const reverse = this.ratioMatches(current.descriptors, reference.descriptors);
@@ -244,6 +270,7 @@
     reset() {
       this.reference?.descriptors.delete();
       this.reference = null;
+      this.lastPose = null;
       this.wasLost = true;
     }
 

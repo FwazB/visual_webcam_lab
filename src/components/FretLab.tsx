@@ -1,6 +1,6 @@
 "use client";
 
-// Audio-scored practice with a calibrated, physical fretboard overlay.
+// Audio-scored practice with a tracked physical fretboard and hand overlay.
 // Visual position candidates stay independent of the lesson's target.
 
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -105,7 +105,7 @@ export default function FretLab({ profile }: FretLabProps) {
   const scorerRef = useRef<SongScorer | null>(null);
   const lastSongNoteRef = useRef<{ chordTone: boolean; at: number } | null>(null);
 
-  const { handsRef, handsUpdatedAtRef, isLoading: handsLoading, error: handsError } = useHandTracking(videoRef);
+  const { handsRef, handsUpdatedAtRef, isLoading: handsLoading, error: handsError, retry: retryHands } = useHandTracking(videoRef);
   const pitch = useGuitarPitch(profile);
   const transport = useSongTransport(chart, pitch.context);
   const touchDesigner = useTouchDesigner();
@@ -201,7 +201,7 @@ export default function FretLab({ profile }: FretLabProps) {
     });
   }, [pitch, profile, sendNoteHit]);
 
-  // Shared camera for hand inference and the calibrated overlay.
+  // Shared camera for hand inference and the physical fretboard overlay.
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
@@ -438,7 +438,7 @@ export default function FretLab({ profile }: FretLabProps) {
         <RealFretboardOverlay
           profile={profile} videoRef={videoRef} handsRef={handsRef} handsUpdatedAtRef={handsUpdatedAtRef}
           targetRef={cameraTargetRef} pitch={pitch} ready={webcamReady}
-          trackingLoading={handsLoading} trackingError={handsError}
+          trackingLoading={handsLoading} trackingError={handsError} onRetryHandTracking={retryHands}
         />
 
         {debug && (

@@ -93,6 +93,53 @@ test("partial hand occlusion is excluded from reference and current feature matc
   } finally { tracker.dispose(); }
 });
 
+test("a narrow neck keeps its feature budget in a heavily textured room with a hand excluded", () => {
+  const base = makeNeckImage({ width: 960, height: 540 });
+  const points = [{ x: 360, y: 290 }, { x: 360, y: 340 }, { x: 640, y: 290 }, { x: 640, y: 340 }];
+  function room(image) {
+    const rgba = new Uint8ClampedArray(image.rgba);
+    const xs = image.points.map((p) => p.x), ys = image.points.map((p) => p.y);
+    const left = Math.min(...xs) - 12, right = Math.max(...xs) + 12;
+    const top = Math.min(...ys) - 12, bottom = Math.max(...ys) + 12;
+    let state = 17539;
+    for (let y = 0; y < image.height; y += 5) for (let x = 0; x < image.width; x += 5) {
+      state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
+      const color = Math.floor(state / 2 ** 32 * 255);
+      for (let dy = 0; dy < 5 && y + dy < image.height; dy++) for (let dx = 0; dx < 5 && x + dx < image.width; dx++) {
+        if (x + dx >= left && x + dx <= right && y + dy >= top && y + dy <= bottom) continue;
+        rgba.set([color, color, color, 255], ((y + dy) * image.width + x + dx) * 4);
+      }
+    }
+    return { ...image, rgba };
+  }
+  const reference = room(warpImage(cv, base, points));
+  const next = room(warpImage(cv, base, points.map((p) => ({ x: p.x + 8, y: p.y - 6 }))));
+  const hand = [{ x: 390 / 960, y: 280 / 540, width: 60 / 960, height: 70 / 540 }];
+  const tracker = new NeckTracker(cv);
+  try {
+    seed(tracker, reference, hand);
+    const result = tracker.update(next.rgba, next.width, next.height, hand);
+    assert.equal(result.status, "tracking");
+    nearCorners(result, next, 2);
+  } finally { tracker.dispose(); }
+});
+
+test("a large move outside the previous search region uses the original reference anywhere in the frame", () => {
+  const reference = makeNeckImage();
+  const distant = warpImage(cv, reference, reference.points.map((p) => ({ x: p.x, y: p.y - 110 })));
+  const tracker = new NeckTracker(cv);
+  try {
+    seed(tracker, reference);
+    const moved = tracker.update(distant.rgba, distant.width, distant.height);
+    assert.equal(moved.status, "tracking", "an internal local miss is not a published loss");
+    nearCorners(moved, distant, 2);
+    assert.deepEqual(tracker.update(blank(reference).rgba, reference.width, reference.height), { status: "lost", points: null, inliers: 0 });
+    const returned = tracker.update(reference.rgba, reference.width, reference.height);
+    assert.equal(returned.status, "reacquired");
+    nearCorners(returned, reference, 2);
+  } finally { tracker.dispose(); }
+});
+
 test("blank images, unrelated texture and repeated fret-like grids publish no pose, then reacquire the original", () => {
   const reference = makeNeckImage();
   const tracker = new NeckTracker(cv);

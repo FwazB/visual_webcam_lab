@@ -25,7 +25,11 @@ A successful PR check followed by an enforced merge is the ordering mechanism. T
 
 Node 24: locked clean install without lifecycle scripts, valid dependency tree, lint, app tests, Python Fuzz tests, fork security regressions, production build, production audit failing at **low** severity, then the narrow all-dependency policy.
 
-The all-dependency gate prints the full npm audit report and accepts only the recorded development-only `minimatch@3.1.5` advisory `GHSA-g3hv-75wg-m249`, its reviewed dependent names, moderate severity, and at most 15 aggregate findings. It checks lockfile dev flags; new advisory IDs, production exposure, severity changes, versions, names and malformed reports fail. Production audit has no exception. This is **not a clean full audit** and does not promise every upstream risk is known. See the existing security audit document for the accepted discrepancy and reassessment conditions.
+The all-dependency gate fails on every production or development advisory. The
+previous minimatch exception was removed after the registry upgrade and the
+hash-checked compatibility patches described in the security audit. Production
+audit also fails at low severity. A clean registry result is a dated check for
+known advisories, not a guarantee that every dependency is harmless.
 
 No live Spotify, TouchDesigner, physical instrument/camera/audio, private playing-vision fixtures or model-weight tests run in this workflow. Those remain separate release evidence; no private fixtures are published for CI.
 

@@ -46,6 +46,21 @@ test("classic worker loads same-origin WASM and rejects malformed or obsolete fr
   assert.equal(messages[1].frameId, 7);
   assert.equal(messages[1].capturedAt, 12, "timestamps are not replaced by worker completion time");
   assert.equal(messages[1].epoch, 3);
+  const visibleNeck = makeNeckImage({ texture: false });
+  const expectedProposal = context.NeckDetector.detectNeck(context.cv, visibleNeck.rgba, visibleNeck.width, visibleNeck.height);
+  context.onmessage({ data: {
+    type: "detect", epoch: 3, frameId: 8, capturedAt: 24, mediaTime: .2,
+    width: visibleNeck.width, height: visibleNeck.height, rgba: visibleNeck.rgba.buffer,
+  } });
+  const detected = messages.at(-1);
+  assert.equal(detected.type, "detected");
+  assert.equal(detected.epoch, 3);
+  assert.equal(detected.frameId, 8);
+  assert.equal(detected.capturedAt, 24);
+  assert.equal(detected.mediaTime, .2);
+  assert.ok(detected.proposal.frets.length > 7, "the worker must retain the whole observed fret sequence");
+  assert.equal(detected.proposal.frets.length, detected.proposal.wireCount);
+  assert.deepEqual(detected.proposal, expectedProposal, "fret coordinates and ordering pass through the worker unchanged");
   const reference = makeNeckImage();
   context.onmessage({ data: {
     type: "seed", epoch: 4, frameId: 8, capturedAt: 30, mediaTime: .3,

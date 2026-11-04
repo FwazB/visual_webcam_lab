@@ -8,13 +8,17 @@ export interface NeckPoint {
 
 type Matrix3 = readonly [number, number, number, number, number, number, number, number, number];
 
-export interface NeckCalibration {
-  readonly firstFret: number;
-  readonly lastFret: number;
-  /** Low/first, high/first, low/last, high/last string/wire intersections. */
+/** Observed neck geometry, with no assumption about absolute fret identity. */
+export interface NeckGeometry {
+  /** First-side/near, second-side/near, first-side/far, second-side/far corners. */
   readonly points: readonly NeckPoint[];
   readonly imageToNeckMatrix: Matrix3;
   readonly neckToImageMatrix: Matrix3;
+}
+
+export interface NeckCalibration extends NeckGeometry {
+  readonly firstFret: number;
+  readonly lastFret: number;
   readonly profileId: string;
   readonly stringCount: number;
   readonly tuning: readonly number[];
@@ -109,18 +113,8 @@ function transform(matrix: Matrix3, point: NeckPoint): NeckPoint | null {
   return { x: Math.max(0, Math.min(1, projected.x)), y: Math.max(0, Math.min(1, projected.y)) };
 }
 
-/** Manual calibration only. Neither hand landmarks nor targets localize the neck. */
-export function createNeckCalibration(
-  points: readonly NeckPoint[],
-  firstFret: number,
-  lastFret: number,
-  profile: InstrumentProfile,
-): NeckCalibration {
-  if (!validProfile(profile)) throw new Error("Invalid instrument profile.");
-  if (!Number.isInteger(firstFret) || !Number.isInteger(lastFret)
-    || firstFret < 0 || lastFret <= firstFret || lastFret > profile.fretCount) {
-    throw new Error(`Choose two fret wires from 0 to ${profile.fretCount}, in increasing order.`);
-  }
+/** Rectify an observed quadrilateral without inventing fret numbers or spacing. */
+export function createNeckGeometry(points: readonly NeckPoint[]): NeckGeometry {
   if (points.length !== 4 || points.some((point) => !inUnitSquare(point))) {
     throw new Error("Choose four fretboard intersections inside the camera image.");
   }
@@ -140,20 +134,37 @@ export function createNeckCalibration(
     throw new Error("Fretboard calibration could not be resolved.");
   }
   return Object.freeze({
-    firstFret, lastFret, points: Object.freeze(copiedPoints),
+    points: Object.freeze(copiedPoints),
     imageToNeckMatrix: Object.freeze(imageToNeckMatrix),
     neckToImageMatrix: Object.freeze(neckToImageMatrix),
+  });
+}
+
+/** Explicitly anchored mapping for callers that know the endpoint fret identities. */
+export function createNeckCalibration(
+  points: readonly NeckPoint[],
+  firstFret: number,
+  lastFret: number,
+  profile: InstrumentProfile,
+): NeckCalibration {
+  if (!validProfile(profile)) throw new Error("Invalid instrument profile.");
+  if (!Number.isInteger(firstFret) || !Number.isInteger(lastFret)
+    || firstFret < 0 || lastFret <= firstFret || lastFret > profile.fretCount) {
+    throw new Error(`Choose two fret wires from 0 to ${profile.fretCount}, in increasing order.`);
+  }
+  return Object.freeze({
+    ...createNeckGeometry(points), firstFret, lastFret,
     profileId: profile.id, stringCount: profile.stringCount,
     tuning: Object.freeze([...profile.tuning]), fretCount: profile.fretCount,
   });
 }
 
 /** Neck x runs first to last wire; y runs lowest to highest string. */
-export function imageToNeck(calibration: NeckCalibration, point: NeckPoint): NeckPoint | null {
+export function imageToNeck(calibration: NeckGeometry, point: NeckPoint): NeckPoint | null {
   return inUnitSquare(point) ? transform(calibration.imageToNeckMatrix, point) : null;
 }
 
-export function neckToImage(calibration: NeckCalibration, point: NeckPoint): NeckPoint | null {
+export function neckToImage(calibration: NeckGeometry, point: NeckPoint): NeckPoint | null {
   return inUnitSquare(point) ? transform(calibration.neckToImageMatrix, point) : null;
 }
 

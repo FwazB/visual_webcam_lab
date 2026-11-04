@@ -4,9 +4,17 @@ import { useCallback, useEffect, useRef, useState, type RefObject } from "react"
 import type { HandDetection } from "./useHandTracking";
 import type { NeckPoint } from "@/lib/instrument/neckMapping";
 
-export type NeckTrackingStatus = "loading" | "idle" | "detecting" | "proposal" | "tracking" | "searching" | "error";
+export type NeckTrackingStatus = "loading" | "idle" | "detecting" | "proposal" | "tracking" | "searching" | "paused" | "error";
 export interface NeckPose { points: NeckPoint[]; capturedAt: number; mediaTime: number }
+export interface NeckCameraIdentity {
+  video: HTMLVideoElement;
+  source: HTMLVideoElement["srcObject"];
+  track: MediaStreamTrack | null;
+  width: number;
+  height: number;
+}
 export interface NeckSnapshot {
+  camera: NeckCameraIdentity;
   canvas: HTMLCanvasElement;
   width: number;
   height: number;
@@ -14,9 +22,15 @@ export interface NeckSnapshot {
   capturedAt: number;
   mediaTime: number;
 }
-export interface NeckProposal { points: NeckPoint[]; wireCount: number }
+type NeckCorners = [NeckPoint, NeckPoint, NeckPoint, NeckPoint];
+export interface NeckProposal {
+  points: NeckCorners;
+  wireCount: number;
+  /** Observed wire segments in sensor coordinates, from the first end to the last. */
+  frets: { a: NeckPoint; b: NeckPoint }[];
+}
 
-interface Controls { freeze(): boolean; find(): void; seed(points: NeckPoint[]): void; reset(): void }
+interface Controls { freeze(): boolean; find(): void; seed(points: NeckPoint[]): void; reset(): void; pause(): void; resume(): void }
 interface Source {
   video: HTMLVideoElement | null;
   object: HTMLVideoElement["srcObject"];
@@ -35,15 +49,56 @@ interface Flight extends Operation { frameId: number }
 
 const FRESH_MS = 250;
 const FRAME_INTERVAL_MS = 1000 / 15;
+const SEARCH_INTERVAL_MS = 1500;
+const REACQUIRE_MS = 3000;
 
-function pointsFrom(value: unknown): NeckPoint[] | null {
-  if (!Array.isArray(value) || value.length !== 4) return null;
-  if (!value.every(p => p && Number.isFinite(p.x) && Number.isFinite(p.y)
-    && p.x >= 0 && p.x <= 1 && p.y >= 0 && p.y <= 1)) return null;
-  return value.map(({ x, y }) => ({ x, y }));
+function pointFrom(value: unknown): NeckPoint | null {
+  if (!value || typeof value !== "object") return null;
+  const { x, y } = value as NeckPoint;
+  return Number.isFinite(x) && Number.isFinite(y) && x >= 0 && x <= 1 && y >= 0 && y <= 1 ? { x, y } : null;
 }
 
-/** Owns the worker, not the camera. Frozen calibration images never become live poses. */
+function pointsFrom(value: unknown): NeckCorners | null {
+  if (!Array.isArray(value) || value.length !== 4) return null;
+  const copied = value.map(pointFrom);
+  return copied.every(p => p !== null) ? copied as NeckCorners : null;
+}
+
+function proposalFrom(value: unknown): NeckProposal | null {
+  if (!value || typeof value !== "object") return null;
+  const proposal = value as Partial<NeckProposal>;
+  const points = pointsFrom(proposal.points);
+  const { wireCount, frets } = proposal;
+  if (!points || typeof wireCount !== "number" || !Number.isInteger(wireCount) || wireCount < 2 || wireCount > 40
+    || !Array.isArray(frets) || frets.length !== wireCount) return null;
+  const polygon = [points[0], points[2], points[3], points[1]];
+  const turns = polygon.map((p, i) => {
+    const next = polygon[(i + 1) % 4], after = polygon[(i + 2) % 4];
+    return (next.x - p.x) * (after.y - next.y) - (next.y - p.y) * (after.x - next.x);
+  });
+  if (!turns.every(turn => turn > 1e-6) && !turns.every(turn => turn < -1e-6)) return null;
+  const copied = [];
+  const progress = [-Infinity, -Infinity];
+  for (const fret of frets) {
+    const a = pointFrom(fret?.a), b = pointFrom(fret?.b);
+    if (!a || !b || Math.hypot(a.x - b.x, a.y - b.y) < 1e-5) return null;
+    for (const [side, point] of [a, b].entries()) {
+      const start = points[side], end = points[side + 2];
+      const dx = end.x - start.x, dy = end.y - start.y, squared = dx * dx + dy * dy;
+      if (squared < 1e-8) return null;
+      const fraction = ((point.x - start.x) * dx + (point.y - start.y) * dy) / squared;
+      const offset = Math.abs(dx * (point.y - start.y) - dy * (point.x - start.x)) / Math.sqrt(squared);
+      if (offset > 1e-4 || fraction < -1e-6 || fraction > 1 + 1e-6 || fraction <= progress[side]) return null;
+      progress[side] = fraction;
+    }
+    copied.push({ a, b });
+  }
+  const ends = [copied[0].a, copied[0].b, copied.at(-1)!.a, copied.at(-1)!.b];
+  if (ends.some((point, i) => Math.hypot(point.x - points[i].x, point.y - points[i].y) > 1e-6)) return null;
+  return { points, wireCount, frets: copied };
+}
+
+/** Owns the worker, not the camera. Background detection snapshots never become live poses. */
 export function useNeckTracking(
   videoRef: RefObject<HTMLVideoElement | null>,
   handsRef: RefObject<HandDetection[]>,
@@ -64,6 +119,11 @@ export function useNeckTracking(
     let epoch = 0;
     let frameId = 0;
     let active = false;
+    let enabled = true;
+    let awaitingProposal = false;
+    let nextSearchAt = 0;
+    let lastSearchMediaTime = -Infinity;
+    let lostSince: number | null = null;
     let pending: Operation | null = null;
     let flight: Flight | null = null;
     let source: Source | null = null;
@@ -85,6 +145,8 @@ export function useNeckTracking(
     function advanceEpoch() {
       epoch++;
       active = false;
+      awaitingProposal = false;
+      lostSince = null;
       pending = null;
       lastMediaTime = -Infinity;
       lastSampleAt = -Infinity;
@@ -98,10 +160,13 @@ export function useNeckTracking(
     function fail(message: string, terminal = false) {
       active = false;
       pending = null;
+      awaitingProposal = false;
       clearPose();
+      snapshotRef.current = null;
+      nextSearchAt = performance.now() + SEARCH_INTERVAL_MS;
       setProposal(null);
-      setError(message);
-      setStatus("error");
+      setError(enabled ? message : null);
+      setStatus(enabled ? "error" : "paused");
       if (terminal) {
         terminalError = message;
         clearTimeout(loadTimer);
@@ -130,11 +195,12 @@ export function useNeckTracking(
         || next.width !== source.width || next.height !== source.height || next.usable !== source.usable
         || next.tracks.length !== source.tracks.length || next.tracks.some((track, i) => track !== source!.tracks[i]));
       if (changed) {
-        const hadReference = active || pending !== null || snapshotRef.current !== null || poseRef.current !== null;
         advanceEpoch();
+        nextSearchAt = 0;
+        lastSearchMediaTime = -Infinity;
         if (!terminalError) {
-          setStatus(ready ? "idle" : "loading");
-          setError(hadReference ? "The camera changed or stopped. Find or mark the neck again." : null);
+          setStatus(!enabled ? "paused" : ready ? "idle" : "loading");
+          setError(null);
         }
       }
       source = next;
@@ -155,7 +221,9 @@ export function useNeckTracking(
       const mediaTime = current.video.currentTime;
       context.drawImage(current.video, 0, 0, canvas.width, canvas.height);
       const rgba = context.getImageData(0, 0, canvas.width, canvas.height).data;
-      const frame = { canvas, width: canvas.width, height: canvas.height, rgba, capturedAt, mediaTime };
+      const frame: NeckSnapshot = { canvas, width: canvas.width, height: canvas.height, rgba, capturedAt, mediaTime,
+        camera: { video: current.video, source: current.object, track: current.tracks[0] ?? null,
+          width: current.width, height: current.height } };
       frameExclusions.set(frame, exclusions(capturedAt));
       return frame;
     }
@@ -179,17 +247,17 @@ export function useNeckTracking(
       if (disposed || !worker || !ready || flight || operation.epoch !== epoch) return;
       const { frame, type, points } = operation;
       const id = ++frameId;
-      // Copy before transfer: a frozen snapshot must remain intact until seeding is acknowledged.
+      // Copy before transfer: the reference snapshot must remain intact until seeding is acknowledged.
       const rgba = frame.rgba.slice().buffer;
       flight = { ...operation, frameId: id };
       operationTimer = setTimeout(() => {
-        if (!disposed && flight?.frameId === id) fail("Fretboard tracking timed out. Reload to retry; audio practice still works.", true);
+        if (!disposed && flight?.frameId === id) fail("Fretboard tracking timed out. Retry neck tracking; hand tracking and audio remain independent.", true);
       }, 5000);
       try {
         worker.postMessage({ type, epoch, frameId: id, capturedAt: frame.capturedAt, mediaTime: frame.mediaTime,
           width: frame.width, height: frame.height, rgba, points, exclusions: frameExclusions.get(frame) ?? [] }, [rgba]);
       } catch {
-        fail("Fretboard tracking could not receive the camera frame. Reload to retry.", true);
+        fail("Fretboard tracking could not receive the camera frame. Retry neck tracking.", true);
       }
     }
 
@@ -202,7 +270,7 @@ export function useNeckTracking(
 
     function sample(now: number) {
       const current = checkSource();
-      if (!active || !current.usable || !current.video || flight || pending || !ready) return;
+      if (!enabled || !active || !current.usable || !current.video || flight || pending || !ready) return;
       if (now - lastSampleAt < FRAME_INTERVAL_MS || current.video.currentTime === lastMediaTime) return;
       try {
         const frame = capture(false);
@@ -211,41 +279,61 @@ export function useNeckTracking(
         lastMediaTime = frame.mediaTime;
         send({ type: "frame", epoch, frame });
       } catch {
-        fail("The camera frame could not be read. Find or mark the neck again.");
+        fail("The camera frame could not be read. Check camera access.");
       }
     }
 
     function freeze(): boolean {
-      if (disposed || terminalError) return false;
+      if (disposed || (terminalError && !startWorker())) return false;
+      enabled = true;
       advanceEpoch();
+      awaitingProposal = true;
       setError(null);
       setStatus("idle");
       try {
         const snapshot = capture(true);
-        if (!snapshot) { setError("Wait for a live camera image, then try again."); return false; }
+        if (!snapshot) { awaitingProposal = false; setError("Wait for a live camera image, then try again."); return false; }
         snapshotRef.current = snapshot;
         setStatus("idle");
         return true;
       } catch {
-        fail("The camera frame could not be frozen. Check camera access and try again.");
+        fail("The camera frame could not be read. Check camera access and try again.");
         return false;
       }
     }
 
+    function find() {
+      if (!freeze()) return;
+      awaitingProposal = false;
+      lastSearchMediaTime = snapshotRef.current!.mediaTime;
+      pending = { type: "detect", epoch, frame: snapshotRef.current! };
+      setStatus("detecting");
+      flush();
+    }
+
+    function search(now: number) {
+      const current = checkSource();
+      if (!enabled || terminalError || !ready || flight || pending || awaitingProposal || !current.usable || !current.video
+        || now < nextSearchAt || current.video.currentTime === lastSearchMediaTime) return;
+      if (active && (lostSince === null || now - lostSince < REACQUIRE_MS)) return;
+      find();
+    }
+
+    function markLost() {
+      clearPose();
+      lostSince ??= performance.now();
+      if (active) setStatus("searching");
+    }
+
     controlsRef.current = {
       freeze,
-      find() {
-        if (!freeze()) return;
-        pending = { type: "detect", epoch, frame: snapshotRef.current! };
-        setStatus("detecting");
-        flush();
-      },
+      find,
       seed(points) {
-        if (disposed || terminalError) return;
+        if (disposed || !enabled || terminalError) return;
         checkSource();
         const snapshot = snapshotRef.current;
         const copied = pointsFrom(points);
-        if (!snapshot || !copied) { fail("Freeze a camera image and mark four neck corners before tracking."); return; }
+        if (!snapshot || !copied) { fail("Waiting for a fresh fretboard image before tracking."); return; }
         advanceEpoch();
         snapshotRef.current = snapshot;
         pending = { type: "seed", epoch, frame: snapshot, points: copied };
@@ -256,100 +344,133 @@ export function useNeckTracking(
       reset() {
         if (disposed) return;
         advanceEpoch();
-        if (!terminalError) { setError(null); setStatus(ready ? "idle" : "loading"); }
+        nextSearchAt = performance.now() + SEARCH_INTERVAL_MS;
+        if (!terminalError) { setError(null); setStatus(!enabled ? "paused" : ready ? "idle" : "loading"); }
+      },
+      pause() {
+        if (disposed) return;
+        enabled = false;
+        advanceEpoch();
+        setError(null);
+        setStatus("paused");
+      },
+      resume() {
+        if (disposed) return;
+        enabled = true;
+        advanceEpoch();
+        nextSearchAt = 0;
+        lastSearchMediaTime = -Infinity;
+        if (terminalError) { startWorker(); return; }
+        setError(null);
+        setStatus(ready ? "idle" : "loading");
       },
     };
 
-    try {
-      worker = new Worker("/vision/fretboard-worker.js");
-      loadTimer = setTimeout(() => {
-        if (!disposed && !ready) fail("Fretboard tracking could not finish loading. Reload to retry; audio practice still works.", true);
-      }, 15000);
-      worker.onerror = () => { if (!disposed) fail("Fretboard tracking could not load or stopped unexpectedly. Reload to retry; audio practice still works.", true); };
-      worker.onmessage = ({ data }) => {
-        if (disposed || !data) return;
-        if (data.type === "ready") {
-          if (ready || terminalError) return;
-          ready = true;
-          clearTimeout(loadTimer);
+    function startWorker(): boolean {
+      if (disposed) return false;
+      terminalError = null;
+      ready = false;
+      setError(null);
+      setStatus("loading");
+      try {
+        const startedWorker = new Worker("/vision/fretboard-worker.js");
+        worker = startedWorker;
+        loadTimer = setTimeout(() => {
+          if (!disposed && worker === startedWorker && !ready) fail("Fretboard tracking could not finish loading. Retry neck tracking; audio practice still works.", true);
+        }, 15000);
+        startedWorker.onerror = () => { if (!disposed && worker === startedWorker) fail("Fretboard tracking could not load or stopped unexpectedly. Retry neck tracking; audio practice still works.", true); };
+        startedWorker.onmessage = ({ data }) => {
+          // A terminated worker can still have a callback queued on the main thread.
+          if (disposed || worker !== startedWorker || !data) return;
+          if (data.type === "ready") {
+            if (ready || terminalError) return;
+            ready = true;
+            clearTimeout(loadTimer);
+            checkSource();
+            worker?.postMessage({ type: "reset", epoch });
+            if (!pending) setStatus(enabled ? "idle" : "paused");
+            flush();
+            return;
+          }
+          if (data.type === "error" && data.epoch === undefined) {
+            fail(typeof data.message === "string" ? data.message : "Fretboard tracking could not load. Retry neck tracking.", true);
+            return;
+          }
+          const completed = flight;
+          if (!completed || data.epoch !== completed.epoch || data.frameId !== completed.frameId) return;
+          flight = null;
+          clearTimeout(operationTimer);
           checkSource();
-          worker?.postMessage({ type: "reset", epoch });
-          if (!pending) setStatus("idle");
-          flush();
-          return;
-        }
-        if (data.type === "error" && data.epoch === undefined) {
-          fail(typeof data.message === "string" ? data.message : "Fretboard tracking could not load. Reload to retry.", true);
-          return;
-        }
-        const completed = flight;
-        if (!completed || data.epoch !== completed.epoch || data.frameId !== completed.frameId) return;
-        flight = null;
-        clearTimeout(operationTimer);
-        checkSource();
-        if (data.epoch !== epoch) { flush(); return; }
-        if (data.capturedAt !== completed.frame.capturedAt || data.mediaTime !== completed.frame.mediaTime) {
-          if (completed.type !== "frame") fail("Fretboard tracking returned a mismatched camera frame. Find or mark the neck again.");
-          flush();
-          return;
-        }
-        if (data.type === "error") {
-          if (completed.type === "seed") snapshotRef.current = null;
-          fail(typeof data.message === "string" ? data.message : "Fretboard tracking stopped. Find or mark the neck again.");
-          return;
-        }
-        if (completed.type === "detect" && data.type === "detected") {
-          const points = pointsFrom(data.proposal?.points);
-          if (points && Number.isInteger(data.proposal.wireCount) && data.proposal.wireCount >= 2) {
-            setProposal({ points, wireCount: data.proposal.wireCount });
-            setStatus("proposal");
-          } else {
-            setStatus("idle");
-            setError("No clear fretboard found. Freeze and mark the neck manually, or adjust the camera and try again.");
+          if (data.epoch !== epoch) { flush(); return; }
+          if (data.capturedAt !== completed.frame.capturedAt || data.mediaTime !== completed.frame.mediaTime) {
+            if (completed.type !== "frame") fail("Fretboard tracking returned a mismatched camera frame. Looking for a fresh image.");
+            flush();
+            return;
           }
-        } else if (completed.type === "seed" && data.type === "seeded" && data.status === "tracking") {
-          snapshotRef.current = null;
-          clearPose();
-          active = true;
-          lastMediaTime = completed.frame.mediaTime;
-          lastSampleAt = -Infinity;
-          setStatus("searching");
-          sample(performance.now());
-        } else if (completed.type === "frame" && data.type === "pose") {
-          const age = performance.now() - data.capturedAt;
-          const points = pointsFrom(data.points);
-          if (!Number.isFinite(age) || age < 0 || age > FRESH_MS || !points
-            || (data.status !== "tracking" && data.status !== "reacquired")) {
+          if (data.type === "error") {
+            if (completed.type === "seed") snapshotRef.current = null;
+            fail(typeof data.message === "string" ? data.message : "Fretboard tracking stopped. Looking for a fresh image.");
+            return;
+          }
+          if (completed.type === "detect" && data.type === "detected") {
+            const detected = proposalFrom(data.proposal);
+            if (detected) {
+              awaitingProposal = true;
+              setProposal(detected);
+              setStatus("proposal");
+            } else {
+              snapshotRef.current = null;
+              nextSearchAt = performance.now() + SEARCH_INTERVAL_MS;
+              setStatus("searching");
+              setError(null);
+            }
+          } else if (completed.type === "seed" && data.type === "seeded" && data.status === "tracking") {
+            snapshotRef.current = null;
             clearPose();
+            active = true;
+            lostSince = performance.now();
+            lastMediaTime = completed.frame.mediaTime;
+            lastSampleAt = -Infinity;
             setStatus("searching");
+            sample(performance.now());
+          } else if (completed.type === "frame" && data.type === "pose") {
+            const age = performance.now() - data.capturedAt;
+            const points = pointsFrom(data.points);
+            if (!Number.isFinite(age) || age < 0 || age > FRESH_MS || !points
+              || (data.status !== "tracking" && data.status !== "reacquired")) {
+              markLost();
+            } else {
+              lostSince = null;
+              poseRef.current = { points, capturedAt: data.capturedAt, mediaTime: data.mediaTime };
+              setStatus("tracking");
+              clearTimeout(expiryTimer);
+              const acceptedPose = poseRef.current;
+              expiryTimer = setTimeout(() => {
+                if (disposed || poseRef.current !== acceptedPose) return;
+                markLost();
+              }, Math.max(1, FRESH_MS + 1 - age));
+            }
           } else {
-            poseRef.current = { points, capturedAt: data.capturedAt, mediaTime: data.mediaTime };
-            setStatus("tracking");
-            clearTimeout(expiryTimer);
-            const acceptedPose = poseRef.current;
-            expiryTimer = setTimeout(() => {
-              if (disposed || poseRef.current !== acceptedPose) return;
-              clearPose();
-              if (active) setStatus("searching");
-            }, Math.max(1, FRESH_MS + 1 - age));
+            fail("Fretboard tracking returned an unexpected result. Looking for a fresh image.");
           }
-        } else {
-          fail("Fretboard tracking returned an unexpected result. Find or mark the neck again.");
-        }
-        flush();
-      };
-    } catch {
-      fail("This browser could not start fretboard tracking. Reload or use a browser with Web Worker support.", true);
+          flush();
+        };
+        return true;
+      } catch {
+        fail("This browser could not start fretboard tracking. Retry neck tracking or use a browser with Web Worker support.", true);
+        return false;
+      }
     }
+    startWorker();
 
     function tick() {
       if (disposed) return;
       const now = performance.now();
       if (poseRef.current && now - poseRef.current.capturedAt > FRESH_MS) {
-        clearPose();
-        if (active) setStatus("searching");
+        markLost();
       }
       checkSource();
+      search(now);
       sample(now);
       raf = requestAnimationFrame(tick);
     }
@@ -371,5 +492,7 @@ export function useNeckTracking(
   const find = useCallback(() => controlsRef.current?.find(), []);
   const seed = useCallback((points: NeckPoint[]) => controlsRef.current?.seed(points), []);
   const reset = useCallback(() => controlsRef.current?.reset(), []);
-  return { poseRef, status, error, proposal, snapshotRef, freeze, find, seed, reset };
+  const pause = useCallback(() => controlsRef.current?.pause(), []);
+  const resume = useCallback(() => controlsRef.current?.resume(), []);
+  return { poseRef, status, error, proposal, snapshotRef, freeze, find, seed, reset, pause, resume };
 }

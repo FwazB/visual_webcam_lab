@@ -165,6 +165,86 @@ frame disclosure was demonstrated.
 - CI now includes the isolated vision geometry and media-lifecycle Node tests;
   those checks do not launch a browser or open capture devices.
 
+## Continuous tracking and Studio review (2026-11-03)
+
+This pass reviews the candidate based on `83d66dc`: the whole browser app,
+MediaPipe and OpenCV integration, Studio recording/storage, Spotify authorization,
+TouchDesigner protocol and local Python/Swift helpers, dependencies, public assets,
+Next security headers, and CI. The current GitHub destination was verified as the
+public `FwazB/visual_webcam_lab` repository, with `main` as its default branch.
+The user requested publication to main; existing Vercel Git integration deploys
+that branch. Provider access settings were not changed.
+
+### Findings and decisions
+
+No confirmed high or medium exploitable vulnerability was found in this pass.
+The review checked media ownership, late permissions and asynchronous completions,
+untrusted text and URLs, OAuth state and token handling, worker and bridge input
+bounds, lifecycle cancellation, local helper process boundaries, dependency
+provenance, and public-file exposure. This is a source and bounded runtime audit,
+not a penetration-test certification or a claim that vulnerabilities cannot exist.
+
+| Severity | Finding | Decision |
+| --- | --- | --- |
+| Low | Studio has no explicit decoded-audio, recording-duration or whole-project mix memory budget | Retained as a documented local availability limit. Very large user-selected audio, prolonged recording, or a large same-origin saved project can exhaust tab memory. No unauthenticated remote trigger was found; no destructive memory-exhaustion test was performed. Recording limits require a considered product choice rather than an arbitrary silent truncation. |
+| Documentation | Workflow instructions still described the obsolete minimatch advisory exception | Updated the document to match the current zero-advisory CI policy. |
+
+### Continuous media safeguards
+
+Fretboard acquisition starts when a live camera is available. Ordinary misses
+retry after a 1.5-second cooldown; tracking loss allows three seconds to recover
+the same reference before requesting a new detection. Only one worker operation
+is in flight, frame size and processing deadlines remain bounded, and terminal
+worker failures require an explicit retry. Pause, camera changes and unmount
+invalidate obsolete operations. Immutable detection snapshots are internal worker
+references; the displayed video and fresh hand dots remain live during searches.
+
+MediaPipe detects hands independently of neck acquisition. GPU initialization or
+inference failure triggers one CPU fallback. If that also fails, a visible retry
+control restarts hand tracking without restarting the camera. Old detectors and
+late initialization results are released; old landmarks are cleared on failure,
+source loss and unmount. The same fixed runtime/model destinations remain in use.
+Camera frames stay in transient local memory and are not uploaded or committed.
+
+Studio exposes actual per-channel incoming levels and separates suspended,
+muted and disconnected states. Audio activation occurs within the user gesture;
+transport awaits it and rejects obsolete starts. Latency overrides are keyed by
+input device, and missing input blocks preserve the recording timeline. No Spark
+firmware, presets or internal settings were changed.
+
+### Verification receipts
+
+- All **267** application tests passed. Full ESLint, TypeScript through the
+  production build, and all **19** localhost smoke checks passed. The checks
+  include script hash equality, security headers and private-path denial.
+- Browser replay using the actual MediaPipe model and OpenCV worker verified
+  automatic acquisition with no setup click, moving neck and hand overlays,
+  neck-only pause with hands still visible, and automatic reacquisition after
+  hiding/restoring the recorded guitar. GPU/CPU failure and late cleanup paths
+  were exercised by controlled hook tests, not forced hardware faults.
+  Saved footage stays in private temporary storage and is excluded from Git;
+  the replay does not open a camera or microphone. Detected fret coverage remains
+  sensitive to faint, blurred or occluded evidence and browser pixel processing.
+- Fresh main npm audit: **0** known findings across **509** dependencies; isolated
+  vision spike: **0** across **21** dependencies. The installed tree validates,
+  lockfile registry sources and integrity fields were checked, and the
+  hash-checked lint preparation made no unexpected changes.
+- Pinned NumPy `pip-audit`: **0** known findings. All **67** Fuzz Python tests,
+  **32** isolated vision tests, **18** dependency/audit regressions and **4** braces
+  hardening tests passed. The Swift helper compiled into temporary storage and
+  handled six malformed/EOF pipe cases without camera/model inference.
+- Gitleaks **8.30.1**, with full redaction: **0** findings in the candidate's
+  **173** tracked/intended source files and **53** reachable Git commits. Ignored
+  files, private recordings and temporary artifacts were excluded. Pattern scans
+  do not certify the absence of every secret or identify every binary media cache.
+- Source inspection confirmed fixed loopback binding, constant-time pairing,
+  bounded clients/handshakes/messages, command allowlists and no app-driven shell,
+  arbitrary file path, Python evaluation or operator execution in the local bridge.
+- Public assets and private-path probes were reviewed. Existing `.toe` artifacts
+  were unchanged; they were not fully decoded again or opened in native
+  TouchDesigner during this pass. Earlier artifact review remains historical
+  evidence, not a new native hardware validation.
+
 ## Remaining limits
 
 - Production CSP is enforced. Static Next hydration still requires inline scripts and
@@ -174,8 +254,9 @@ frame disclosure was demonstrated.
   connections, external script origins and child workers. Browser enforcement
   and physical media paths still need a real session; HTTP and VM checks do
   not substitute for it.
-- Real Spark input and physical projector alignment still need a hardware
-  session.
+- Spark USB capture and playback were verified in this task, including user-confirmed
+  playback of a recorded guitar passage. Physical projector alignment remains
+  unverified in this pass.
 - Opening the TD project starts local camera/audio capture independently of
   the browser; closing it releases capture. Do not overwrite a shared `.toe`
   with an ordinary working save: sample caches need stripping again.

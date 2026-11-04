@@ -82,34 +82,44 @@ Details and hardware limits: [Spark PEDAL guide](docs/spark-pedal.md).
 
 ## Trainer
 
-The main view shows your real instrument. **Find fretboard** searches a frozen
-camera frame for a likely outline using string and fret-line geometry. Check
-the outline, low/high string sides and actual first/last fret numbers once,
-then choose **Use this outline**. A cropped neck does not establish absolute
-fret numbering; use 0 only when the selected wire is the nut. The detector is
-experimental and can miss a neck or propose the wrong region.
+The main view shows your real instrument and live MediaPipe hand landmarks.
+Fretboard detection starts automatically when the camera is ready, then follows
+the detected neck as it moves. Video and fingertip dots stay live during the
+search; there is no frozen setup screen. A missed detection retries after a
+short cooldown. Tracking loss first searches for the same neck, then starts a
+fresh detection after three seconds. **Pause neck tracking** pauses this search;
+**Resume neck tracking** starts it again. There is no fixed fret range or manual
+fret-number setup. The overlay draws six string guides for guitar (four for bass)
+and every fret segment supported by the detection, preserving the observed
+spacing. It does not add hidden frets or assign absolute fret numbers to an
+unidentified stretch of neck.
 
-**Mark manually** is the fallback. Choose two visible fret wires and mark four
-intersections on the frozen image in the displayed order: low string / first
-wire, high string / first wire, low string / last wire, high string / last wire.
-Arrow keys move the crosshair (Shift for fine movement); Enter marks a point.
-Both setup paths use physical, unequal fret spacing for standard six-string
-guitar or four-string bass.
+The detector is experimental and can miss a neck or propose the wrong region.
+When individual strings are faint, it also searches for bright fret wires and
+refines their outline against visible outer-string evidence. Incomplete or
+cropped evidence can require another view; the detector does not invent missing
+string edges.
 
-After setup, an OpenCV worker matches features against the original neck image
-and estimates a perspective transform as the guitar moves. Hand regions are
+After detection, an OpenCV worker matches features against the original neck image
+and estimates a perspective transform as the guitar moves. It searches near the
+last verified neck position first, then the full image when needed, so background
+detail does not consume the neck's feature budget. Hand regions are
 excluded from the feature search when fresh hand observations are available.
 The immutable reference limits cumulative drift. Weak or stale matches hide
-the overlay; tracking keeps searching for the same reference and can reacquire
+the neck grid; tracking keeps searching for the same reference and can reacquire
 it without another setup. Blur, strong viewpoint changes and low-detail necks
 can still lose tracking. Camera source, track or resolution changes require a
-new reference. There is no stationary-calibration fallback on tracking loss.
+new reference. A frozen reference never substitutes for a live tracked pose.
 
-The ring is the lesson target;
-numbered dots are estimated fingertips. **Seen** and **Heard** remain separate:
-matching pitch means compatibility, not verified string contact or pressure.
-Ambiguous positions remain uncertain, stale hand/neck/audio frames expire, and an
-absent finger never establishes an open string. Use single notes. Accuracy and
+Fresh MediaPipe hand landmarks and fingertip dots remain visible before neck
+detection, during searches, and during neck tracking loss. Hand tracking tries
+the CPU if GPU initialization or inference fails. If both backends fail,
+**Retry hand tracking** restarts the model without restarting the camera. Fingertips projected onto a fresh neck outline are highlighted;
+these are camera observations, not proof of string contact or pressure.
+**Seen** and **Heard** remain separate. Lesson targets stay in the lesson display;
+unknown fret identity does not produce a target ring or a guessed note position.
+Stale hand/neck/audio frames expire, and an absent finger never establishes an
+open string. Use single notes. Accuracy and
 latency on real guitar playing still need physical validation; synthetic
 geometry, actual-WASM synthetic motion tests and component tests do not establish
 recognition quality. Neck and finger observations must also be close in time.
@@ -192,6 +202,10 @@ if desired. There is no background polling or playlist write access.
 `/studio` records the same USB input (the Spark is picked automatically) into
 tracks on a timeline, like a small GarageBand.
 
+- **Input:** click **Connect input**, confirm the Spark, and play a note. The
+  live meter shows incoming signal before recording, including audio present
+  on only one stereo channel. **Enable audio** resumes a paused browser audio
+  session; muted or disconnected inputs are reported separately.
 - **Record:** press **● Rec** or `R`. One bar of count-in clicks plays first
   (toggle **count-in**), then the take records onto the armed track (● on the
   track; a new "Guitar" track is created if none is armed) until you stop. A
@@ -206,7 +220,10 @@ tracks on a timeline, like a small GarageBand.
   every audible clip to a 16-bit stereo file.
 - **Latency:** takes are shifted earlier by the browser's latency estimate so
   they line up with what you heard. If takes sound late or early, set
-  **latency ms** yourself; it is remembered.
+  **latency ms** yourself; it is remembered for the selected input. Clear the
+  field to use the automatic estimate for that input. Recheck calibration if
+  you change the output device or audio routing; a speaker-to-microphone test
+  does not measure the Spark's guitar-input path.
 
 Takes record the pedal's processed tone (amp model and effects). Listen
 through the pedal's headphones or line out; the browser does not echo the

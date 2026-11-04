@@ -8,6 +8,7 @@ import { useEffect, useReducer, useRef, useState } from "react";
 import Link from "next/link";
 import AudioDevicePicker from "@/components/AudioDevicePicker";
 import { useStudioEngine } from "@/hooks/useStudioEngine";
+import { useStudioLatency } from "@/hooks/useStudioLatency";
 import { channelsOf, computePeaks, encodeWav, PEAKS_PER_SECOND, toAudioBuffer } from "@/lib/studio/audio";
 import { renderMix, type RecordedTake, type TransportMode } from "@/lib/studio/engine";
 import {
@@ -61,7 +62,6 @@ function reducer(history: History, action: Action): History {
   }
 }
 
-const LATENCY_KEY = "bodysynth.studio.latencyMs";
 const HEADER_W = 208;
 const MIN_ZOOM = 8;
 const MAX_ZOOM = 400;
@@ -74,15 +74,6 @@ interface Drag {
   startX: number;
   startY: number;
   moved: boolean;
-}
-
-function readLatency(): number | null {
-  try {
-    const v = localStorage.getItem(LATENCY_KEY);
-    return v === null || !Number.isFinite(Number(v)) ? null : Number(v);
-  } catch {
-    return null;
-  }
 }
 
 function registerBuffer(buffers: Map<string, AudioBuffer>, peaks: Map<string, Float32Array>, id: string, buffer: AudioBuffer) {
@@ -110,8 +101,7 @@ export default function Studio() {
   const [countIn, setCountIn] = useState(true);
   const [snapOn, setSnapOn] = useState(true);
   const [zoom, setZoomState] = useState(60);
-  // Rendered client-only (dynamic import with ssr: false), so storage exists.
-  const [latencyMs, setLatencyMs] = useState<number | null>(readLatency);
+  const { latencyMs, setLatencyMs, getLatencyMs } = useStudioLatency(studio.deviceId);
   const [loaded, setLoaded] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -204,6 +194,8 @@ export default function Studio() {
     try {
       const engine = await ensureEngine();
       if (!isCurrentProject(generation) || request !== transportRequestRef.current) return;
+      await engine.resume();
+      if (!isCurrentProject(generation) || request !== transportRequestRef.current) return;
       engine.play(from, project, buffersRef.current, options(project));
       setMode("playing");
     } catch (err) {
@@ -242,6 +234,13 @@ export default function Studio() {
       setNotice("Connect an input to record.");
       return;
     }
+    try {
+      await engine.resume();
+    } catch (err) {
+      if (isCurrentProject(generation) && request === transportRequestRef.current) setNotice(`Audio could not start: ${message(err)}`);
+      return;
+    }
+    if (!isCurrentProject(generation) || request !== transportRequestRef.current) return;
     let current = project;
     let trackId = armedTrackId && project.tracks.some((t) => t.id === armedTrackId) ? armedTrackId : null;
     if (!trackId) {
@@ -251,9 +250,14 @@ export default function Studio() {
       setArmedTrackId(track.id);
       trackId = track.id;
     }
-    const latency = (latencyMs ?? studio.refreshLatency()) / 1000;
+    const latency = (getLatencyMs(studio.getConnectedDeviceId()) ?? studio.refreshLatency()) / 1000;
     const from = playheadRef.current;
-    engine.record(from, current, buffersRef.current, options(current), latency, countIn);
+    try {
+      engine.record(from, current, buffersRef.current, options(current), latency, countIn);
+    } catch (err) {
+      setNotice(`Recording could not start: ${message(err)}`);
+      return;
+    }
     recordingRef.current = { trackId, start: from };
     setSelectedClipId(null);
     setMode("recording");
@@ -580,6 +584,9 @@ export default function Studio() {
   const rolling = mode !== "stopped";
   const latencyPlaceholder = studio.inputStatus === "ready" ? `${studio.latencyEstimateMs} auto` : "auto";
   const deviceLabel = studio.devices.find((d) => d.deviceId === studio.deviceId)?.label ?? "";
+  const inputDb = studio.inputLevel && studio.inputLevel.rms > 0 ? 20 * Math.log10(studio.inputLevel.rms) : -96;
+  const inputSignal = !!studio.inputLevel && studio.inputLevel.peak >= 0.001;
+  const connectedInput = ["ready", "suspended", "muted"].includes(studio.inputStatus);
 
   return (
     <div className="fixed inset-0 bg-black text-white overflow-y-auto flex flex-col">
@@ -638,7 +645,7 @@ export default function Studio() {
         </div>
 
         <div className="flex flex-wrap items-center gap-1.5 text-[11px] font-mono">
-          {studio.inputStatus === "ready" ? (
+          {connectedInput ? (
             <span className="px-2.5 py-1 rounded-full bg-emerald-500/20 border border-emerald-400/30 text-emerald-200 max-w-[200px] truncate" title={deviceLabel}>
               in · {deviceLabel.replace(/\s*\(.*\)\s*$/, "") || "input"}
             </span>
@@ -647,31 +654,41 @@ export default function Studio() {
           ) : (
             <button onClick={() => void studio.connect()} className="px-2.5 py-1 rounded-full bg-white text-black active:scale-95">Connect input</button>
           )}
+          {studio.audioPaused && (
+            <button onClick={() => void studio.resumeAudio()} className="px-2.5 py-1 rounded-full bg-yellow-300 text-black">Enable audio</button>
+          )}
+          {connectedInput && (
+            <div className="flex items-center gap-2" role="group" aria-label="Guitar input level">
+              <meter min={-60} max={0} low={-48} high={-6} optimum={-12} value={Math.max(-60, Math.min(0, inputDb))}
+                aria-label="Input level in decibels" className="h-3 w-20" />
+              <span role="status" className={studio.inputLevel && studio.inputLevel.peak >= 0.98 ? "text-red-300" : inputSignal ? "text-emerald-300" : "text-zinc-400"}>
+                {studio.audioPaused ? "Audio paused" : studio.inputStatus === "muted" ? "Input muted"
+                  : !studio.inputLevel ? "Waiting for audio" : studio.inputLevel.peak >= 0.98 ? "Input clipping"
+                  : inputSignal ? "Signal detected" : "Input quiet"}
+              </span>
+              {inputSignal && !studio.audioPaused && <span aria-hidden="true" className="w-12 tabular-nums text-zinc-400">{Math.round(inputDb)} dB</span>}
+            </div>
+          )}
           {(studio.inputStatus === "needs-device" || studio.devices.length > 1) && (
             <AudioDevicePicker devices={studio.devices} selectedDeviceId={studio.deviceId} onSelect={studio.selectDevice} />
           )}
-          {studio.error && studio.inputStatus === "error" && (
+          {studio.error && (
             <span className="text-red-300 max-w-[220px] truncate" title={studio.error}>
               {/NotAllowed|Permission/i.test(studio.error) ? "microphone blocked: allow it in site settings" : studio.error}
             </span>
           )}
-          <label className="flex items-center gap-1 text-zinc-400" title="Shifts new takes earlier to line up with what you heard">
+          <label className="flex items-center gap-1 text-zinc-400" title="Compensation for this input only; shifts new takes earlier. Blank uses the automatic estimate.">
             latency ms
             <input
               type="number"
               min={0}
               max={500}
+              disabled={!studio.deviceId}
               value={latencyMs ?? ""}
               placeholder={latencyPlaceholder}
               onChange={(e) => {
                 const v = e.target.value === "" ? null : Math.max(0, Math.min(500, Math.round(Number(e.target.value))));
                 setLatencyMs(v);
-                try {
-                  if (v === null) localStorage.removeItem(LATENCY_KEY);
-                  else localStorage.setItem(LATENCY_KEY, String(v));
-                } catch {
-                  // Storage blocked: keep the value for this session.
-                }
               }}
               className="w-20 bg-black/40 border border-white/10 rounded px-1 py-1 text-center text-white placeholder:text-zinc-600"
             />

@@ -146,14 +146,261 @@
     return {
       points: corners.map((p) => ({ x: p.x / width, y: p.y / height })),
       wireCount: ordered.length,
+      frets: ordered.map((wire) => ({
+        a: { x: wire.a.x / width, y: wire.a.y / height },
+        b: { x: wire.b.x / width, y: wire.b.y / height },
+      })),
       score: ordered.length * 3 + stringOffsets.length * 20 + span / length,
     };
   }
 
+  // Faint strings can disappear at webcam resolution while the metal fret wires
+  // remain visible. Extract bright transverse ridges instead of requiring every
+  // string to survive an edge detector. This still proposes geometry only.
+  function detectFretRidges(cv, gray, width, height) {
+    const owned = [];
+    const own = (mat) => { owned.push(mat); return mat; };
+    const diagonal = Math.hypot(width, height);
+    try {
+      const edges = own(new cv.Mat()), hough = own(new cv.Mat());
+      const ridge = own(new cv.Mat(height, width, cv.CV_8UC1));
+      cv.Canny(gray, edges, 35, 100);
+      cv.HoughLinesP(edges, hough, 1, PI / 720, 20, diagonal * 0.14, 14);
+      const directions = [];
+      for (let i = 0; i < Math.min(hough.rows, 1000); i++) {
+        const values = hough.data32S;
+        const dx = values[i * 4 + 2] - values[i * 4], dy = values[i * 4 + 3] - values[i * 4 + 1];
+        directions.push({ angle: (Math.atan2(dy, dx) + PI) % PI, length: Math.hypot(dx, dy) });
+      }
+      directions.sort((a, b) => b.length - a.length);
+      const axes = [];
+      for (const line of directions) {
+        if (axes.every((angle) => angleDistance(angle, line.angle) > PI / 45)) axes.push(line.angle);
+        if (axes.length === 10) break;
+      }
+      const lines = [], pixels = gray.data;
+      for (const angle of axes) {
+        const ax = Math.cos(angle), ay = Math.sin(angle), transverse = (angle + PI / 2) % PI;
+        ridge.data.fill(0);
+        for (let y = 4; y < height - 4; y++) {
+          for (let x = 4; x < width - 4; x++) {
+            const left = pixels[Math.round(y - ay * 3) * width + Math.round(x - ax * 3)];
+            const right = pixels[Math.round(y + ay * 3) * width + Math.round(x + ax * 3)];
+            if (pixels[y * width + x] > Math.max(left, right) + 7) ridge.data[y * width + x] = 255;
+          }
+        }
+        cv.HoughLinesP(ridge, hough, 1, PI / 720, 10, 18, 5);
+        for (let i = 0; i < Math.min(hough.rows, 2000); i++) {
+          const values = hough.data32S;
+          const a = { x: values[i * 4], y: values[i * 4 + 1] };
+          const b = { x: values[i * 4 + 2], y: values[i * 4 + 3] };
+          const length = Math.hypot(b.x - a.x, b.y - a.y);
+          const foundAngle = (Math.atan2(b.y - a.y, b.x - a.x) + PI) % PI;
+          if (length < 18 || length > diagonal * 0.14 || angleDistance(foundAngle, transverse) > PI / 30) continue;
+          const dx = (b.x - a.x) / length, dy = (b.y - a.y) / length;
+          // Hough can stop midway across a fret. Follow its visible ridge to
+          // the actual endpoint; reaching the image edge means it is cropped.
+          const extend = (point, sign) => {
+            let last = { ...point }, missed = 0;
+            for (let step = 1; step <= 60; step++) {
+              const x = Math.round(point.x + sign * dx * step), y = Math.round(point.y + sign * dy * step);
+              if (x < 4 || x >= width - 4 || y < 4 || y >= height - 4) return null;
+              let supported = false;
+              for (let shift = -1; shift <= 1; shift++) {
+                if (ridge.data[Math.round(y + ay * shift) * width + Math.round(x + ax * shift)]) supported = true;
+              }
+              if (supported) { last = { x, y }; missed = 0; }
+              else if (++missed >= 4) break;
+            }
+            return last;
+          };
+          const start = extend(a, -1), end = extend(b, 1);
+          if (!start || !end) continue;
+          const fullLength = Math.hypot(end.x - start.x, end.y - start.y);
+          if (fullLength > diagonal * 0.18) continue;
+          lines.push({ a: start, b: end, length: fullLength, angle: foundAngle,
+            center: { x: (start.x + end.x) / 2, y: (start.y + end.y) / 2 } });
+          // A textured scene must not turn into unbounded candidate searches.
+          if (lines.length > 1200) return null;
+        }
+      }
+
+      function fit(points) {
+        const meanT = points.reduce((sum, p) => sum + p.t, 0) / points.length;
+        const meanN = points.reduce((sum, p) => sum + p.n, 0) / points.length;
+        const denominator = points.reduce((sum, p) => sum + (p.t - meanT) ** 2, 0);
+        if (!denominator) return null;
+        const slope = points.reduce((sum, p) => sum + (p.t - meanT) * (p.n - meanN), 0) / denominator;
+        const at = (t) => meanN + slope * (t - meanT);
+        const residual = Math.sqrt(points.reduce((sum, p) => sum + (p.n - at(p.t)) ** 2, 0) / points.length);
+        return { at, slope, residual };
+      }
+
+      function runs(wires) {
+        const found = [];
+        for (const ordered of [wires, wires.slice().reverse()]) {
+          for (let i = 0; i < ordered.length - 5; i++) {
+            for (let j = i + 1; j < Math.min(ordered.length - 4, i + 4); j++) {
+              for (let k = j + 1; k < Math.min(ordered.length - 3, j + 4); k++) {
+                const firstGap = Math.abs(ordered[j].t - ordered[i].t);
+                const secondGap = Math.abs(ordered[k].t - ordered[j].t);
+                let ratio = secondGap / firstGap;
+                if (firstGap < 7 || ratio < 0.82 || ratio > 0.99) continue;
+                const run = [ordered[i], ordered[j], ordered[k]];
+                let gap = secondGap, at = k, missing = 0, estimates = 1;
+                let pendingStart = -1, confirmations = 0;
+                for (let next = k + 1; next < ordered.length; next++) {
+                  const observed = Math.abs(ordered[next].t - ordered[at].t), expected = gap * ratio;
+                  const tolerance = Math.max(1.8, expected * 0.12);
+                  if (observed < expected - tolerance) continue;
+                  if (observed > expected + tolerance) {
+                    // A hand may hide up to two wires. The next visible wire
+                    // must fit the summed shrinking spacing, then two further
+                    // observed wires must confirm the cadence. Hidden positions
+                    // never become output segments.
+                    if (pendingStart >= 0 || missing >= 2) break;
+                    let skipped = 0, predicted = expected;
+                    for (let extra = 1; extra <= 2 - missing; extra++) {
+                      predicted += gap * ratio ** (extra + 1);
+                      if (Math.abs(observed - predicted) <= Math.max(2.2, predicted * 0.08)) { skipped = extra; break; }
+                    }
+                    if (!skipped) break;
+                    pendingStart = run.length;
+                    confirmations = 0;
+                    missing += skipped;
+                    run.push(ordered[next]); at = next;
+                    gap = gap * ratio ** (skipped + 1) * observed / predicted;
+                    continue;
+                  }
+                  const localRatio = observed / gap;
+                  if (localRatio < 0.78 || localRatio > 1.08) continue;
+                  run.push(ordered[next]); gap = observed; at = next;
+                  ratio = (ratio * estimates + localRatio) / ++estimates;
+                  if (pendingStart >= 0 && ++confirmations >= 2) pendingStart = -1;
+                }
+                if (pendingStart >= 0) run.length = pendingStart;
+                if (run.length < 6) continue;
+                const gaps = run.slice(1).map((p, n) => Math.abs(p.t - run[n].t));
+                const contraction = (gaps.at(-1) + gaps.at(-2)) / (gaps[0] + gaps[1]);
+                if (contraction <= 0.90 && contraction >= 0.30) found.push(run);
+              }
+            }
+          }
+        }
+        return found.sort((a, b) => b.length - a.length).slice(0, 12);
+      }
+
+      // Transverse fret endpoints describe the wood edges, not string centers.
+      // Resolve the two outer string rails from longitudinal bright-ridge
+      // evidence inside those edges, with additional interior string support.
+      function stringEdges(points) {
+        const corners = points.map((p) => ({ x: p.x * width, y: p.y * height }));
+        const value = (x, y) => pixels[Math.max(0, Math.min(height - 1, Math.round(y))) * width + Math.max(0, Math.min(width - 1, Math.round(x)))];
+        const profile = [];
+        for (let index = 0; index <= 100; index++) {
+          const fraction = index / 100;
+          let contrastSum = 0, supported = 0;
+          for (let sample = 0; sample < 80; sample++) {
+            const t = 0.05 + 0.90 * sample / 79;
+            const low = { x: corners[0].x + (corners[2].x - corners[0].x) * t, y: corners[0].y + (corners[2].y - corners[0].y) * t };
+            const high = { x: corners[1].x + (corners[3].x - corners[1].x) * t, y: corners[1].y + (corners[3].y - corners[1].y) * t };
+            const dx = high.x - low.x, dy = high.y - low.y, span = Math.hypot(dx, dy);
+            const x = low.x + dx * fraction, y = low.y + dy * fraction;
+            const contrast = value(x, y) - Math.max(value(x + dx / span * 3, y + dy / span * 3), value(x - dx / span * 3, y - dy / span * 3));
+            contrastSum += Math.max(0, contrast);
+            if (contrast > 4) supported++;
+          }
+          profile.push({ fraction, score: contrastSum / 80, coverage: supported / 80 });
+        }
+        const peak = (min, max) => profile.filter((p) => p.fraction >= min && p.fraction <= max)
+          .sort((a, b) => b.score - a.score)[0];
+        const low = peak(0, 0.15), high = peak(0.85, 1);
+        if (low.score < 1.5 || high.score < 1.5 || low.coverage < 0.10 || high.coverage < 0.10) return null;
+        const internal = profile.filter((p, i) => i > 0 && i < profile.length - 1 && p.fraction > low.fraction + 0.10
+          && p.fraction < high.fraction - 0.10 && p.score >= 2 && p.coverage >= 0.15
+          && p.score > profile[i - 1].score && p.score >= profile[i + 1].score);
+        if (!internal.some((a) => internal.some((b) => Math.abs(a.fraction - b.fraction) > 0.10))) return null;
+        const between = (a, b, fraction) => ({ x: a.x + (b.x - a.x) * fraction, y: a.y + (b.y - a.y) * fraction });
+        return [between(points[0], points[1], low.fraction), between(points[0], points[1], high.fraction),
+          between(points[2], points[3], low.fraction), between(points[2], points[3], high.fraction)];
+      }
+
+      let best = null, checked = 0;
+      for (const seed of lines) {
+        for (const adjustment of [-0.06, 0, 0.06]) {
+          const angle = seed.angle - PI / 2 + adjustment;
+          const axis = { x: Math.cos(angle), y: Math.sin(angle) }, normal = { x: -axis.y, y: axis.x };
+          const centerN = dot(seed.center, normal), centerT = dot(seed.center, axis);
+          const family = lines.filter((line) => angleDistance(line.angle, seed.angle) < PI / 24
+            && line.length > seed.length * 0.58 && line.length < seed.length * 1.65
+            && Math.abs(dot(line.center, normal) - centerN) < seed.length * 0.30
+            && Math.abs(dot(line.center, axis) - centerT) < seed.length * 8);
+          if (family.length < 6 || family.length > 100) continue;
+          const supports = family.map((line) => ({
+            t: dot(line.center, axis),
+            low: Math.min(dot(line.a, normal), dot(line.b, normal)),
+            high: Math.max(dot(line.a, normal), dot(line.b, normal)),
+            a: line.a,
+            b: line.b,
+          })).sort((a, b) => a.t - b.t);
+          const wires = [];
+          for (const support of supports) {
+            const previous = wires.at(-1);
+            if (previous && support.t - previous.t < 4) {
+              if (support.high - support.low > previous.high - previous.low) Object.assign(previous, support);
+            } else wires.push({ ...support });
+          }
+          if (wires.length < 6 || wires.length > 40) continue;
+          for (const run of runs(wires)) {
+            if (++checked > 4000) return best;
+            const low = fit(run.map((p) => ({ t: p.t, n: p.low })));
+            const high = fit(run.map((p) => ({ t: p.t, n: p.high })));
+            if (!low || !high) continue;
+            const first = run[0], last = run.at(-1), length = Math.abs(first.t - last.t);
+            const firstSpan = high.at(first.t) - low.at(first.t), lastSpan = high.at(last.t) - low.at(last.t);
+            const span = (firstSpan + lastSpan) / 2;
+            if (Math.min(firstSpan, lastSpan) < 14 || length < diagonal * 0.16 || length / span < 3
+              || low.residual > span * 0.12 || high.residual > span * 0.12
+              || Math.abs(low.slope) > 0.25 || Math.abs(high.slope) > 0.25) continue;
+            const from = (t, n) => ({ x: (axis.x * t + normal.x * n) / width, y: (axis.y * t + normal.y * n) / height });
+            const points = [from(first.t, low.at(first.t)), from(first.t, high.at(first.t)),
+              from(last.t, low.at(last.t)), from(last.t, high.at(last.t))];
+            // Cropped wires cannot establish the unseen outer string edge.
+            if (points.some((p) => p.x * width < 6 || p.x * width > width - 6 || p.y * height < 6 || p.y * height > height - 6)) continue;
+            const score = run.length * 10 + length / span - low.residual - high.residual;
+            if (!best || score > best.score) {
+              const refined = stringEdges(points);
+              if (!refined) continue;
+              const pixelCorners = refined.map((p) => ({ x: p.x * width, y: p.y * height }));
+              const rails = [0, 1].map((side) => ({ a: pixelCorners[side],
+                direction: difference(pixelCorners[side + 2], pixelCorners[side]) }));
+              // Preserve each observed wire's position and angle. Only trim its
+              // overhanging metal ends to the two supported outer-string rails.
+              const frets = run.map((wire) => {
+                const line = { a: wire.a, direction: difference(wire.b, wire.a) };
+                const ends = rails.map((rail) => intersection(rail, line));
+                if (ends.some((p) => !p || !Number.isFinite(p.x) || !Number.isFinite(p.y)
+                  || p.x < 0 || p.x >= width || p.y < 0 || p.y >= height)) return null;
+                return { a: { x: ends[0].x / width, y: ends[0].y / height },
+                  b: { x: ends[1].x / width, y: ends[1].y / height } };
+              });
+              if (frets.some((wire) => !wire)) continue;
+              best = { points: [frets[0].a, frets[0].b, frets.at(-1).a, frets.at(-1).b],
+                frets, wireCount: frets.length, score };
+            }
+          }
+        }
+      }
+      return best;
+    } finally {
+      for (let index = owned.length - 1; index >= 0; index--) owned[index].delete();
+    }
+  }
+
   /**
    * Experimental pixel-based outline proposal, not instrument identification.
-   * The caller must confirm string side, endpoint fret numbers and alignment.
-   * All coordinates are from the unmirrored input. No absolute fret is inferred.
+   * Returns the observed wires, ordered along the neck, without absolute fret
+   * numbers or string identities. Coordinates are from the unmirrored input.
    */
   function detectNeck(cv, rgba, width, height) {
     if (!Number.isInteger(width) || !Number.isInteger(height) || width < 80 || height < 60
@@ -216,7 +463,8 @@
           }
         }
       }
-      return best ? { points: best.points, wireCount: best.wireCount } : null;
+      const proposal = best ?? detectFretRidges(cv, gray, width, height);
+      return proposal ? { points: proposal.points, wireCount: proposal.wireCount, frets: proposal.frets } : null;
     } finally {
       for (let index = owned.length - 1; index >= 0; index--) owned[index].delete();
     }
