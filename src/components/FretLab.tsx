@@ -8,6 +8,9 @@ import Link from "next/link";
 import { useHandTracking } from "@/hooks/useHandTracking";
 import { useGuitarPitch } from "@/hooks/useGuitarPitch";
 import { useSongTransport } from "@/hooks/useSongTransport";
+import { useHighwaySession } from "@/hooks/useHighwaySession";
+import NoteHighway from "@/components/NoteHighway";
+import { createHighwayPattern } from "@/lib/lesson/noteHighway";
 import { useTouchDesigner } from "@/hooks/useTouchDesigner";
 import AudioDevicePicker from "@/components/AudioDevicePicker";
 import PitchDebugPanel from "@/components/PitchDebugPanel";
@@ -90,7 +93,7 @@ export default function FretLab({ profile }: FretLabProps) {
   const [matchState, setMatchState] = useState<MatchState>("yellow");
   // Rendered client-only (dynamic import with ssr: false), so window exists.
   const [debug] = useState(() => new URLSearchParams(window.location.search).get("debug") === "1");
-  const [mode, setMode] = useState<"shapes" | "song">(() => new URLSearchParams(window.location.search).get("song") === SONGS[0].id ? "song" : "shapes");
+  const [mode, setMode] = useState<"play" | "shapes" | "song">(() => new URLSearchParams(window.location.search).get("song") === SONGS[0].id ? "song" : "play");
   const [barsPerChord, setBarsPerChord] = useState<1 | 2>(1);
   const song = SONGS[0];
   const chart = useMemo(() => withBarsPerChord(song, barsPerChord), [song, barsPerChord]);
@@ -107,13 +110,28 @@ export default function FretLab({ profile }: FretLabProps) {
 
   const { handsRef, handsUpdatedAtRef, isLoading: handsLoading, error: handsError, retry: retryHands } = useHandTracking(videoRef);
   const pitch = useGuitarPitch(profile);
-  const transport = useSongTransport(chart, pitch.context);
+  const playPattern = useMemo(() => createHighwayPattern(profile), [profile]);
+  const playChart = useMemo<SongChart>(() => ({
+    id: "string-run", title: playPattern.name, artist: "Body Synth practice", bpm: 80,
+    beatsPerBar: 4, key: "E minor", notes: "Pick one note on each beat.",
+    voicings: { [profile.id]: { em: { id: "em", name: "Em", notes: [{ s: 0, f: 0 }], rootMidiPc: 4 } } },
+    sections: [{ name: "Run", loop: [{ chordId: "em", beats: playPattern.lengthBeats }], repeats: 0 }],
+  }), [profile, playPattern]);
+  const transport = useSongTransport(mode === "play" ? playChart : chart, pitch.context);
   const touchDesigner = useTouchDesigner();
   const { sendChord, sendNoteHit, setPlaying: setVisualPlaying } = touchDesigner;
+  const highway = useHighwaySession(profile, pitch, transport, mode === "play", sendNoteHit);
+  function switchMode(next: "play" | "shapes" | "song") {
+    highway.stop();
+    modeRef.current = next;
+    setMode(next);
+    if (next === "play") transport.setBacking(false);
+    transport.setBpm(next === "play" ? playChart.bpm : chart.bpm);
+  }
   const activeSongChordId = songChord.current;
   useEffect(() => {
     if (touchDesigner.status !== "ready") return;
-    setVisualPlaying(mode === "song" && transport.playing);
+    setVisualPlaying((mode === "song" || mode === "play") && transport.playing);
   }, [touchDesigner.status, mode, transport.playing, setVisualPlaying]);
   useEffect(() => {
     if (touchDesigner.status !== "ready" || mode !== "song") return;
@@ -177,6 +195,7 @@ export default function FretLab({ profile }: FretLabProps) {
   // Note events → lesson or song scoring → diagram pulse and visuals.
   useEffect(() => {
     return pitch.onNote((evt) => {
+      if (modeRef.current === "play") return;
       let ok: boolean;
       if (modeRef.current === "song" && transportRef.current.playing) {
         const noteBeat = transportRef.current.beatsAt(evt.t);
@@ -303,6 +322,13 @@ export default function FretLab({ profile }: FretLabProps) {
       if (nowMs - lastFrameMs < FRAME_INTERVAL_MS) return;
       lastFrameMs = nowMs;
       const nowPerf = performance.now();
+      if (modeRef.current === "play") {
+        const beat = transportRef.current.playing ? transportRef.current.beatsRef.current : 0;
+        const upcoming = highway.gameRef.current?.notesBetween(Math.max(0, beat - 0.2), Math.max(0, beat) + 6)
+          .find(note => note.state === "pending");
+        cameraTargetRef.current = upcoming ?? null;
+        return;
+      }
       const songMode = modeRef.current === "song";
       const songCovered = songMode ? updateSong() : null;
       frameCounter++;
@@ -350,7 +376,7 @@ export default function FretLab({ profile }: FretLabProps) {
 
     rafId = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(rafId);
-  }, [profile, pitch.context]);
+  }, [profile, pitch.context, highway.gameRef]);
 
   const status = cameraError
     ? "Audio practice · camera unavailable"
@@ -360,7 +386,9 @@ export default function FretLab({ profile }: FretLabProps) {
         ? "Starting video..."
         : handsLoading
           ? "Loading hand tracking..."
-          : mode === "song"
+          : mode === "play"
+            ? "Live play · follow the strings"
+            : mode === "song"
             ? `${song.title} · ${song.key}`
             : `${keyName} ${shape.name}`;
   const currentVoicing = voicingFor(chart, profile, songChord.current);
@@ -400,13 +428,13 @@ export default function FretLab({ profile }: FretLabProps) {
               <AudioDevicePicker devices={pitch.devices} selectedDeviceId={pitch.selectedDeviceId} onSelect={pitch.selectDevice} />
             </>
           )}
-          {pitch.error && pitch.status === "error" && (
+          {pitch.error && (pitch.status === "error" || pitch.status === "unavailable") && (
             <span className="text-[11px] font-mono text-red-300 max-w-[240px] truncate" title={pitch.error}>
               {/NotAllowed|Permission/i.test(pitch.error) ? "microphone blocked: allow it in the browser's site settings" : pitch.error}
             </span>
           )}
         </div>
-        <div aria-label={`Audio score: ${matchState}`} className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/5 border border-white/10">
+        {mode !== "play" && <div aria-label={`Audio score: ${matchState}`} className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/5 border border-white/10">
           <span className="text-[10px] text-zinc-400">Pitch</span>
           {(["red", "yellow", "green"] as MatchState[]).map((s) => (
             <div
@@ -418,7 +446,7 @@ export default function FretLab({ profile }: FretLabProps) {
               }}
             />
           ))}
-        </div>
+        </div>}
         <nav className="flex gap-1 flex-shrink-0">
           {NAV_ROUTES.map((r) => (
             <Link
@@ -434,8 +462,42 @@ export default function FretLab({ profile }: FretLabProps) {
         </nav>
       </div>
 
-      <div className="relative bg-zinc-950">
-        <RealFretboardOverlay
+      <div className="flex flex-wrap items-center gap-2 border-y border-white/10 px-3 py-2 sm:px-4">
+        {(["play", "shapes", "song"] as const).map(value => <button key={value} type="button"
+          onClick={() => switchMode(value)} aria-pressed={mode === value}
+          className={`rounded-md px-3 py-2 text-sm font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300 ${mode === value ? "bg-white text-black" : "text-zinc-400 hover:bg-white/10 hover:text-white"}`}>
+          {value === "play" ? "Play along" : value === "shapes" ? "Shapes" : "Song practice"}
+        </button>)}
+      </div>
+      <div className={mode === "play" ? "grid min-w-0 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]" : ""}>
+      {mode === "play" && <section className="min-w-0 bg-[#101524]" aria-label="Live play along">
+        <div className="flex flex-wrap items-center justify-between gap-3 px-4 pt-4 pb-3">
+          <div><h2 className="text-xl font-semibold tracking-tight">{playPattern.name}</h2>
+            <p className="mt-1 text-xs text-slate-300">Pick the note when it reaches the line.</p></div>
+          <div className="flex flex-wrap items-center gap-2">
+            {transport.playing || highway.starting ? <button type="button" onClick={highway.stop}
+              className="rounded-md bg-white px-4 py-2 text-sm font-semibold text-black focus-visible:outline-2 focus-visible:outline-cyan-300">{highway.starting ? "Cancel" : "Stop run"}</button>
+              : <><button type="button" disabled={!audioRunning} onClick={() => void highway.start(false)}
+                  className="rounded-md bg-[#62e1e8] px-4 py-2 text-sm font-semibold text-[#101524] disabled:opacity-40 focus-visible:outline-2 focus-visible:outline-white">Play with guitar</button>
+                <button type="button" onClick={() => void highway.start(true)}
+                  className="rounded-md border border-slate-600 px-3 py-2 text-sm text-slate-200 hover:bg-white/10 focus-visible:outline-2 focus-visible:outline-cyan-300">Preview track</button></>}
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-4 px-4 pb-3 text-xs text-slate-300">
+          <label className="flex items-center gap-2">Tempo <input aria-label="Play along tempo" type="number" min={40} max={200}
+            disabled={transport.playing || highway.starting} value={transport.bpm}
+            onChange={event => { if (!transport.playing && !highway.starting) transport.setBpm(Number(event.target.value)); }}
+            className="w-16 rounded border border-slate-600 bg-transparent px-2 py-1.5 text-white tabular-nums disabled:opacity-50" /> BPM</label>
+          <label className="flex items-center gap-2"><input type="checkbox" disabled={highway.preview && transport.playing} checked={transport.metronome} onChange={event => transport.setMetronome(event.target.checked)} /> Metronome</label>
+          <span>Pitch + timing scoring</span>
+        </div>
+        {!audioRunning && <p role="status" className="px-4 pb-3 text-xs text-amber-200">Connect your guitar to score. Preview is silent and runs without points.</p>}
+        {(highway.error || transport.error) && <p role="alert" className="px-4 pb-3 text-sm text-rose-300">{highway.error ?? transport.error}</p>}
+        <NoteHighway profile={profile} gameRef={highway.gameRef} beatsRef={transport.beatsRef}
+          playing={transport.playing} inputReady={audioRunning} preview={highway.preview} />
+      </section>}
+      <div className="relative min-w-0 bg-zinc-950">
+        <RealFretboardOverlay compact={mode === "play"}
           profile={profile} videoRef={videoRef} handsRef={handsRef} handsUpdatedAtRef={handsUpdatedAtRef}
           targetRef={cameraTargetRef} pitch={pitch} ready={webcamReady}
           trackingLoading={handsLoading} trackingError={handsError} onRetryHandTracking={retryHands}
@@ -443,12 +505,13 @@ export default function FretLab({ profile }: FretLabProps) {
 
         {debug && (
           <div className="absolute top-3 right-3">
-            <PitchDebugPanel pitch={pitch} profile={profile} getStep={() => stepViewRef.current} />
+            <PitchDebugPanel pitch={pitch} profile={profile} getStep={() => stepViewRef.current} testDisabled={mode === "play" && (transport.playing || highway.starting)} />
           </div>
         )}
       </div>
+      </div>
 
-      <div className="bg-zinc-950/95 border-t border-white/10 flex-shrink-0">
+      {mode !== "play" && <div className="bg-zinc-950/95 border-t border-white/10 flex-shrink-0">
         {cameraError && <p role="status" className="px-3 pt-2 text-xs text-amber-200">{cameraError}</p>}
         <div className="px-3 py-2 border-b border-white/10">
           {mode === "song" ? (
@@ -489,10 +552,7 @@ export default function FretLab({ profile }: FretLabProps) {
             {(["shapes", "song"] as const).map((m) => (
               <button
                 key={m}
-                onClick={() => {
-                  if (m === "shapes" && transport.playing) transport.stop();
-                  setMode(m);
-                }}
+                onClick={() => switchMode(m)}
                 className={`text-[11px] font-mono px-2.5 py-1.5 rounded transition active:scale-95 ${
                   mode === m ? "bg-emerald-400 text-black" : "bg-white/10 hover:bg-white/20 text-white"
                 }`}
@@ -572,7 +632,7 @@ export default function FretLab({ profile }: FretLabProps) {
                   </span>
                 )}
                 {audioRunning && <span className="text-zinc-500">pick chord notes one at a time · pedal looper off</span>}
-                {transportError && <span role="alert" className="text-red-300">{transportError}</span>}
+                {(transportError || transport.error) && <span role="alert" className="text-red-300">{transportError ?? transport.error}</span>}
               </div>
               {currentVoicing && (
                 <div className="text-[11px] font-mono text-zinc-400">
@@ -616,7 +676,12 @@ export default function FretLab({ profile }: FretLabProps) {
           )}
           <TouchDesignerPanel bridge={touchDesigner} />
         </div>
-      </div>
+      </div>}
+      {mode === "play" && <div className="border-t border-white/10 px-4 py-3 text-xs text-zinc-400">
+        {cameraError && <p role="status" className="mb-2 text-amber-200">{cameraError}</p>}
+        <p>Numbers are frets. Lanes are strings. Pick single notes; the camera follows your hands while audio scores the run.</p>
+        <details className="mt-2"><summary className="cursor-pointer py-1">Visual output settings</summary><TouchDesignerPanel bridge={touchDesigner} /></details>
+      </div>}
     </div>
   );
 }

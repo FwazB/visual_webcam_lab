@@ -245,6 +245,54 @@ firmware, presets or internal settings were changed.
   TouchDesigner during this pass. Earlier artifact review remains historical
   evidence, not a new native hardware validation.
 
+## Live play-along review (2026-11-03)
+
+This incremental pass covers the candidate based on `18bad0c`: the note highway,
+scoring engine, session and transport lifecycle, input availability, diagnostic
+audio, and their integration with existing camera, song and visual-output modes.
+The broader application audit above remains the baseline; dependencies, public
+workers, Spotify, Studio storage, native helpers and bridge protocol are unchanged.
+
+No new exploitable high or medium security issue was identified. Scores remain
+local, in-memory practice feedback; there is no competitive leaderboard or trusted
+server-side score. Camera landmarks cannot award points. The added code introduces
+no upload, recording persistence, analytics, credential or permission path.
+
+The review fixed several correctness and resource-lifetime problems:
+
+- Diagnostic tones and pending sweeps are canceled at their source before a run,
+  and injection stays disabled until the run ends. Old worklet callbacks cannot
+  score after input replacement. Muted, disabled or ended tracks cannot score.
+- A run checks both input identity and the original audio clock, rejects pre-run
+  onsets, and stops on input loss, mode changes, page hiding or cancellation.
+  Pending starts cannot revive after navigation or an input change.
+- Scored playback uses the input's audio clock. Silent preview is an explicit,
+  unscored visual mode and cannot accumulate hits or misses. It does not request
+  capture or create audio. Audio transport stops on a paused or stalled clock;
+  wall-clock time never substitutes for scored audio timing.
+- Transport owns and closes only its standalone playback context, never the
+  pitch hook's borrowed context. Superseded starts and late resume completions
+  cannot restart playback. Switching to Play along disables hidden song backing.
+- Pattern validation, timing-window searches, retained judgments and visible-note
+  generation are bounded. Long idle intervals are counted arithmetically instead
+  of generating unbounded note histories.
+
+Verification includes controlled onset/timing tests, actual hook lifecycle tests,
+renderer tests, private saved-video browser replay, and desktop/mobile layout
+checks. The replay opens neither camera nor microphone and stays outside Git.
+All **323** application tests, full ESLint, the production TypeScript build and
+all **19** localhost HTTP smoke checks passed. The replay verified continuous travel after count-in, six readable string
+lanes, independent neck/hand tracking, restart and mode-switch behavior, and
+unscored preview on desktop and mobile layouts.
+Real guitar scoring latency and playing accuracy have not been tested with the
+new game; earlier Spark capture/playback evidence does not establish those results.
+The input identifies pitch, not the physical string used to play that pitch.
+
+Fresh npm audit reports **0** known findings across **509** dependencies. A fully
+redacted Gitleaks scan found **0** matches in **182** tracked/intended candidate
+files. This is an incremental source/runtime review, not a security certification.
+The existing local Studio memory-budget limitation remains documented above.
+
 ## Remaining limits
 
 - Production CSP is enforced. Static Next hydration still requires inline scripts and

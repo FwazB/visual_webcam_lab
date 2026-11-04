@@ -16,7 +16,7 @@ import type { NoteEvent, PitchFrame, WorkletConfig, WorkletMessage } from "@/lib
 import { createTestSignal, type TestSignal } from "@/lib/audio/testSignal";
 import { configureHumFilter } from "@/lib/audio/inputFilter";
 
-type GuitarPitchStatus = "idle" | "needs-device" | "starting" | "running" | "suspended" | "error";
+type GuitarPitchStatus = "idle" | "needs-device" | "starting" | "running" | "suspended" | "unavailable" | "error";
 
 interface GuitarPitchTuning {
   gateDb: number;
@@ -80,6 +80,9 @@ export function useGuitarPitch(profile: InstrumentProfile): GuitarPitch {
   const tuningRef = useRef(tuning);
   const startAttemptRef = useRef(0);
   const discoveryAbortRef = useRef<AbortController | null>(null);
+  const inputCleanupRef = useRef<(() => void) | null>(null);
+  const syncInputRef = useRef<(() => boolean) | null>(null);
+  const testRef = useRef<TestSignal | null>(null);
   useEffect(() => {
     tuningRef.current = tuning;
   });
@@ -88,8 +91,14 @@ export function useGuitarPitch(profile: InstrumentProfile): GuitarPitch {
     startAttemptRef.current++;
     discoveryAbortRef.current?.abort();
     discoveryAbortRef.current = null;
+    inputCleanupRef.current?.();
+    inputCleanupRef.current = null;
+    syncInputRef.current = null;
+    testRef.current?.setEnabled(false);
+    testRef.current = null;
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
+    if (nodeRef.current) nodeRef.current.port.onmessage = null;
     nodeRef.current?.port.close();
     nodeRef.current?.disconnect();
     nodeRef.current = null;
@@ -153,8 +162,10 @@ export function useGuitarPitch(profile: InstrumentProfile): GuitarPitch {
       try {
         stream = await navigator.mediaDevices.getUserMedia(instrumentConstraints(deviceId));
         if (attempt !== startAttemptRef.current) { release(); return; }
+        const track = stream.getAudioTracks()[0];
+        if (!track || track.readyState !== "live") throw new Error("Guitar input disconnected. Connect it again.");
         streamRef.current = stream;
-        setSettings(stream.getAudioTracks()[0]?.getSettings() ?? null);
+        setSettings(track.getSettings());
 
         ctx = new AudioContext({ latencyHint: "interactive" });
         ctxRef.current = ctx;
@@ -186,7 +197,40 @@ export function useGuitarPitch(profile: InstrumentProfile): GuitarPitch {
 
         const tracker = trackerRef.current;
         tracker.reset();
+        const ownsInput = () => attempt === startAttemptRef.current && ctxRef.current === ctx
+          && nodeRef.current === node && streamRef.current === stream;
+        let inputStatus: GuitarPitchStatus | null = null;
+        const syncInput = () => {
+          if (!ownsInput()) return false;
+          if (track.readyState !== "live") {
+            stop();
+            setError("Guitar input disconnected. Connect it again.");
+            setStatus("error");
+            return false;
+          }
+          const available = track.enabled && !track.muted;
+          const next = !available ? "unavailable" : ctx!.state === "running" ? "running" : "suspended";
+          if (next !== "running") {
+            tracker.reset();
+            frameRef.current = EMPTY_FRAME;
+            activeNoteRef.current = null;
+          }
+          if (next !== inputStatus) {
+            inputStatus = next;
+            setError(available ? null : "Guitar input is muted or disabled. Restore the input to continue.");
+            setStatus(next);
+          }
+          return next === "running";
+        };
+        syncInputRef.current = syncInput;
+        for (const event of ["ended", "mute", "unmute"]) track.addEventListener(event, syncInput);
+        inputCleanupRef.current = () => {
+          for (const event of ["ended", "mute", "unmute"]) track.removeEventListener(event, syncInput);
+        };
         node.port.onmessage = (e: MessageEvent<WorkletMessage>) => {
+          // Closed ports may still have an already queued callback. Never let
+          // another input's audio clock or an unavailable track score a note.
+          if (!ownsInput() || !syncInput()) return;
           const msg = e.data;
           if (msg.type === "onset") lastOnsetRef.current = msg.t;
           const out = tracker.handle(msg);
@@ -202,8 +246,10 @@ export function useGuitarPitch(profile: InstrumentProfile): GuitarPitch {
         };
         sendConfig();
         setContext(ctx);
-        setTest(createTestSignal(ctx, hpf));
-        setStatus(ctx.state === "running" ? "running" : "suspended");
+        const signal = createTestSignal(ctx, hpf);
+        testRef.current = signal;
+        setTest(signal);
+        syncInput();
       } catch (err) {
         release();
         if (attempt !== startAttemptRef.current) return;
@@ -262,7 +308,7 @@ export function useGuitarPitch(profile: InstrumentProfile): GuitarPitch {
     const ctx = context;
     if (!ctx) return;
     const sync = () => {
-      setStatus((s) => (s === "running" || s === "suspended" ? (ctx.state === "running" ? "running" : "suspended") : s));
+      if (ctxRef.current === ctx) syncInputRef.current?.();
     };
     sync();
     const id = window.setInterval(sync, 1000);

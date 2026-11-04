@@ -82,6 +82,25 @@ Details and hardware limits: [Spark PEDAL guide](docs/spark-pedal.md).
 
 ## Trainer
 
+**Play along** opens a live note highway beside the camera. Six lanes represent
+standard guitar strings (four for bass); the number on each approaching note is
+the fret to play, with 0 meaning open. The built-in E-minor practice run moves
+one note per beat and repeats. It is a practice pattern, not a song transcription.
+Connect the guitar, set the tempo, then choose **Play with guitar**. A four-beat
+count-in leads into the run. Pick single notes at the hit line: accurate pitch
+within 90 ms earns Perfect (100 points), within 220 ms earns Good (60 points).
+Misses and wrong notes reset the streak. Timing uses detected onset timestamps,
+with a short delivery allowance for the pitch processor. This is pitch/timing
+scoring; the same pitch on a different string cannot be distinguished by audio.
+
+**Preview track** shows the moving chart silently without input or scoring. MediaPipe
+hands and automatic neck tracking stay independent of the game. Tempo is locked
+during a run; stopping allows changes. Hiding the tab or losing/changing the input
+stops scored play. A paused or stalled audio clock also stops playback; scored
+runs never substitute a wall clock for audio timing. Diagnostic test signals are canceled and disabled during a
+run or preview, so they cannot earn points. **Shapes** and **Song practice** retain
+the existing free-practice and chord-loop tools.
+
 The main view shows your real instrument and live MediaPipe hand landmarks.
 Fretboard detection starts automatically when the camera is ready, then follows
 the detected neck as it moves. Video and fingertip dots stay live during the

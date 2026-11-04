@@ -23,28 +23,53 @@ function setup(t, addModule, mediaDevices = {}) {
     useMemo: (fn) => fn(),
   };
   let stops = 0;
-  const track = { stop: () => { stops++; }, getSettings: () => ({ sampleRate: 48000 }) };
-  const stream = { getTracks: () => [track], getAudioTracks: () => [track] };
-  const contexts = [];
+  const streams = [], contexts = [], worklets = [];
+  const createStream = () => {
+    const listeners = new Map();
+    const track = { readyState: "live", enabled: true, muted: false,
+      stop() { stops++; this.readyState = "ended"; }, getSettings: () => ({ sampleRate: 48000 }),
+      addEventListener(event, callback) { listeners.set(event, callback); },
+      removeEventListener(event) { listeners.delete(event); },
+      emit(event) { listeners.get(event)?.(); },
+      get listenerCount() { return listeners.size; },
+    };
+    const stream = { track, getTracks: () => [track], getAudioTracks: () => [track] };
+    streams.push(stream);
+    return stream;
+  };
+  const graphNode = () => ({ connect(next) { return next; }, disconnect() {},
+    frequency: { value: 0 }, Q: { value: 0 }, gain: { value: 0 } });
   class AudioContext {
     state = "running";
+    currentTime = 0;
     audioWorklet = { addModule };
     constructor() { contexts.push(this); }
     async close() { this.state = "closed"; }
+    createMediaStreamSource() { return graphNode(); }
+    createBiquadFilter() { return graphNode(); }
+  }
+  class AudioWorkletNode {
+    port = { onmessage: null, postMessage() {}, close() {} };
+    constructor() { worklets.push(this); }
+    disconnect() {}
   }
   const originalNavigator = Object.getOwnPropertyDescriptor(globalThis, "navigator");
   const originalContext = Object.getOwnPropertyDescriptor(globalThis, "AudioContext");
+  const originalWorklet = Object.getOwnPropertyDescriptor(globalThis, "AudioWorkletNode");
   Object.defineProperty(globalThis, "navigator", { configurable: true, value: { mediaDevices: {
     enumerateDevices: async () => [{ kind: "audioinput", deviceId: "spark", label: "Spark PEDAL" }],
-    getUserMedia: async () => stream,
+    getUserMedia: async () => createStream(),
     ...mediaDevices,
   } } });
   Object.defineProperty(globalThis, "AudioContext", { configurable: true, value: AudioContext });
+  Object.defineProperty(globalThis, "AudioWorkletNode", { configurable: true, value: AudioWorkletNode });
   t.after(() => {
     if (originalNavigator) Object.defineProperty(globalThis, "navigator", originalNavigator);
     else delete globalThis.navigator;
     if (originalContext) Object.defineProperty(globalThis, "AudioContext", originalContext);
     else delete globalThis.AudioContext;
+    if (originalWorklet) Object.defineProperty(globalThis, "AudioWorkletNode", originalWorklet);
+    else delete globalThis.AudioWorkletNode;
   });
   const source = fs.readFileSync(require.resolve("../src/hooks/useGuitarPitch.ts"), "utf8");
   const { outputText } = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } });
@@ -52,7 +77,7 @@ function setup(t, addModule, mediaDevices = {}) {
   new Function("require", "module", "exports", outputText)((name) => name === "react" ? react : require(name), loaded, loaded.exports);
   const pitch = loaded.exports.useGuitarPitch(GUITAR_STANDARD);
   const cleanups = effects.map((effect) => effect()).filter(Boolean);
-  return { pitch, states, contexts, stops: () => stops, unmount: () => cleanups.forEach((cleanup) => cleanup()) };
+  return { pitch, states, contexts, streams, worklets, stops: () => stops, unmount: () => cleanups.forEach((cleanup) => cleanup()) };
 }
 
 test("a worklet load failure releases the microphone and audio context", async (t) => {
@@ -133,7 +158,7 @@ test("device changes only enumerate metadata and discard results after effect cl
     compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
   }).outputText;
   vm.runInNewContext(output, {
-    module: loaded, context: ctx, ctxRef,
+    module: loaded, context: ctx, ctxRef, syncInputRef: { current: () => true },
     setStatus() {}, setDevices: (devices) => updates.push(devices),
     listAudioInputs: () => assert.fail("background refresh cannot request a permission probe"),
     window: { setInterval() { return 1; }, clearInterval() {}, addEventListener() {}, removeEventListener() {} },
@@ -159,4 +184,81 @@ test("device changes only enumerate metadata and discard results after effect cl
   ctxRef.current = null;
   handler();
   assert.equal(pending.length, 0, "a stopped context cannot start discovery");
+});
+
+function playNote(handler, onset = 0.1) {
+  handler({ data: { type: "onset", t: onset, strength: 1, rms: .2 } });
+  for (let i = 1; i <= 3; i++) handler({ data: {
+    type: "frame", t: onset + i * .02, hz: 110, clarity: .99, rms: .2, db: -20,
+  } });
+}
+
+test("late worklet callbacks from a replaced input cannot dispatch notes into the current session", async (t) => {
+  const run = setup(t, async () => {});
+  const heard = [];
+  run.pitch.onNote(note => heard.push(note));
+  await run.pitch.start();
+  const old = run.worklets[0].port.onmessage;
+  playNote(old);
+  assert.equal(heard.length, 1);
+  await run.pitch.start();
+  assert.equal(run.worklets[0].port.onmessage, null);
+  assert.equal(run.streams[0].track.listenerCount, 0);
+  playNote(old, 1);
+  assert.equal(heard.length, 1);
+  playNote(run.worklets[1].port.onmessage, 2);
+  assert.equal(heard.length, 2);
+  assert.ok(heard[1].id > heard[0].id, "note IDs remain monotonic across input replacement");
+  run.unmount();
+});
+
+test("muted, disabled and ended capture cannot score while the audio context remains running", async (t) => {
+  const run = setup(t, async () => {});
+  const heard = [];
+  run.pitch.onNote(note => heard.push(note));
+  await run.pitch.start();
+  const track = run.streams[0].track;
+  const handler = run.worklets[0].port.onmessage;
+  playNote(handler);
+  assert.equal(heard.length, 1);
+  track.muted = true;
+  track.emit("mute");
+  assert.equal(run.states[0], "unavailable");
+  assert.equal(run.pitch.activeNoteRef.current, null);
+  playNote(handler, 1);
+  assert.equal(heard.length, 1);
+  track.muted = false;
+  track.emit("unmute");
+  assert.equal(run.states[0], "running");
+  playNote(handler, 2);
+  assert.equal(heard.length, 2);
+  track.enabled = false;
+  playNote(handler, 3);
+  assert.equal(run.states[0], "unavailable");
+  assert.equal(heard.length, 2);
+  track.enabled = true;
+  playNote(handler, 4);
+  assert.equal(heard.length, 3);
+  track.readyState = "ended";
+  track.emit("ended");
+  assert.equal(run.states[0], "error");
+  assert.match(run.states[1], /disconnected/);
+  assert.equal(run.contexts[0].state, "closed");
+  assert.equal(track.listenerCount, 0);
+  playNote(handler, 5);
+  assert.equal(heard.length, 3);
+  run.unmount();
+});
+
+test("stopping an input disables its synthetic signal before closing its audio context", async (t) => {
+  const run = setup(t, async () => {});
+  await run.pitch.start();
+  const signal = run.states[6];
+  const enabled = [];
+  const original = signal.setEnabled;
+  signal.setEnabled = value => { enabled.push([value, run.contexts[0].state]); original(value); };
+  run.pitch.stop();
+  assert.deepEqual(enabled, [[false, "running"]]);
+  assert.equal(run.states[6], null);
+  run.unmount();
 });

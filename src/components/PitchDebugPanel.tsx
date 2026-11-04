@@ -14,9 +14,10 @@ interface PitchDebugPanelProps {
   pitch: GuitarPitch;
   profile: InstrumentProfile;
   getStep: () => StepView | null;
+  testDisabled?: boolean;
 }
 
-export default function PitchDebugPanel({ pitch, profile, getStep }: PitchDebugPanelProps) {
+export default function PitchDebugPanel({ pitch, profile, getStep, testDisabled = false }: PitchDebugPanelProps) {
   const [, setTick] = useState(0);
   const [sweepReport, setSweepReport] = useState<string | null>(null);
   useEffect(() => {
@@ -32,7 +33,7 @@ export default function PitchDebugPanel({ pitch, profile, getStep }: PitchDebugP
   const ctxRate = pitch.context?.sampleRate ?? 0;
 
   const runSweep = async (drive: number) => {
-    if (!pitch.test) return;
+    if (!pitch.test || testDisabled) return;
     setSweepReport("sweeping…");
     const startLen = pitch.noteLogRef.current.length;
     const played = await pitch.test.sweep(profile.tuning[0], profile.tuning[profile.tuning.length - 1] + 12, { drive });
@@ -110,14 +111,14 @@ export default function PitchDebugPanel({ pitch, profile, getStep }: PitchDebugP
         </label>
       </div>
       {pitch.test && (
-        <div className="flex flex-wrap gap-1 items-center">
-          <span className="text-zinc-500">test</span>
+        <fieldset disabled={testDisabled} className="flex flex-wrap gap-1 items-center disabled:opacity-40">
+          <legend className="text-zinc-500">{testDisabled ? "Test tones disabled during play" : "test"}</legend>
           {profile.tuning.map((m, i) => (
             <button key={i} onClick={() => pitch.test?.playPluck(m)} className="px-1.5 py-0.5 rounded bg-white/10 hover:bg-white/20">{profile.stringLabels[i]}</button>
           ))}
           <button onClick={() => runSweep(0)} className="px-1.5 py-0.5 rounded bg-white/10 hover:bg-white/20">sweep</button>
           <button onClick={() => runSweep(0.6)} className="px-1.5 py-0.5 rounded bg-white/10 hover:bg-white/20">sweep+drive</button>
-        </div>
+        </fieldset>
       )}
       {sweepReport && <div className="text-zinc-300">{sweepReport}</div>}
       {note && (

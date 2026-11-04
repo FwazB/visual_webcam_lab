@@ -13,6 +13,7 @@ import { createNeckGeometry, imageToNeck, neckToImage, type NeckGeometry, type N
 export interface CameraTarget { string: number; fret: number; midi: number }
 
 interface Props {
+  compact?: boolean;
   profile: InstrumentProfile;
   videoRef: RefObject<HTMLVideoElement | null>;
   handsRef: RefObject<HandDetection[]>;
@@ -55,7 +56,7 @@ function validPoint(point: { x: number; y: number; z?: number } | undefined): po
 
 /** Live hand landmarks plus observed neck geometry; no invented fret identities. */
 export default function RealFretboardOverlay({
-  profile, videoRef, handsRef, handsUpdatedAtRef, targetRef, pitch, ready, trackingLoading, trackingError, onRetryHandTracking,
+  compact = false, profile, videoRef, handsRef, handsUpdatedAtRef, targetRef, pitch, ready, trackingLoading, trackingError, onRetryHandTracking,
 }: Props) {
   const surfaceRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -223,7 +224,7 @@ export default function RealFretboardOverlay({
                   : "Looking for the fretboard automatically. Show a clear stretch of neck with visible frets."}</p>
         {(error || neck.error) && <p role="alert" className="mt-2 rounded-md border border-amber-300/20 bg-amber-300/10 px-3 py-2 text-sm text-amber-200">{neck.error ?? error}</p>}
       </div>
-      <div ref={surfaceRef} className="relative h-[54vh] min-h-[260px] sm:min-h-[380px] bg-black">
+      <div ref={surfaceRef} className={compact ? "relative h-[30vh] min-h-[200px] lg:h-[52vh] bg-black" : "relative h-[54vh] min-h-[260px] sm:min-h-[380px] bg-black"}>
         <video ref={videoRef} autoPlay playsInline muted className="absolute inset-0 w-full h-full object-contain -scale-x-100" />
         <canvas ref={canvasRef} aria-hidden="true" className="absolute inset-0 w-full h-full" />
       </div>
@@ -232,9 +233,15 @@ export default function RealFretboardOverlay({
         <p><span className="text-zinc-400">Seen</span> · {trackingError ? "Tracking unavailable" : trackingLoading ? "Loading hand tracking…" : readout.seen}</p>
         {trackingError && onRetryHandTracking && <button type="button" onClick={onRetryHandTracking} className="mt-2 rounded-md bg-white/10 px-3 py-2 text-xs hover:bg-white/20">Retry hand tracking</button>}
         <p className="mt-1"><span className="text-zinc-400">Heard</span> · {readout.heard}</p>
-        <p role="status" className="mt-2 text-xs text-zinc-300">{trackingError ?? readout.detail}</p>
-        <p className="mt-1 text-[11px] text-zinc-400">White = {profile.stringCount}-string guide · yellow = observed frets · purple = hand landmarks · cyan = fingertips over the neck</p>
-        <p className="mt-1 text-[11px] text-zinc-500">Fret numbers and string pitches are not inferred from this camera outline.</p>
+        {compact ? <details className="mt-2 text-xs text-zinc-400"><summary className="cursor-pointer">Tracking details</summary>
+          <p role="status" className="mt-1">{trackingError ?? readout.detail}</p>
+          <p className="mt-1">White strings · yellow frets · purple hands · cyan fingertips over the neck.</p>
+          <p className="mt-1">Fret numbers and string pitches are not inferred from the camera.</p>
+        </details> : <>
+          <p role="status" className="mt-2 text-xs text-zinc-300">{trackingError ?? readout.detail}</p>
+          <p className="mt-1 text-[11px] text-zinc-400">White = {profile.stringCount}-string guide · yellow = observed frets · purple = hand landmarks · cyan = fingertips over the neck</p>
+          <p className="mt-1 text-[11px] text-zinc-500">Fret numbers and string pitches are not inferred from this camera outline.</p>
+        </>}
       </div>
     </div>
   );
