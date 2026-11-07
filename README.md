@@ -7,38 +7,25 @@ MediaPipe hand tracking with a real-fretboard detection and tracking preview.
 
 Live: the body-synth project on Vercel deploys `main`.
 
-## Current security checks — 2026-11-01
+## Current security checks — 2026-11-04
 
-Production and development dependency audits now require **zero findings**.
-The former minimatch exception is removed: actual registry `minimatch@11.0.3`
-runs behind small, version- and hash-checked updates to its legacy lint
-consumers. Lint rules remain enabled. See the
-[compatibility patch maintenance notes](security/lint-minimatch/README.md).
+Production and development audits require zero known dependency findings. CSP
+is enforced, with JavaScript evaluation restricted to the isolated OpenCV worker.
+Media, storage and local bridge boundaries are covered by focused regressions;
+[the current audit](docs/security-audit.md) records fixes, evidence and limits.
+The [lint compatibility patch](security/lint-minimatch/README.md) remains version-
+and hash-checked, with useful lint rules enabled.
 
-CSP is enforced, with the JavaScript evaluation exception restricted to the
-OpenCV worker. The Fuzz bridge bounds connections and expires unpaired clients.
-
-The current fretboard candidate and broader security review are documented in
-[the candidate audit](docs/security-audit.md#real-fretboard-candidate-review-2026-11-01),
-including media cleanup fixes, regression results and remaining limits.
-
-An earlier baseline browser check passed native decoded synthetic-video audio
-through the AudioWorklet to **55 Hz / MIDI 33**, along with model inference/export
-and capture-lifecycle regressions. That browser check was not repeated for this
-candidate. Analysis-only audio uses a feature-detected silent sink to avoid a
-reproduced default-output clock stall. Unsupported-browser fallback and physical
-bass accuracy remain unverified; synthetic fixtures are not real playing validation.
-
-These are **local source results**, not a production deployment. Vercel is
-configured to deploy `main`; other branches have deployment disabled.
-
-See [security audit](docs/security-audit.md) and [playing-vision experiment](spikes/playing-vision/README.md).
+Vercel deploys `main`; other branches have deployment disabled. Recorded-video
+and automated checks do not establish real-guitar timing or hidden-fret accuracy.
+The separate [playing-vision experiment](spikes/playing-vision/README.md) remains
+a local research tool rather than a production accuracy claim.
 
 ## Routes
 
-- `/guitar` and `/bass`: camera-first fretboard trainer. Finds a neck outline,
-  tracks an accepted reference, maps estimated fingertips, and compares visible positions with
-  USB instrument audio (Positive Grid Spark), and scores lessons by pitch.
+- `/guitar` and `/bass`: live note highway with pitch/timing scoring, automatic
+  neck tracking and MediaPipe fingertip dots. Shapes and Song practice retain
+  the existing lesson and chord-loop tools.
 - `/studio`: multitrack recorder for the guitar: record takes over a click,
   arrange and trim them, export a WAV.
 - `/for-you`: practice picks, with an optional read-only Spotify connection.
@@ -247,7 +234,10 @@ tracks on a timeline, like a small GarageBand.
 Takes record the pedal's processed tone (amp model and effects). Listen
 through the pedal's headphones or line out; the browser does not echo the
 input. The project autosaves in this browser (IndexedDB); export a WAV to keep
-a copy anywhere else.
+a copy anywhere else. Restore reads only the current project's referenced audio;
+it does not delete another tab's pending takes. Unreferenced saved audio remains
+until **New** or clearing site data. Use one Studio editing tab: autosave is not a
+collaborative editor.
 
 ## First test with a real guitar
 
@@ -258,8 +248,8 @@ a copy anywhere else.
 3. Shapes mode: play the targets and watch each turn green and the pulse
    land on the right string and fret.
 4. Song mode → Play, play the vamp, watch accuracy and streak.
-5. Browser console: lines mentioning `Content-Security-Policy-Report-Only`
-   are reports, not failures. Collect them so the policy can be enforced.
+5. Check for blocked audio/camera requests or enforced CSP errors. Do not disable
+   the policy to work around an integration failure.
 
 ## TouchDesigner
 

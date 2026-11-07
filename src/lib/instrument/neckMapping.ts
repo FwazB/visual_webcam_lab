@@ -1,5 +1,3 @@
-import type { InstrumentProfile } from "./profile";
-
 /** Coordinates are sensor-normalized image points unless explicitly called neck points. */
 export interface NeckPoint {
   x: number;
@@ -16,28 +14,7 @@ export interface NeckGeometry {
   readonly neckToImageMatrix: Matrix3;
 }
 
-export interface NeckCalibration extends NeckGeometry {
-  readonly firstFret: number;
-  readonly lastFret: number;
-  readonly profileId: string;
-  readonly stringCount: number;
-  readonly tuning: readonly number[];
-  readonly fretCount: number;
-}
-
-export interface FingerCandidate {
-  handIndex: number;
-  /** Index, middle, ring, little finger. */
-  finger: 1 | 2 | 3 | 4;
-  string: number;
-  fret: number;
-  midi: number;
-  /** Observed fingertip, not a snapped position or an inferred contact. */
-  point: NeckPoint;
-}
-
 const EPSILON = 1e-9;
-const FINGERTIPS = [8, 12, 16, 20] as const;
 const UNIT_CORNERS: readonly NeckPoint[] = [
   { x: 0, y: 0 }, { x: 0, y: 1 }, { x: 1, y: 0 }, { x: 1, y: 1 },
 ];
@@ -46,19 +23,6 @@ function inUnitSquare(point: NeckPoint, tolerance = 0): boolean {
   return Number.isFinite(point.x) && Number.isFinite(point.y)
     && point.x >= -tolerance && point.x <= 1 + tolerance
     && point.y >= -tolerance && point.y <= 1 + tolerance;
-}
-
-function validProfile(profile: InstrumentProfile): boolean {
-  return Number.isInteger(profile.stringCount) && profile.stringCount >= 2
-    && Number.isInteger(profile.fretCount) && profile.fretCount > 0
-    && profile.tuning.length === profile.stringCount
-    && profile.tuning.every((midi) => Number.isInteger(midi) && midi >= 0 && midi <= 127);
-}
-
-function matchesProfile(calibration: NeckCalibration, profile: InstrumentProfile): boolean {
-  return validProfile(profile) && calibration.profileId === profile.id
-    && calibration.stringCount === profile.stringCount && calibration.fretCount === profile.fretCount
-    && calibration.tuning.every((midi, index) => midi === profile.tuning[index]);
 }
 
 function solveHomography(source: readonly NeckPoint[], destination: readonly NeckPoint[]): Matrix3 {
@@ -140,93 +104,11 @@ export function createNeckGeometry(points: readonly NeckPoint[]): NeckGeometry {
   });
 }
 
-/** Explicitly anchored mapping for callers that know the endpoint fret identities. */
-export function createNeckCalibration(
-  points: readonly NeckPoint[],
-  firstFret: number,
-  lastFret: number,
-  profile: InstrumentProfile,
-): NeckCalibration {
-  if (!validProfile(profile)) throw new Error("Invalid instrument profile.");
-  if (!Number.isInteger(firstFret) || !Number.isInteger(lastFret)
-    || firstFret < 0 || lastFret <= firstFret || lastFret > profile.fretCount) {
-    throw new Error(`Choose two fret wires from 0 to ${profile.fretCount}, in increasing order.`);
-  }
-  return Object.freeze({
-    ...createNeckGeometry(points), firstFret, lastFret,
-    profileId: profile.id, stringCount: profile.stringCount,
-    tuning: Object.freeze([...profile.tuning]), fretCount: profile.fretCount,
-  });
-}
-
-/** Neck x runs first to last wire; y runs lowest to highest string. */
+/** Neck x runs first to last observed fret; y runs between the observed outer rails. */
 export function imageToNeck(calibration: NeckGeometry, point: NeckPoint): NeckPoint | null {
   return inUnitSquare(point) ? transform(calibration.imageToNeckMatrix, point) : null;
 }
 
 export function neckToImage(calibration: NeckGeometry, point: NeckPoint): NeckPoint | null {
   return inUnitSquare(point) ? transform(calibration.neckToImageMatrix, point) : null;
-}
-
-/** Normalized longitudinal position of a fret wire. Out-of-range wires return NaN. */
-export function fretCoordinate(calibration: NeckCalibration, fret: number): number {
-  if (!Number.isInteger(fret) || fret < calibration.firstFret || fret > calibration.lastFret) return NaN;
-  const first = 2 ** (-calibration.firstFret / 12);
-  const last = 2 ** (-calibration.lastFret / 12);
-  return (first - 2 ** (-fret / 12)) / (first - last);
-}
-
-/** Sensor point for a target just behind its fret wire. An open target sits at the nut. */
-export function positionOnNeck(
-  calibration: NeckCalibration, profile: InstrumentProfile, string: number, fret: number,
-): NeckPoint | null {
-  if (!matchesProfile(calibration, profile) || !Number.isInteger(string)
-    || string < 0 || string >= profile.stringCount || !Number.isInteger(fret)) return null;
-  if (fret === 0 && calibration.firstFret === 0) {
-    return neckToImage(calibration, { x: 0, y: string / (profile.stringCount - 1) });
-  }
-  if (fret <= calibration.firstFret || fret > calibration.lastFret) return null;
-  const start = fretCoordinate(calibration, fret - 1);
-  const end = fretCoordinate(calibration, fret);
-  return neckToImage(calibration, { x: start + (end - start) * 0.75, y: string / (profile.stringCount - 1) });
-}
-
-/**
- * Geometric candidates only: projected overlap cannot prove string contact.
- * No lesson target, audio, handedness score or absent finger chooses a position.
- */
-export function locateFingers(
-  calibration: NeckCalibration,
-  profile: InstrumentProfile,
-  hands: readonly { landmarks: readonly { x: number; y: number; z?: number }[] }[],
-): FingerCandidate[] {
-  if (!matchesProfile(calibration, profile)) return [];
-  const candidates: FingerCandidate[] = [];
-  hands.forEach((hand, handIndex) => {
-    FINGERTIPS.forEach((landmarkIndex, fingerIndex) => {
-      const tip = hand.landmarks[landmarkIndex];
-      if (!tip || (tip.z !== undefined && !Number.isFinite(tip.z))) return;
-      const neck = imageToNeck(calibration, tip);
-      if (!neck) return;
-      const first = 2 ** (-calibration.firstFret / 12);
-      const last = 2 ** (-calibration.lastFret / 12);
-      const fractionalFret = -12 * Math.log2(first - neck.x * (first - last));
-      const nearestWire = Math.round(fractionalFret);
-      const frets = Math.abs(fractionalFret - nearestWire) <= 0.08
-        ? [nearestWire, nearestWire + 1] : [Math.ceil(fractionalFret)];
-      const stringCoordinate = neck.y * (profile.stringCount - 1);
-      for (let string = 0; string < profile.stringCount; string++) {
-        // Keep both strings close to their midpoint instead of silently snapping.
-        if (Math.abs(stringCoordinate - string) > 0.6 + EPSILON) continue;
-        for (const fret of frets) {
-          if (fret <= calibration.firstFret || fret > calibration.lastFret) continue;
-          candidates.push({
-            handIndex, finger: (fingerIndex + 1) as FingerCandidate["finger"], string, fret,
-            midi: profile.tuning[string] + fret, point: { x: tip.x, y: tip.y },
-          });
-        }
-      }
-    });
-  });
-  return candidates;
 }

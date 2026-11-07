@@ -38,7 +38,7 @@ export class StudioEngine {
   private clickOut: GainNode;
   private recorder: AudioWorkletNode;
   private trackGains = new Map<string, GainNode>();
-  private sources: AudioBufferSourceNode[] = [];
+  private sources = new Map<AudioBufferSourceNode, string>();
   private input: MediaStreamAudioSourceNode | null = null;
   private stream: MediaStream | null = null;
   private inputGeneration = 0;
@@ -168,7 +168,21 @@ export class StudioEngine {
     return (this.ctx.baseLatency || 0) + (this.ctx.outputLatency || 0) + (settings?.latency ?? 0);
   }
 
-  setTrackGain(trackId: string, gain: number): void {
+  /** Apply live gains and release audio belonging to tracks that were removed. */
+  syncTracks(project: Project): void {
+    if (this.closed) return;
+    const ids = new Set(project.tracks.map(track => track.id));
+    for (const [source, trackId] of this.sources) if (!ids.has(trackId)) this.stopSource(source);
+    for (const [trackId, gain] of this.trackGains) {
+      if (ids.has(trackId)) continue;
+      gain.disconnect();
+      this.trackGains.delete(trackId);
+    }
+    const solo = anySolo(project);
+    for (const track of project.tracks) this.setTrackGain(track.id, effectiveGain(track, solo));
+  }
+
+  private setTrackGain(trackId: string, gain: number): void {
     const node = this.trackGains.get(trackId);
     if (node) {
       node.gain.setTargetAtTime(gain, this.ctx.currentTime, 0.01);
@@ -190,8 +204,7 @@ export class StudioEngine {
     const startCtx = this.ctx.currentTime + START_DELAY;
     this.anchorCtx = startCtx;
     this.anchorTimeline = from - preroll;
-    const solo = anySolo(project);
-    for (const track of project.tracks) this.setTrackGain(track.id, effectiveGain(track, solo));
+    this.syncTracks(project);
     for (const clip of project.clips) {
       const buffer = buffers.get(clip.bufferId);
       const out = this.trackGains.get(clip.trackId);
@@ -200,8 +213,13 @@ export class StudioEngine {
       const source = this.ctx.createBufferSource();
       source.buffer = buffer;
       source.connect(out);
+      this.sources.set(source, clip.trackId);
+      source.onended = () => {
+        if (!this.sources.delete(source)) return;
+        source.onended = null;
+        source.disconnect();
+      };
       source.start(startCtx + preroll + Math.max(0, clip.start - from), clip.offset + late, clip.duration - late);
-      this.sources.push(source);
     }
     this.nextBeat = Math.ceil(this.anchorTimeline / (60 / opts.bpm) - 1e-9);
     this.scheduleClicks();
@@ -267,6 +285,8 @@ export class StudioEngine {
     this.closed = true;
     try {
       this.halt();
+      for (const gain of this.trackGains.values()) gain.disconnect();
+      this.trackGains.clear();
     } finally {
       this.detachInput();
       this.onStopped?.();
@@ -279,16 +299,15 @@ export class StudioEngine {
     }
   }
 
+  private stopSource(source: AudioBufferSourceNode): void {
+    if (!this.sources.delete(source)) return;
+    source.onended = null;
+    try { source.stop(); } catch { /* Already stopped. */ }
+    source.disconnect();
+  }
+
   private halt(): void {
-    for (const source of this.sources) {
-      try {
-        source.stop();
-      } catch {
-        // Already stopped.
-      }
-      source.disconnect();
-    }
-    this.sources = [];
+    for (const source of this.sources.keys()) this.stopSource(source);
     if (this.clickTimer !== null) window.clearInterval(this.clickTimer);
     this.clickTimer = null;
     this.mode = "stopped";

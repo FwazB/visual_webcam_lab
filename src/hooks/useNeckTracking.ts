@@ -247,8 +247,8 @@ export function useNeckTracking(
       if (disposed || !worker || !ready || flight || operation.epoch !== epoch) return;
       const { frame, type, points } = operation;
       const id = ++frameId;
-      // Copy before transfer: the reference snapshot must remain intact until seeding is acknowledged.
-      const rgba = frame.rgba.slice().buffer;
+      // Reference snapshots survive detection and seeding; disposable live frames transfer ownership.
+      const rgba = type === "frame" ? frame.rgba.buffer as ArrayBuffer : frame.rgba.slice().buffer;
       flight = { ...operation, frameId: id };
       operationTimer = setTimeout(() => {
         if (!disposed && flight?.frameId === id) fail("Fretboard tracking timed out. Retry neck tracking; hand tracking and audio remain independent.", true);
@@ -284,7 +284,7 @@ export function useNeckTracking(
     }
 
     function freeze(): boolean {
-      if (disposed || (terminalError && !startWorker())) return false;
+      if (disposed) return false;
       enabled = true;
       advanceEpoch();
       awaitingProposal = true;
@@ -293,8 +293,9 @@ export function useNeckTracking(
       try {
         const snapshot = capture(true);
         if (!snapshot) { awaitingProposal = false; setError("Wait for a live camera image, then try again."); return false; }
+        if (!worker && !startWorker()) return false;
         snapshotRef.current = snapshot;
-        setStatus("idle");
+        setStatus(ready ? "idle" : "loading");
         return true;
       } catch {
         fail("The camera frame could not be read. Check camera access and try again.");
@@ -360,7 +361,8 @@ export function useNeckTracking(
         advanceEpoch();
         nextSearchAt = 0;
         lastSearchMediaTime = -Infinity;
-        if (terminalError) { startWorker(); return; }
+        terminalError = null;
+        if (!worker && checkSource().usable) { startWorker(); return; }
         setError(null);
         setStatus(ready ? "idle" : "loading");
       },
@@ -461,7 +463,8 @@ export function useNeckTracking(
         return false;
       }
     }
-    startWorker();
+    // Camera permission may be denied or pending indefinitely: load OpenCV only for usable video.
+    if (readSource().usable) startWorker();
 
     function tick() {
       if (disposed) return;
@@ -469,7 +472,8 @@ export function useNeckTracking(
       if (poseRef.current && now - poseRef.current.capturedAt > FRESH_MS) {
         markLost();
       }
-      checkSource();
+      const current = checkSource();
+      if (enabled && !worker && !terminalError && current.usable) startWorker();
       search(now);
       sample(now);
       raf = requestAnimationFrame(tick);

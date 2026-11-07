@@ -7,7 +7,7 @@ import { useNeckTracking, type NeckCameraIdentity } from "@/hooks/useNeckTrackin
 import type { InstrumentProfile } from "@/lib/instrument/profile";
 import { midiToName } from "@/lib/instrument/pitch";
 import { cameraViewport, imageToCamera } from "@/lib/instrument/cameraCoordinates";
-import { evaluateNeckEvidence } from "@/lib/instrument/neckEvidence";
+import { readHeardMidi } from "@/lib/instrument/neckEvidence";
 import { createNeckGeometry, imageToNeck, neckToImage, type NeckGeometry, type NeckPoint } from "@/lib/instrument/neckMapping";
 
 export interface CameraTarget { string: number; fret: number; midi: number }
@@ -143,14 +143,14 @@ export default function RealFretboardOverlay({
       }));
       const frame = pitch.frameRef.current;
       const audioAgeMs = pitch.context && frame ? (pitch.context.currentTime - frame.t) * 1000 : Infinity;
-      const audio = evaluateNeckEvidence({ candidates: [], handAgeMs, audioFrame: frame, audioAgeMs,
+      const heardMidi = readHeardMidi({ audioFrame: frame, audioAgeMs,
         audioRunning: pitch.status === "running" && pitch.context?.state === "running",
         gateDb: pitch.tuning.gateDb, clarityThreshold: pitch.tuning.clarityThreshold });
       const names = [...new Set(placements.map(placement => placement.name))];
       const target = targetRef.current;
       const next = {
         seen: names.length ? `${names.join(" / ")} visible on neck` : hands.length ? "Hand landmarks visible" : "No fresh hands visible",
-        heard: audio.heardMidi !== null ? midiToName(audio.heardMidi) : pitch.status === "running" ? "Waiting for a clear note" : "Connect guitar",
+        heard: heardMidi !== null ? midiToName(heardMidi) : pitch.status === "running" ? "Waiting for a clear note" : "Connect guitar",
         detail: geometry
           ? "Cyan fingertips overlap the neck in the camera image · string contact is not measured."
           : neck.status === "paused" ? "Neck tracking paused · hand landmarks remain live."

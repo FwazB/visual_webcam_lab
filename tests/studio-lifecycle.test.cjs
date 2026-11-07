@@ -284,6 +284,7 @@ let projectGuard;
     const source = node.arguments[0].getText(componentTree);
     if (source.includes("mountedRef.current = true")) effectSources.lifetime = source;
     if (source.includes("loadStudio()")) effectSources.restore = source;
+    if (source.includes("saveProject(project)")) effectSources.autosave = source;
   }
   ts.forEachChild(node, visit);
 })(componentTree);
@@ -298,19 +299,20 @@ function componentHarness(options = {}) {
   };
   const values = {
     ...projectModel,
-    mountedRef: { current: true }, projectGenerationRef: { current: 0 }, transportRequestRef: { current: 0 }, restoreRef: { current: null },
+    mountedRef: { current: true }, projectGenerationRef: { current: 0 }, transportRequestRef: { current: 0 }, restoreRef: { current: null }, resettingRef: { current: false },
     project: projectModel.emptyProject(), armedTrackId: null,
     getLatencyMs: id => options.getLatencyMs ? options.getLatencyMs(id) : options.latency?.value ?? null, countIn: false,
     recordingRef: { current: null }, engineRef: { current: engine },
+    dragRef: { current: null }, previewRef: { current: null },
     buffersRef: { current: new Map() }, peaksRef: { current: new Map() }, playheadRef: { current: 0 }, scrollXRef: { current: 0 },
     studio: { connect: async () => {}, cancelPendingInput() { events.push("cancel-input"); }, refreshLatency: () => 0, getConnectedDeviceId: () => "synthetic-input" },
     ensureEngine: () => options.creation?.promise ?? Promise.resolve(engine),
     options: () => ({ bpm: 96, beatsPerBar: 4, metronome: false }),
-    setBusy(value) { events.push(`busy:${value}`); }, setConfirmNew() {}, setSelectedClipId() {}, setArmedTrackId() {}, setMode() {}, setLoaded() {},
+    setBusy(value) { events.push(`busy:${value}`); }, setResetting() {}, setConfirmNew() {}, setSelectedClipId() {}, setArmedTrackId() {}, setMode() {}, setLoaded() {},
     setNotice: value => notices.push(value), message: String,
     registerBuffer() { events.push("register"); }, channelsOf: () => [new Float32Array(1)], toAudioBuffer: () => ({}),
     saveBuffer: async buffer => { stored.push(buffer); events.push("save-buffer"); },
-    clearStudio: async () => { stored.length = 0; events.push("clear"); },
+    clearStudio: async () => { if (options.clearing) await options.clearing.promise; stored.length = 0; events.push("clear"); },
     loadStudio: () => loading.promise,
     dispatch: action => { actions.push(action); events.push(`dispatch:${action.type}`); },
     renderMix: () => options.rendering?.promise,
@@ -318,7 +320,7 @@ function componentHarness(options = {}) {
     Blob: class {}, encodeWav: () => new ArrayBuffer(0),
     document: { createElement: () => ({ click() { events.push("download"); } }) }, window: { setTimeout() {} },
   };
-  const names = ["play", "record", "stop", "addTake", "importFile", "newProject", "exportMix"];
+  const names = ["play", "record", "stop", "addTake", "importFile", "newProject", "exportMix", "onPointerUp"];
   const source = `const isCurrentProject = ${projectGuard};\n${names.map(name => functions[name]).join("\n")}\nreturn { ${names.join(",")}, lifetime: ${effectSources.lifetime}, restore: ${effectSources.restore} };`;
   const actionsUnderTest = new Function(...Object.keys(values), compile(source))(...Object.values(values));
   const unmount = actionsUnderTest.lifetime();
@@ -370,6 +372,20 @@ test("New waits for an obsolete restore and never loads its previous private rec
   run.unmount();
 });
 
+test("restore drops clips with missing audio while preserving the surviving clip", async () => {
+  const run = componentHarness();
+  const cancelRestore = run.restore();
+  const project = { ...projectModel.emptyProject(), clips: [
+    { id: "gone", bufferId: "missing" }, { id: "keep", bufferId: "present" },
+  ] };
+  run.loading.resolve({ project, buffers: [{ id: "present", channels: [new Float32Array(1)], sampleRate: 48000 }] });
+  await run.values.restoreRef.current;
+  assert.deepEqual(run.actions.map(action => action.project.clips), [[{ id: "keep", bufferId: "present" }]]);
+  assert.equal(run.events.filter(event => event === "register").length, 1);
+  cancelRestore();
+  run.unmount();
+});
+
 test("New discards an in-progress take without writing a final recording during deletion", async () => {
   const run = componentHarness();
   run.engine.mode = "recording";
@@ -378,6 +394,105 @@ test("New discards an in-progress take without writing a final recording during 
   await run.newProject();
   assert.equal(run.events.includes("save-buffer"), false);
   assert.equal(run.events.includes("register"), false);
+  run.unmount();
+});
+
+test("New blocks new Play and Record requests until its delayed deletion completes", async () => {
+  const clearing = deferred();
+  const run = componentHarness({ clearing });
+  const pending = run.newProject();
+  assert.equal(run.values.resettingRef.current, true, "guard is synchronous, before a React rerender");
+  await flush();
+  await run.play();
+  await run.record();
+  assert.equal(run.events.includes("play"), false);
+  assert.equal(run.events.includes("record"), false);
+  assert.equal(run.values.recordingRef.current, null);
+  clearing.resolve();
+  await pending;
+  assert.equal(run.values.resettingRef.current, false);
+  assert.ok(run.events.includes("clear"));
+  await run.play();
+  assert.equal(run.events.filter(event => event === "play").length, 1, "normal playback can start after New finishes");
+  run.unmount();
+});
+
+test("a failed project deletion releases the reset guard for a later playback attempt", async () => {
+  const clearing = deferred();
+  const run = componentHarness({ clearing });
+  const pending = run.newProject();
+  clearing.reject(new Error("Storage unavailable"));
+  await pending;
+  assert.equal(run.values.resettingRef.current, false);
+  assert.match(run.notices.at(-1), /Could not clear/);
+  await run.play();
+  assert.equal(run.events.includes("play"), true);
+  run.unmount();
+});
+
+test("New discards a pending timeline drag and ignores pointer-up during or after deletion", async () => {
+  const clearing = deferred();
+  const run = componentHarness({ clearing });
+  const previous = { ...projectModel.emptyProject(), clips: [{ id: "old-clip", bufferId: "old-audio" }] };
+  run.values.dragRef.current = { moved: true };
+  run.values.previewRef.current = previous;
+  const pending = run.newProject();
+  assert.equal(run.values.dragRef.current, null, "drag invalidation is synchronous");
+  assert.equal(run.values.previewRef.current, null);
+  // A queued pointer-up must also reject any obsolete preview during deletion.
+  run.values.dragRef.current = { moved: true };
+  run.values.previewRef.current = previous;
+  run.onPointerUp();
+  assert.equal(run.actions.length, 0);
+  assert.equal(run.values.dragRef.current, null);
+  assert.equal(run.values.previewRef.current, null);
+  clearing.resolve();
+  await pending;
+  run.onPointerUp();
+  assert.deepEqual(run.actions.map(action => action.type), ["load"]);
+  assert.deepEqual(run.actions[0].project.clips, []);
+  run.unmount();
+});
+
+test("autosave stays paused throughout New and rearms only for the replacement project", async () => {
+  const clearing = deferred();
+  const run = componentHarness({ clearing });
+  const saves = [], timers = new Map();
+  let nextTimer = 0;
+  const window = {
+    setTimeout(callback) { const id = ++nextTimer; timers.set(id, callback); return id; },
+    clearTimeout(id) { timers.delete(id); },
+  };
+  const effect = new Function("project", "loaded", "resetting", "resettingRef", "projectGenerationRef",
+    "isCurrentProject", "saveProject", "setNotice", "window", compile(`return ${effectSources.autosave};`));
+  const arm = (project, resetting) => effect(project, true, resetting, run.values.resettingRef,
+    run.values.projectGenerationRef, generation => generation === run.values.projectGenerationRef.current,
+    async project => { saves.push(project); }, () => {}, window)();
+  const previous = { ...projectModel.emptyProject(), clips: [{ id: "old", bufferId: "old-audio" }] };
+  const cleanupOld = arm(previous, false);
+  const oldCallback = [...timers.values()][0];
+  const pending = run.newProject();
+  oldCallback();
+  assert.equal(saves.length, 0, "the synchronous reset guard rejects a timer queued before rerender");
+  cleanupOld();
+  assert.equal(timers.size, 0, "the resetting dependency cleans up the old timer");
+  assert.equal(arm(previous, true), undefined);
+  assert.equal(timers.size, 0, "even a project edit cannot arm autosave during deferred clear");
+  // Model a stale false-state effect queued with the new generation: the ref
+  // still blocks its callback until React has committed the resetting state.
+  const cleanupStale = arm(previous, false);
+  [...timers.values()][0]();
+  assert.equal(saves.length, 0);
+  cleanupStale();
+  clearing.resolve();
+  await pending;
+  assert.equal(saves.length, 0);
+  const replacement = run.actions.find(action => action.type === "load").project;
+  const cleanupNew = arm(replacement, false);
+  [...timers.values()][0]();
+  await flush();
+  assert.deepEqual(saves, [projectModel.emptyProject()]);
+  cleanupNew();
   run.unmount();
 });
 

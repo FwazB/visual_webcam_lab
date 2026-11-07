@@ -14,11 +14,9 @@ import { renderMix, type RecordedTake, type TransportMode } from "@/lib/studio/e
 import {
   addClip,
   addTrack,
-  anySolo,
   carveOut,
   commit,
   deleteClip,
-  effectiveGain,
   emptyProject,
   makeTrack,
   MIN_CLIP,
@@ -105,6 +103,7 @@ export default function Studio() {
   const [loaded, setLoaded] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [resetting, setResetting] = useState(false);
   const [confirmNew, setConfirmNew] = useState(false);
 
   const buffersRef = useRef(new Map<string, AudioBuffer>());
@@ -125,6 +124,7 @@ export default function Studio() {
   const mountedRef = useRef(true);
   const projectGenerationRef = useRef(0);
   const transportRequestRef = useRef(0);
+  const resettingRef = useRef(false);
   const restoreRef = useRef<Promise<void> | null>(null);
 
   const isCurrentProject = (generation: number) => mountedRef.current && generation === projectGenerationRef.current;
@@ -169,26 +169,26 @@ export default function Studio() {
   }, []);
 
   useEffect(() => {
-    if (!loaded) return;
+    if (!loaded || resetting) return;
     const generation = projectGenerationRef.current;
     const id = window.setTimeout(() => {
-      if (!isCurrentProject(generation)) return;
+      if (resettingRef.current || !isCurrentProject(generation)) return;
       saveProject(project).catch(() => { if (isCurrentProject(generation)) setNotice("Could not autosave the project."); });
     }, 400);
     return () => window.clearTimeout(id);
-  }, [project, loaded]);
+  }, [project, loaded, resetting]);
 
-  // Mute, solo and volume apply live.
+  // Track removal, mute, solo and volume apply live.
   useEffect(() => {
     const engine = engineRef.current;
     if (!engine) return;
-    const solo = anySolo(project);
-    for (const t of project.tracks) engine.setTrackGain(t.id, effectiveGain(t, solo));
+    engine.syncTracks(project);
   }, [project, engineRef]);
 
   const options = (p: Project) => ({ bpm: p.bpm, beatsPerBar: p.beatsPerBar, metronome });
 
   async function play(from = playheadRef.current) {
+    if (resettingRef.current) return;
     const generation = projectGenerationRef.current;
     const request = ++transportRequestRef.current;
     try {
@@ -218,6 +218,7 @@ export default function Studio() {
   }
 
   async function record() {
+    if (resettingRef.current) return;
     const generation = projectGenerationRef.current;
     const request = ++transportRequestRef.current;
     let engine;
@@ -339,13 +340,18 @@ export default function Studio() {
   }
 
   async function newProject() {
+    if (resettingRef.current) return;
+    resettingRef.current = true;
+    dragRef.current = null;
+    previewRef.current = null;
+    setResetting(true);
     const generation = ++projectGenerationRef.current;
     setConfirmNew(false);
     setBusy(true);
     studio.cancelPendingInput();
     try {
       await stop(true);
-      // Let the old restore/cleanup transaction finish before deleting the saved project.
+      // Let the old restore transaction finish before deleting the saved project.
       await restoreRef.current;
       if (!isCurrentProject(generation)) return;
       await clearStudio();
@@ -362,11 +368,16 @@ export default function Studio() {
     } catch {
       if (isCurrentProject(generation)) setNotice("Could not clear the saved project. Try New again to discard it.");
     } finally {
-      if (isCurrentProject(generation)) setBusy(false);
+      resettingRef.current = false;
+      if (isCurrentProject(generation)) {
+        setResetting(false);
+        setBusy(false);
+      }
     }
   }
 
   function seek(t: number) {
+    if (resettingRef.current) return;
     const at = Math.max(0, t);
     playheadRef.current = at;
     const engine = engineRef.current;
@@ -400,6 +411,11 @@ export default function Studio() {
     keyRef.current = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement | null;
       if (el && (el.tagName === "INPUT" || el.tagName === "SELECT" || el.tagName === "TEXTAREA" || el.isContentEditable)) return;
+      if (resettingRef.current) {
+        if (!e.metaKey && !e.ctrlKey && !e.altKey
+          && [" ", "r", "R", "s", "S", "Enter", "Home", "Backspace", "Delete"].includes(e.key)) e.preventDefault();
+        return;
+      }
       const mod = e.metaKey || e.ctrlKey;
       if (mod && e.key.toLowerCase() === "z") {
         e.preventDefault();
@@ -525,7 +541,7 @@ export default function Studio() {
   const snapT = (t: number, e: { altKey: boolean }) => (snapOn && !e.altKey ? snap(t, project.bpm) : t);
 
   function onPointerDown(e: React.PointerEvent<HTMLCanvasElement>) {
-    if (e.button !== 0) return;
+    if (e.button !== 0 || resettingRef.current) return;
     const { x, y } = pointer(e);
     const hit = hitTest(project, view(), x, y);
     e.currentTarget.setPointerCapture(e.pointerId);
@@ -544,6 +560,7 @@ export default function Studio() {
   }
 
   function onPointerMove(e: React.PointerEvent<HTMLCanvasElement>) {
+    if (resettingRef.current) return;
     const { x, y } = pointer(e);
     const drag = dragRef.current;
     if (!drag) {
@@ -577,7 +594,7 @@ export default function Studio() {
     const preview = previewRef.current;
     dragRef.current = null;
     previewRef.current = null;
-    if (drag?.moved && preview) dispatch({ type: "commit", project: preview });
+    if (!resettingRef.current && drag?.moved && preview) dispatch({ type: "commit", project: preview });
   }
 
   const recording = mode === "recording";
@@ -601,13 +618,13 @@ export default function Studio() {
         </div>
 
         <div className="flex items-center gap-1.5">
-          <button onClick={() => (rolling ? void stop().then(() => seek(0)) : seek(0))} className={btnIdle} title="To start (Enter)">⏮</button>
-          <button onClick={() => (rolling ? void stop() : void play())} className={`${btn} w-16 ${rolling ? "bg-white text-black" : "bg-white/10 hover:bg-white/20"}`} title="Play / stop (Space)">
+          <button onClick={() => (rolling ? void stop().then(() => seek(0)) : seek(0))} disabled={resetting} className={btnIdle} title="To start (Enter)">⏮</button>
+          <button onClick={() => (rolling ? void stop() : void play())} disabled={resetting} className={`${btn} w-16 ${rolling ? "bg-white text-black" : "bg-white/10 hover:bg-white/20"}`} title="Play / stop (Space)">
             {rolling ? "■ Stop" : "▶ Play"}
           </button>
           <button
             onClick={() => (recording ? void stop() : void record())}
-            disabled={mode === "playing"}
+            disabled={mode === "playing" || resetting}
             className={`${btn} ${recording ? "bg-red-500 text-white animate-pulse" : "bg-white/10 hover:bg-red-500/40 text-red-300"}`}
             title="Record (R)"
           >
@@ -627,8 +644,9 @@ export default function Studio() {
               min={40}
               max={240}
               value={project.bpm}
-              disabled={rolling}
+              disabled={rolling || resetting}
               onChange={(e) => {
+                if (resettingRef.current) return;
                 const bpm = Math.round(Number(e.target.value));
                 if (bpm >= 40 && bpm <= 240) dispatch({ type: "edit", fn: (p) => ({ ...p, bpm }), key: "bpm" });
               }}
@@ -696,8 +714,8 @@ export default function Studio() {
         </div>
 
         <div className="flex flex-wrap items-center gap-1.5 ml-auto">
-          <button onClick={() => dispatch({ type: "undo" })} disabled={history.past.length === 0} className={btnIdle} title="Undo (⌘Z)">↶</button>
-          <button onClick={() => dispatch({ type: "redo" })} disabled={history.future.length === 0} className={btnIdle} title="Redo (⇧⌘Z)">↷</button>
+          <button onClick={() => dispatch({ type: "undo" })} disabled={resetting || history.past.length === 0} className={btnIdle} title="Undo (⌘Z)">↶</button>
+          <button onClick={() => dispatch({ type: "redo" })} disabled={resetting || history.future.length === 0} className={btnIdle} title="Redo (⇧⌘Z)">↷</button>
           <button onClick={() => fileRef.current?.click()} disabled={busy || recording} className={btnIdle}>Import audio</button>
           <input
             ref={fileRef}
@@ -741,7 +759,7 @@ export default function Studio() {
                 dispatch({ type: "edit", fn: (p) => addTrack(p, { ...makeTrack(p), id: track.id }) });
                 setArmedTrackId(track.id);
               }}
-              disabled={recording}
+              disabled={recording || resetting}
               className="text-[11px] font-mono text-zinc-400 hover:text-white disabled:opacity-40"
             >
               + track
@@ -756,7 +774,9 @@ export default function Studio() {
                   <input
                     key={`${track.id}:${track.name}`}
                     defaultValue={track.name}
+                    disabled={resetting}
                     onBlur={(e) => {
+                      if (resettingRef.current) return;
                       const name = e.target.value.trim();
                       if (name && name !== track.name) dispatch({ type: "edit", fn: (p) => updateTrack(p, track.id, { name }) });
                     }}
@@ -765,7 +785,7 @@ export default function Studio() {
                   />
                   <button
                     onClick={() => dispatch({ type: "edit", fn: (p) => removeTrack(p, track.id) })}
-                    disabled={recording}
+                    disabled={recording || resetting}
                     className="text-zinc-600 hover:text-red-300 text-sm px-1 disabled:opacity-40"
                     title="Delete track"
                   >
@@ -775,7 +795,7 @@ export default function Studio() {
                 <div className="flex items-center gap-1">
                   <button
                     onClick={() => setArmedTrackId(armed ? null : track.id)}
-                    disabled={recording}
+                    disabled={recording || resetting}
                     className={`w-6 h-5 rounded text-[10px] ${armed ? "bg-red-500 text-white" : "bg-white/10 text-red-300 hover:bg-red-500/30"}`}
                     title="Record on this track"
                   >
@@ -783,6 +803,7 @@ export default function Studio() {
                   </button>
                   <button
                     onClick={() => dispatch({ type: "edit", fn: (p) => updateTrack(p, track.id, { muted: !track.muted }) })}
+                    disabled={resetting}
                     className={`w-6 h-5 rounded text-[10px] font-mono ${track.muted ? "bg-amber-400 text-black" : "bg-white/10 text-zinc-300 hover:bg-white/20"}`}
                     title="Mute"
                   >
@@ -790,6 +811,7 @@ export default function Studio() {
                   </button>
                   <button
                     onClick={() => dispatch({ type: "edit", fn: (p) => updateTrack(p, track.id, { solo: !track.solo }) })}
+                    disabled={resetting}
                     className={`w-6 h-5 rounded text-[10px] font-mono ${track.solo ? "bg-sky-400 text-black" : "bg-white/10 text-zinc-300 hover:bg-white/20"}`}
                     title="Solo"
                   >
@@ -801,7 +823,9 @@ export default function Studio() {
                     max={1.5}
                     step={0.01}
                     value={track.volume}
+                    disabled={resetting}
                     onChange={(e) => {
+                      if (resettingRef.current) return;
                       const volume = Number(e.target.value);
                       dispatch({ type: "edit", fn: (p) => updateTrack(p, track.id, { volume }), key: `volume:${track.id}` });
                     }}

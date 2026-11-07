@@ -1,315 +1,188 @@
-# Security audit
+# Security and bloat audit
 
-Scope: the web app, dependency lockfile and MCP launch configuration, the
-local Fuzz bridge, and the two shared TouchDesigner projects. This is a
-source and local runtime review, not a penetration-test certification. First
-audited at `b7e52ba` (2026-09-17); later changes were reviewed as they landed.
+Reviewed 2026-11-04, based on `8dd6fc7`. Scope: the browser app, media and worker
+lifecycles, Studio persistence, Spotify authorization, dependencies and build
+configuration, the isolated vision experiment, local Fuzz/Light Maps helpers,
+and both shared TouchDesigner artifacts. This is a source and bounded runtime
+review, not a penetration-test certification.
+
+No confirmed high or medium exploitable security vulnerability was found in
+this pass. The concrete issues below affect local data integrity, audio behavior
+and resource use. This audit opened no camera, microphone or native TouchDesigner
+session. Spark configuration and provider settings were unchanged.
 
 ## Findings fixed
 
-| Finding | Impact | Fix |
+| Finding | Effect | Resolution |
 | --- | --- | --- |
-| Late camera/microphone permission grants outlived navigation or cancellation | Capture could remain active after the UI stopped using it | Cancel pending camera starts on unmount; stop superseded microphone streams and close partially created audio contexts (covered by `tests/media-lifecycle.test.cjs` and `tests/guitar-input.test.cjs`) |
-| Fuzz pairing code persisted in saved component storage | Sharing the project could disclose its local control credential | Save a blank startup value, clear runtime authentication before export, and generate a fresh code when opening the project |
-| TD saves retained camera IDs and recent audio samples | Binary project files could disclose device metadata and small capture fragments | Strip cached CHOP samples and device IDs before export; select the camera with a runtime expression |
-| Bare `npx` MCP launch could resolve/download a package outside the lockfile | Missing local dependencies could change the code being executed | Pin `touchdesigner-mcp-server` to exactly `2.0.0` and invoke its installed CLI through `node`; missing dependencies fail closed |
+| Studio restore deleted audio not referenced by an earlier project snapshot | Opening another tab during autosave could erase a new take before its clip metadata was saved | Restore uses one read-only transaction for project and referenced buffers. It neither scans every saved buffer nor deletes pending takes. Explicit New still clears saved data. |
+| Removed Studio tracks retained gain nodes and scheduled sources | Deleted tracks could keep sounding and repeated track replacement accumulated audio nodes | Reconcile live track IDs, stop only removed tracks' sources, disconnect their gains, and release completed sources. Surviving tracks keep playing. |
+| Transport, pending drags and autosave could act while New cleared the old project | Old playback or project state could survive reset | Gate transport and edits, invalidate drag previews, and suspend autosave for the complete reset lifetime. |
+| Audio device preference storage methods could throw | Blocked or full browser storage could prevent selecting or connecting an input | Treat preference reads and writes as optional; keep the selected input usable when persistence fails. |
 
-## Current design
+These fixes do not turn Studio into a collaborative editor. Multiple tabs can
+still overwrite the single saved project's metadata; use one editing tab.
+Unreferenced audio is deliberately retained until New or clearing site data,
+because another tab or an undo history may still need it.
 
-- **Bridge.** The Fuzz Web Server DAT listens on `127.0.0.1:9980` only and is
-  saved inactive; its startup callback checks the explicit loopback binding
-  before enabling it, and unsupported TouchDesigner versions leave it off. It
-  requires a version-1 `hello` with the pairing code, accepts only Fuzz
-  controls, song chord/hit events, transport and heartbeat, validates types
-  and ranges with an 8 KB limit, and never evaluates app-supplied code or
-  paths. It caps pending handshakes at 8, total clients at 16, and closes
-  unpaired clients after 5 seconds of wall-clock time. Malformed pre-authentication
-  messages close immediately. HTTP returns 404 with an empty body.
-- **Local media.** Fuzz shares images with the mapper over Syphon on the same
-  Mac, not network video. The Light Maps helper uses Apple Vision locally,
-  receives 256×144 frames at up to 15 Hz through process pipes, stores no raw
-  frames, makes no network requests, and its binary stays in the ignored
-  `lights/.build`. The pitch detector keeps at most 4096 samples in module
-  memory, not saved storage. Speaker monitoring defaults off and only routes
-  a selected Spark input to the built-in speakers.
-- **Studio recordings.** `/studio` keeps its project and recorded audio in the
-  browser's IndexedDB for this origin only; nothing is uploaded. Clearing
-  site data or **New** deletes it.
-- **Web app.** Fully client-side: no API routes, server actions or secrets.
-  Security headers are set in `next.config.ts` and checked by
-  `npm run smoke`.
+## Bloat removed
 
-## Shared artifacts
+- Removed unused manual fret-number calibration, inverse click mapping and
+  visual/audio candidate-agreement branches left behind by the continuous
+  tracker. Current neck geometry, observed fret lines, fingertip dots and fresh
+  heard-note validation remain. No absolute fret numbers are invented.
+- Delay OpenCV worker creation until a usable video frame exists. Camera denial
+  or an unavailable video no longer loads the 10,872,779-byte runtime. This is
+  the uncompressed asset size, not a claimed network-transfer measurement.
+- Transfer live tracking frames directly instead of copying every RGBA buffer.
+  Detection and seed frames still retain immutable snapshots. At 960×540 this
+  removes one 2,073,600-byte copy per live tracking request.
+- Studio restore fetches only distinct referenced buffers instead of loading
+  all saved audio. Removed tracks and completed sources now release resources.
+- Consolidated repeated historical audit text and corrected outdated README
+  instructions. Earlier receipts remain in Git history.
 
-Both files were expanded and inspected before commit: embedded source matches
-the repository, pairing storage is blank, authenticated clients are empty,
-`PITCH` diagnostics are neutral, `MASK` has no pixel cache, and no `.ts`
-sample caches, `.oldacbo` backups, device UUIDs, `/Users/` or temporary paths
-remain. The original artifacts reopened independently at 1280×720 without
-operator errors. The updated Fuzz artifact below was repacked and re-expanded
-with the installed CLI tools; it has not been reopened in native TouchDesigner.
+All direct app dependencies have current consumers. OpenCV, MediaPipe, Tone,
+the isolated vision experiment and the maintained lint compatibility patches
+were retained. No package was removed merely to reduce audit counts, and no
+advisory or useful lint rule was suppressed.
 
-| Artifact | Bytes | Operators | SHA-256 |
-| --- | ---: | ---: | --- |
-| `touchdesigner/fuzz/fuzz.toe` | 18,650 | 50 (36 at root, 14 in Light Maps) | `2573cf1e10039764c0003a2288c7036b9fabfaceefdc25af1630506f24c7eeae` |
-| `touchdesigner/projection_mapping/projection_mapping.toe` | 4,338 | 9 | `292628544caf83121b9862ce8a70a2ee4b8a8c593576bfbb0e0b985ed73f985e` |
+## Trust boundaries
 
-Safe export steps are in [the Fuzz README](../touchdesigner/fuzz/README.md#rebuild-or-export).
-TouchDesigner documents the [startup storage behavior](https://docs.derivative.ca/OP_Class)
-and the [expand/collapse workflow](https://docs.derivative.ca/Toecollapse).
+**Browser and media.** The app has no API routes, server actions, server-side
+credentials or camera-frame upload path. Camera images remain in transient
+browser/worker memory. MediaPipe runtime/model requests are fixed, versioned
+external downloads; they are separate from sending images. Studio project/audio
+stay in same-origin IndexedDB. Device and latency preferences stay in browser
+storage; Spotify tokens stay in memory, with a short-lived PKCE/state record in
+session storage during login. Spotify uses explicit read-only authorization,
+fixed HTTPS endpoints, state/redirect validation, request cancellation and no
+response-driven navigation.
 
-## Development dependency remediation (2026-11-01)
+Camera/microphone discovery, model initialization and source changes release
+late grants and obsolete resources. Hand tracking remains independent of neck
+tracking, with one GPU-to-CPU fallback and an explicit retry after terminal
+failure. Neck processing bounds frames to 960 pixels per dimension and 15 Hz,
+permits one request in flight, enforces deadlines and rejects stale generations,
+frame IDs and acquisition timestamps. Ordinary detection misses retry; lost
+tracking reacquires. Pausing or removing the camera cannot revive an old pose.
 
-The retained MCP `2.1.0` package is used by `.mcp.json`. Its dependencies were
-updated within their declared ranges; Zod remains narrowly overridden to
-`4.6.6`. Production packages and lint rules were not removed or downgraded.
+**Practice scoring.** Scores are local in-memory feedback. The engine bounds
+patterns, timing-window searches, visible notes and retained judgments. Camera
+landmarks cannot award points. Diagnostic tones/sweeps are canceled and disabled
+during runs; stale, foreign, pre-run or unavailable audio events cannot score.
+Scored play uses the exact input audio clock and stops on input loss, tab hiding,
+mode change, suspension or a stalled clock. Silent preview is explicitly
+unscored and uses its own visual clock. Transport closes only audio contexts it
+owns. Audio identifies pitch, not the physical string used to play that pitch.
 
-The former 15 moderate aggregate entries for minimatch GHSA-g3hv-75wg-m249 are
-resolved by the actual registry `minimatch@11.0.3`. Legacy consumers cannot use
-that version unchanged: callable default exports and regex-building APIs were
-removed. Instead, 16 call-site updates across five exact lint packages use the
-supported named exports and matcher objects. React, import, accessibility and
-ESLint configuration regressions exercise matching and nonmatching cases.
+**HTTP and workers.** CSP is enforced, not report-only. Frames, object embeds and
+inline event handlers are blocked. Static Next hydration still permits inline
+scripts, React styles permit inline styling, and Tone uses local blob scripts
+and workers. The page allows WASM compilation but not JavaScript eval. Only the
+exact OpenCV worker response permits JavaScript eval; its policy denies network
+connections, outside script origins and child workers. Security headers and
+private-path denial are checked by `npm run smoke`. Public assets contain only
+the two audio worklets and the fixed vision scripts/license; no recorded media
+or credentials are shipped there.
 
-`scripts/patch-lint-minimatch.cjs` checks each consumer's version, its resolved
-minimatch version, and every original or patched file hash before writing any
-changes. Unexpected or partial installations fail closed. Installation and
-normal npm lint/test/build/dev commands prepare the toolchain; direct ESLint
-checks preparation. A production-only install skips absent development tools.
-The patch manifest and [maintenance instructions](../security/lint-minimatch/README.md)
-must be reviewed when those dependencies change. No dependency is disguised as
-a new version, no useful lint rules are disabled, and no audit finding is suppressed.
+**Fuzz and native helpers.** The bridge is saved inactive and binds only
+`127.0.0.1:9980`; unsupported bindings fail closed. It requires a runtime pairing
+code, compares it in constant time, and accepts only versioned controls,
+chord/hit events, transport and heartbeat. Callback limits are 8 KB/message,
+8 pending handshakes, 16 clients and 5 seconds to authenticate. Malformed
+pre-authentication messages close immediately; HTTP exposes no state. The
+protocol cannot execute code, choose file paths or invoke shell commands.
 
-The exception gate is removed. CI fails on **any** production or development
-advisory. Registry results at the verification date do not guarantee harmless
-dependencies. No provider settings or deployment triggers were changed.
+Fuzz/Light Maps share images locally through Syphon. The Swift mask helper reads
+bounded frames through process pipes, stores no images and makes no network
+requests. Its caller uses fixed argv without a shell, keeps only the newest
+frame, rejects stale output, and terminates/joins obsolete workers. The compiled
+helper remains ignored. The isolated vision server is loopback-only, checks
+Host/Origin/method, serves a fixed allowlist and rejects symlink files; model and
+fixture downloads have pinned checksums. No test camera or inference model was
+opened during this audit.
 
-## Real-fretboard candidate review (2026-11-01)
+## Dependencies and build
 
-This pass covers the working-tree candidate based on `591f924`, including the
-new physical-fretboard mapper, detector, tracker, worker and bundled OpenCV,
-and the existing web routes, Studio storage, Spotify authorization, local
-vision spike, Fuzz bridge, dependency configuration and CI. It is a source,
-synthetic-runtime and localhost HTTP audit. No browser or physical device was
-controlled and no provider settings were changed. Publication uses the existing
-review branch; no merge or production deployment is part of this verification.
+Fresh registry audits report zero known findings in the main installation
+(509 packages) and isolated vision experiment (21 packages). The installed main
+tree validates; registry packages in both lockfiles have expected npm registry
+origins and integrity hashes. Pinned NumPy test requirements also pass pip-audit.
+These results describe known advisories at the audit time, not package safety
+certification.
 
-### Findings and remediation
+The MCP tool is pinned to `touchdesigner-mcp-server@2.1.0` and launched from the
+installed local CLI, never an unpinned `npx` download. OpenCV is exactly
+`4.12.0-release.1`; its runtime and license are copied from the locked package.
+The lint patch checks exact consumer versions and original/patched hashes,
+rejecting unexpected installations. Maintain it using the
+[compatibility instructions](../security/lint-minimatch/README.md). CI installs
+with scripts disabled, validates the tree, prepares the audited toolchain, and
+fails on every production or development advisory. Actions are pinned by commit;
+CI permissions are read-only and checkout does not retain credentials.
 
-| Severity | Finding | Resolution |
-| --- | --- | --- |
-| Medium | Studio could accept a microphone grant after navigation, retaining capture in a closed engine | Cancel obsolete device and engine initialization requests; stop late streams; release streams when graph attachment fails |
-| Low | A temporary device-label permission probe could keep capturing after leaving Guitar or Studio while device enumeration was pending | Add abortable device discovery, release its probe on cancellation, and stop late grants before further enumeration |
-| Medium | A pending Studio import could repopulate audio after **New** cleared the saved project | Invalidate obsolete project operations and guard persistence and UI completion against the current project lifetime |
-| Medium | The isolated vision spike could leave a microphone or camera active when setup failed | Own partial capture resources across all setup steps and release them on failure or cancellation; obsolete setup cannot tear down a newer source |
-| Low | ASCII segmentation retained SDK-owned mask memory after the callback returned | Copy the mask within the callback; clear it on stop, failure, missing results or unavailable video; reject late callbacks |
-| Low | The local Fuzz bridge retained unauthenticated clients without a cap or hello deadline | Limit pending/total connections to 8/16, expire hello after 5 seconds, and close malformed pre-authentication messages. One owned timer is canceled on pairing, disconnect, stop or export. Scheduler errors close pending clients; native close failures stop the listener. Source and sanitized `.toe` are synchronized |
-| Hardening | CSP only reported violations | Enforce the page policy and a separate policy for the exact OpenCV worker entry point; its required JavaScript evaluation permission does not extend to the page |
+## Shared TouchDesigner artifacts
 
-The fixes are exercised by focused lifecycle tests using deferred permission
-grants, setup failures and obsolete asynchronous completions. The low-severity
-mask defect is a data-lifetime/correctness issue; no native-code exploitation or
-frame disclosure was demonstrated.
+Both unchanged `.toe` files were expanded using the installed CLI, without
+opening native TouchDesigner. The expanded files contain no sample-cache `.ts`
+files, `.oldacbo` backups or symlinks. Storage was inspected with pickle opcode
+disassembly, never deserialized: runtime/startup pairing values are empty, client
+and pending maps are empty, and no object-construction opcodes or personal paths
+were found. Embedded callback source matches the checkout. The bridge is saved
+off with the expected loopback binding.
 
-### Fretboard privacy and trust boundaries
+| Artifact | Bytes | SHA-256 |
+| --- | ---: | --- |
+| `touchdesigner/fuzz/fuzz.toe` | 18,650 | `2573cf1e10039764c0003a2288c7036b9fabfaceefdc25af1630506f24c7eeae` |
+| `touchdesigner/projection_mapping/projection_mapping.toe` | 4,338 | `292628544caf83121b9862ce8a70a2ee4b8a8c593576bfbb0e0b985ed73f985e` |
 
-- Camera images remain in transient browser memory and a dedicated worker.
-  The new code has no upload, file-save, analytics or storage path for pixels.
-  Existing MediaPipe runtime/model downloads remain external requests; that is
-  separate from sending camera images.
-- The OpenCV dependency is exactly `4.12.0-release.1`, pinned by lockfile
-  integrity. A local build step copies its runtime and license to `/vision/`;
-  the worker imports only fixed same-origin scripts. Frames enter OpenCV as
-  bounded raw RGBA arrays, not uploaded image files. OpenCV 4.12 includes the
-  fix for [CVE-2025-53644](https://securitylab.github.com/advisories/GHSL-2025-057_OpenCV/);
-  this one advisory check is not a proof that the runtime has no defects.
-- Capture is capped at 960 pixels per dimension and 15 samples per second,
-  with one request in flight. The worker independently rejects invalid
-  dimensions, oversized frames and mismatched buffer sizes. Initialization and
-  processing deadlines terminate a stuck worker.
-- Request generations, frame IDs and acquisition timestamps prevent obsolete
-  results from restoring an old pose. Unmount terminates the worker. Lost or
-  stale tracking hides finger-position claims; a frozen calibration image is
-  never accepted as a live pose. Audio/visual agreement remains explicitly
-  insufficient to prove string contact.
+Follow the [safe export procedure](../touchdesigner/fuzz/README.md#rebuild-or-export)
+before sharing a newly saved artifact; ordinary saves may retain capture caches.
+Opening a native project can start its own camera/audio independently of the web
+app. No native runtime or projector-alignment result is claimed by this audit.
 
-### Verification receipts
+## Verification
 
-- On Node 24.22.1, all **213** app tests and **32** isolated vision-spike
-  tests passed with no skips, including the actual pinned OpenCV WASM and
-  deferred media/storage regressions. Full ESLint and the production build
-  (including TypeScript) passed. These are automated local checks, not a real
-  camera, Spark, OAuth or browser validation session.
-- Fresh npm registry audits: production **0** known vulnerabilities; isolated
-  vision spike **0**; full app installation **0**. The fail-closed policy rejects
-  every advisory, including the previously excepted one. `npm ls --all` passed.
-- `pip-audit` checked the pinned Fuzz test requirement (`numpy==2.5.4`): **0**
-  known vulnerabilities. All **67** Fuzz Python regressions and all **4** local
-  braces security regressions passed.
-- Gitleaks 8.30.1 found no secret matches in the candidate's **170 non-ignored files**
-  or the **50 prior local Git commits**. Reports were redacted. This does
-  not certify the absence of secrets or remove historical binary media caches.
-- The expanded HTTP smoke check covers all seven pages and six worklet/vision
-  scripts. It verifies response headers, MIME and revalidation behavior, and
-  SHA-256 equality with local scripts. Six private-project path probes return
-  404. These are localhost responses, not production evidence.
-- The isolated vision server passed local probes for host/origin restrictions,
-  supported methods, traversal rejection and private-path denial. No actual
-  TouchDesigner service was opened or exercised.
-- The updated Fuzz `.toe` was re-expanded: only the bridge callback text,
-  empty pending-client storage and explicit inactive listener changed. All six
-  embedded source files match the checkout, all 50 operators remain, and no
-  media cache, private path, device UUID or saved pairing/authentication state
-  was introduced. The projection artifact is unchanged. Neither was reopened
-  natively during this pass.
-- CI now includes the isolated vision geometry and media-lifecycle Node tests;
-  those checks do not launch a browser or open capture devices.
+Release preparation revalidated on 2026-11-07: application and Fuzz tests,
+isolated vision/braces tests, lint, production build, dependency audits and the
+candidate secret scan all passed again. Local servers remained stopped; the
+localhost HTTP and native-artifact receipts below are from the November 4 audit.
 
-## Continuous tracking and Studio review (2026-11-03)
-
-This pass reviews the candidate based on `83d66dc`: the whole browser app,
-MediaPipe and OpenCV integration, Studio recording/storage, Spotify authorization,
-TouchDesigner protocol and local Python/Swift helpers, dependencies, public assets,
-Next security headers, and CI. The current GitHub destination was verified as the
-public `FwazB/visual_webcam_lab` repository, with `main` as its default branch.
-The user requested publication to main; existing Vercel Git integration deploys
-that branch. Provider access settings were not changed.
-
-### Findings and decisions
-
-No confirmed high or medium exploitable vulnerability was found in this pass.
-The review checked media ownership, late permissions and asynchronous completions,
-untrusted text and URLs, OAuth state and token handling, worker and bridge input
-bounds, lifecycle cancellation, local helper process boundaries, dependency
-provenance, and public-file exposure. This is a source and bounded runtime audit,
-not a penetration-test certification or a claim that vulnerabilities cannot exist.
-
-| Severity | Finding | Decision |
-| --- | --- | --- |
-| Low | Studio has no explicit decoded-audio, recording-duration or whole-project mix memory budget | Retained as a documented local availability limit. Very large user-selected audio, prolonged recording, or a large same-origin saved project can exhaust tab memory. No unauthenticated remote trigger was found; no destructive memory-exhaustion test was performed. Recording limits require a considered product choice rather than an arbitrary silent truncation. |
-| Documentation | Workflow instructions still described the obsolete minimatch advisory exception | Updated the document to match the current zero-advisory CI policy. |
-
-### Continuous media safeguards
-
-Fretboard acquisition starts when a live camera is available. Ordinary misses
-retry after a 1.5-second cooldown; tracking loss allows three seconds to recover
-the same reference before requesting a new detection. Only one worker operation
-is in flight, frame size and processing deadlines remain bounded, and terminal
-worker failures require an explicit retry. Pause, camera changes and unmount
-invalidate obsolete operations. Immutable detection snapshots are internal worker
-references; the displayed video and fresh hand dots remain live during searches.
-
-MediaPipe detects hands independently of neck acquisition. GPU initialization or
-inference failure triggers one CPU fallback. If that also fails, a visible retry
-control restarts hand tracking without restarting the camera. Old detectors and
-late initialization results are released; old landmarks are cleared on failure,
-source loss and unmount. The same fixed runtime/model destinations remain in use.
-Camera frames stay in transient local memory and are not uploaded or committed.
-
-Studio exposes actual per-channel incoming levels and separates suspended,
-muted and disconnected states. Audio activation occurs within the user gesture;
-transport awaits it and rejects obsolete starts. Latency overrides are keyed by
-input device, and missing input blocks preserve the recording timeline. No Spark
-firmware, presets or internal settings were changed.
-
-### Verification receipts
-
-- All **267** application tests passed. Full ESLint, TypeScript through the
-  production build, and all **19** localhost smoke checks passed. The checks
-  include script hash equality, security headers and private-path denial.
-- Browser replay using the actual MediaPipe model and OpenCV worker verified
-  automatic acquisition with no setup click, moving neck and hand overlays,
-  neck-only pause with hands still visible, and automatic reacquisition after
-  hiding/restoring the recorded guitar. GPU/CPU failure and late cleanup paths
-  were exercised by controlled hook tests, not forced hardware faults.
-  Saved footage stays in private temporary storage and is excluded from Git;
-  the replay does not open a camera or microphone. Detected fret coverage remains
-  sensitive to faint, blurred or occluded evidence and browser pixel processing.
-- Fresh main npm audit: **0** known findings across **509** dependencies; isolated
-  vision spike: **0** across **21** dependencies. The installed tree validates,
-  lockfile registry sources and integrity fields were checked, and the
-  hash-checked lint preparation made no unexpected changes.
-- Pinned NumPy `pip-audit`: **0** known findings. All **67** Fuzz Python tests,
-  **32** isolated vision tests, **18** dependency/audit regressions and **4** braces
-  hardening tests passed. The Swift helper compiled into temporary storage and
-  handled six malformed/EOF pipe cases without camera/model inference.
-- Gitleaks **8.30.1**, with full redaction: **0** findings in the candidate's
-  **173** tracked/intended source files and **53** reachable Git commits. Ignored
-  files, private recordings and temporary artifacts were excluded. Pattern scans
-  do not certify the absence of every secret or identify every binary media cache.
-- Source inspection confirmed fixed loopback binding, constant-time pairing,
-  bounded clients/handshakes/messages, command allowlists and no app-driven shell,
-  arbitrary file path, Python evaluation or operator execution in the local bridge.
-- Public assets and private-path probes were reviewed. Existing `.toe` artifacts
-  were unchanged; they were not fully decoded again or opened in native
-  TouchDesigner during this pass. Earlier artifact review remains historical
-  evidence, not a new native hardware validation.
-
-## Live play-along review (2026-11-03)
-
-This incremental pass covers the candidate based on `18bad0c`: the note highway,
-scoring engine, session and transport lifecycle, input availability, diagnostic
-audio, and their integration with existing camera, song and visual-output modes.
-The broader application audit above remains the baseline; dependencies, public
-workers, Spotify, Studio storage, native helpers and bridge protocol are unchanged.
-
-No new exploitable high or medium security issue was identified. Scores remain
-local, in-memory practice feedback; there is no competitive leaderboard or trusted
-server-side score. Camera landmarks cannot award points. The added code introduces
-no upload, recording persistence, analytics, credential or permission path.
-
-The review fixed several correctness and resource-lifetime problems:
-
-- Diagnostic tones and pending sweeps are canceled at their source before a run,
-  and injection stays disabled until the run ends. Old worklet callbacks cannot
-  score after input replacement. Muted, disabled or ended tracks cannot score.
-- A run checks both input identity and the original audio clock, rejects pre-run
-  onsets, and stops on input loss, mode changes, page hiding or cancellation.
-  Pending starts cannot revive after navigation or an input change.
-- Scored playback uses the input's audio clock. Silent preview is an explicit,
-  unscored visual mode and cannot accumulate hits or misses. It does not request
-  capture or create audio. Audio transport stops on a paused or stalled clock;
-  wall-clock time never substitutes for scored audio timing.
-- Transport owns and closes only its standalone playback context, never the
-  pitch hook's borrowed context. Superseded starts and late resume completions
-  cannot restart playback. Switching to Play along disables hidden song backing.
-- Pattern validation, timing-window searches, retained judgments and visible-note
-  generation are bounded. Long idle intervals are counted arithmetically instead
-  of generating unbounded note histories.
-
-Verification includes controlled onset/timing tests, actual hook lifecycle tests,
-renderer tests, private saved-video browser replay, and desktop/mobile layout
-checks. The replay opens neither camera nor microphone and stays outside Git.
-All **323** application tests, full ESLint, the production TypeScript build and
-all **19** localhost HTTP smoke checks passed. The replay verified continuous travel after count-in, six readable string
-lanes, independent neck/hand tracking, restart and mode-switch behavior, and
-unscored preview on desktop and mobile layouts.
-Real guitar scoring latency and playing accuracy have not been tested with the
-new game; earlier Spark capture/playback evidence does not establish those results.
-The input identifies pitch, not the physical string used to play that pitch.
-
-Fresh npm audit reports **0** known findings across **509** dependencies. A fully
-redacted Gitleaks scan found **0** matches in **182** tracked/intended candidate
-files. This is an incremental source/runtime review, not a security certification.
-The existing local Studio memory-budget limitation remains documented above.
+- All 334 application tests, full ESLint, the production TypeScript build and
+  all 19 localhost HTTP smoke checks passed. The checks cover deferred storage
+  failures/completion, cross-tab take preservation, removed-track cleanup, reset
+  races, unavailable preference storage and lazy worker/transfer ownership.
+- All 32 isolated vision tests and four braces-hardening regressions passed.
+- 67 Fuzz Python regressions and 23 TypeScript bridge/client regressions passed.
+  The Swift helper compiled into temporary storage and passed six malformed/EOF
+  pipe cases without camera/model inference.
+- Fresh npm and pinned-requirement pip audits returned zero known findings.
+- Fully redacted Gitleaks scans found zero matches in all 183 tracked/intended
+  candidate files and 55 reachable prior Git commits.
+- The prior release had saved-video desktop/mobile browser replay coverage for
+  live neck/hands and note travel. This audit uses controlled lifecycle/data
+  tests and HTTP checks; no new browser, physical guitar or hardware validation
+  is claimed. Real-guitar game latency and ambiguous/occluded fret coverage remain
+  unverified limits.
 
 ## Remaining limits
 
-- Production CSP is enforced. Static Next hydration still requires inline scripts and
-  React styling requires inline styles; inline event-handler attributes and
-  frames are blocked. Tone uses local blob scripts/workers. JavaScript eval is
-  allowed only in the OpenCV worker, whose policy denies fetch/WebSocket
-  connections, external script origins and child workers. Browser enforcement
-  and physical media paths still need a real session; HTTP and VM checks do
-  not substitute for it.
-- Spark USB capture and playback were verified in this task, including user-confirmed
-  playback of a recorded guitar passage. Physical projector alignment remains
-  unverified in this pass.
-- Opening the TD project starts local camera/audio capture independently of
-  the browser; closing it releases capture. Do not overwrite a shared `.toe`
-  with an ordinary working save: sample caches need stripping again.
-- Historical Git revisions may still contain older prototype camera IDs and
-  short audio caches. No history rewrite was performed. The former Fuzz
-  credential is rejected by the restarted bridge.
-- Loopback pairing limits remote control; it does not isolate this program
-  from other software already running as the same local user.
+- Studio has no decoded-audio, recording-duration or whole-project mix memory
+  budget. Very large imports, prolonged recording or a large saved project can
+  exhaust tab memory. No unauthenticated remote trigger was identified, and no
+  destructive memory-exhaustion test was performed.
+- CSP's static inline-script allowance remains a defense-in-depth limit. HTTP
+  assertions do not prove enforcement in every browser or replace physical media
+  testing. Default-output audio clocks can stall in some environments; the game
+  now stops with an error instead of silently advancing scored time.
+- Application callback caps do not prove native HTTP/WebSocket allocation or
+  packet-rate limits before callbacks execute. Loopback pairing does not isolate
+  the app from other software running as the same local user.
+- Earlier Git revisions may contain prototype camera IDs or short media caches;
+  no history rewrite was performed. Pattern-based secret scans do not identify
+  every possible secret or binary media cache.
+
+This document replaces repeated chronological audit sections with the current
+state. The [prior audit and verification history](https://github.com/FwazB/visual_webcam_lab/blob/8dd6fc762984bea54d1b91f46fbdb4561a5ade2b/docs/security-audit.md)
+retains the earlier media-lifecycle, pairing-storage, CSP and dependency repairs.

@@ -57,18 +57,23 @@ export async function saveBuffer(buffer: StoredBuffer): Promise<void> {
   await done(tx);
 }
 
-/** Load the saved project and the audio it uses; unused audio is deleted. */
+/**
+ * Restore one consistent snapshot without changing another tab's pending takes.
+ * Unreferenced audio remains until explicit New clears the saved project.
+ */
 export async function loadStudio(): Promise<{ project: Project; buffers: StoredBuffer[] } | null> {
-  const database = await db();
-  const project = await result(database.transaction("project").objectStore("project").get(PROJECT_KEY)) as Project | undefined;
-  if (!project) return null;
-  const tx = database.transaction("buffers", "readwrite");
-  const store = tx.objectStore("buffers");
-  const all = await result(store.getAll()) as StoredBuffer[];
-  const used = new Set(project.clips.map((c) => c.bufferId));
-  for (const buffer of all) if (!used.has(buffer.id)) store.delete(buffer.id);
-  await done(tx);
-  return { project, buffers: all.filter((b) => used.has(b.id)) };
+  const tx = (await db()).transaction(["project", "buffers"], "readonly");
+  const completed = done(tx);
+  const restored = (async () => {
+    const project = await result(tx.objectStore("project").get(PROJECT_KEY)) as Project | undefined;
+    if (!project) return null;
+    const store = tx.objectStore("buffers");
+    const ids = new Set(project.clips.map((clip) => clip.bufferId));
+    const loaded = await Promise.all([...ids].map(id => result(store.get(id)) as Promise<StoredBuffer | undefined>));
+    return { project, buffers: loaded.filter((buffer): buffer is StoredBuffer => buffer !== undefined) };
+  })();
+  const [, saved] = await Promise.all([completed, restored]);
+  return saved;
 }
 
 export async function clearStudio(): Promise<void> {

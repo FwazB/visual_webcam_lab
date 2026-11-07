@@ -5,14 +5,25 @@ const { StudioEngine } = require("../src/lib/studio/engine");
 const { emptyProject } = require("../src/lib/studio/project");
 
 function environment(t, options = {}) {
-  const events = [], messages = [];
-  const node = () => ({ gain: { value: 1 }, connect() { return this; }, disconnect() {} });
+  const events = [], messages = [], gains = [], sources = [];
+  const node = () => ({ gain: { value: 1, setTargetAtTime(value) { this.value = value; } },
+    connections: [], disconnected: 0,
+    connect(target) { this.connections.push(target); return this; },
+    disconnect() { this.disconnected++; this.connections = []; },
+  });
   const ctx = {
     state: options.state ?? "running", currentTime: 0, sampleRate: 48000, destination: {},
     audioWorklet: { async addModule() { events.push("module"); } },
     resume() { events.push("resume"); return options.resume ? options.resume(ctx) : Promise.resolve(); },
     close() { events.push("close"); this.state = "closed"; return Promise.resolve(); },
-    createGain: node,
+    createGain() { const gain = node(); gains.push(gain); return gain; },
+    createBufferSource() {
+      const source = { ...node(), onended: null, stopped: 0, starts: [],
+        start(...args) { this.starts.push(args); }, stop() { this.stopped++; },
+      };
+      sources.push(source);
+      return source;
+    },
     createMediaStreamSource() { events.push("source"); return node(); },
   };
   const recorder = { disconnect() { events.push("disconnect-recorder"); }, port: {
@@ -30,7 +41,7 @@ function environment(t, options = {}) {
       stop() { this.stopped++; this.readyState = "ended"; }, getSettings: () => ({}) };
     return { track, getAudioTracks: () => [track], getTracks: () => [track] };
   };
-  return { ctx, recorder, events, messages, stream,
+  return { ctx, recorder, events, messages, gains, sources, stream,
     emit(data) { recorder.port.onmessage?.({ data }); },
     generation: () => messages.filter((message) => message.type === "reset-meter").at(-1).generation,
   };
@@ -123,5 +134,56 @@ test("an already-ended input is rejected and released", async (t) => {
   assert.throws(() => engine.attachInput(stream), /disconnected/);
   assert.equal(stream.track.stopped, 1);
   assert.equal(engine.hasInput, false);
+  engine.close();
+});
+
+test("deleting a playing track stops only its sources and releases its gain", async t => {
+  const run = environment(t);
+  const engine = await StudioEngine.create();
+  const tracks = ["removed", "retained"].map(id => ({ id, volume: 1, muted: false, solo: false }));
+  const project = { ...emptyProject(), tracks, clips: tracks.map(track => ({
+    id: track.id, trackId: track.id, bufferId: "audio", start: 0, offset: 0, duration: 4,
+  })) };
+  engine.play(0, project, new Map([["audio", {}]]), { bpm: 96, beatsPerBar: 4, metronome: false });
+  const [removed, retained] = run.sources;
+  const removedGain = removed.connections[0], retainedGain = retained.connections[0];
+  engine.syncTracks({ ...project, tracks: [tracks[1]], clips: [project.clips[1]] });
+  assert.equal(engine.mode, "playing");
+  assert.equal(removed.stopped, 1);
+  assert.equal(removed.disconnected, 1);
+  assert.equal(removed.onended, null);
+  assert.equal(removedGain.disconnected, 1);
+  assert.equal(retained.stopped, 0);
+  assert.equal(retained.disconnected, 0);
+  assert.equal(retainedGain.disconnected, 0);
+  assert.equal(engine.sources.size, 1);
+  assert.equal(engine.trackGains.size, 1);
+  engine.close();
+  assert.equal(retained.stopped, 1);
+  assert.equal(retainedGain.disconnected, 1);
+  assert.equal(engine.trackGains.size, 0);
+});
+
+test("repeated track edits retain only current gains and ended sources release themselves", async t => {
+  const run = environment(t);
+  const engine = await StudioEngine.create();
+  for (let i = 0; i < 200; i++) {
+    engine.syncTracks({ ...emptyProject(), tracks: [{ id: String(i), volume: 1, muted: false, solo: false }] });
+    assert.equal(engine.trackGains.size, 1);
+  }
+  assert.equal(run.gains.filter(gain => gain.disconnected === 0).length, 3, "master, click output and one current track");
+  const project = { ...emptyProject(), tracks: [{ id: "last", volume: 1, muted: false, solo: false }],
+    clips: [{ id: "clip", trackId: "last", bufferId: "audio", start: 0, offset: 0, duration: 1 }] };
+  engine.play(0, project, new Map([["audio", {}]]), { bpm: 96, beatsPerBar: 4, metronome: false });
+  const source = run.sources[0];
+  const ended = source.onended;
+  ended();
+  assert.equal(source.disconnected, 1);
+  assert.equal(source.onended, null);
+  assert.equal(engine.sources.size, 0);
+  ended();
+  assert.equal(source.disconnected, 1, "a queued duplicate end does not touch the source again");
+  engine.syncTracks(emptyProject());
+  assert.equal(engine.trackGains.size, 0);
   engine.close();
 });

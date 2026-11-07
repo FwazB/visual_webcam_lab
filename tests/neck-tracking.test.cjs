@@ -20,9 +20,9 @@ const { outputText } = ts.transpileModule(source, { compilerOptions: { module: t
 
 function setup(options = {}) {
   let now = 1000, nextId = 0, stateCursor = 0, refCursor = 0, rendered = false, updates = 0;
-  const states = [], refs = [], effects = [], timers = new Map(), frames = new Map(), workers = [], canvases = [];
+  const states = [], refs = [], effects = [], timers = new Map(), frames = new Map(), workers = [], canvases = [], readbacks = [];
   const tracks = [{ readyState: "live", enabled: true, muted: false }];
-  const video = { srcObject: { getVideoTracks: () => tracks }, readyState: 2, paused: false, ended: false,
+  const video = { srcObject: { getVideoTracks: () => tracks }, readyState: options.cameraReady === false ? 0 : 2, paused: false, ended: false,
     videoWidth: 1920, videoHeight: 1080, currentTime: 1 };
   const videoRef = { current: video }, handsRef = { current: [] }, handsUpdatedAtRef = { current: -Infinity };
   const react = {
@@ -48,7 +48,11 @@ function setup(options = {}) {
     assert.equal(tag, "canvas");
     const canvas = { width: 0, height: 0, draws: [], getContext: () => ({
       drawImage(...args) { canvas.draws.push(args); now += options.drawDelay ?? 0; },
-      getImageData: () => ({ data: new Uint8ClampedArray(canvas.width * canvas.height * 4).fill(Math.round(video.currentTime) % 255) }),
+      getImageData() {
+        const data = new Uint8ClampedArray(canvas.width * canvas.height * 4).fill(Math.round(video.currentTime) % 255);
+        readbacks.push(data);
+        return { data };
+      },
     }) };
     canvases.push(canvas);
     return canvas;
@@ -83,7 +87,7 @@ function setup(options = {}) {
     pending.forEach(([, fn]) => fn(now));
   }
   return {
-    get hook() { hook = render(); return hook; }, video, videoRef, tracks, handsRef, handsUpdatedAtRef, workers, canvases, timers, frames,
+    get hook() { hook = render(); return hook; }, video, videoRef, tracks, handsRef, handsUpdatedAtRef, workers, canvases, timers, frames, readbacks,
     get now() { return now; }, get updates() { return updates; },
     advance, tick, cleanup,
     ready() { workers.at(-1).emit({ type: "ready" }); },
@@ -664,5 +668,91 @@ test("a timeout after pause cannot resume acquisition or replace the paused UI",
   assert.equal(run.workers[0].terminated, true);
   run.hook.resume();
   assert.equal(run.workers.length, 2);
+  run.cleanup();
+});
+
+test("OpenCV waits for a usable camera and starts automatic acquisition once video arrives", () => {
+  const run = setup({ cameraReady: false });
+  assert.equal(run.workers.length, 0, "denied or pending camera permission does not load the vision runtime");
+  assert.equal(run.timers.size, 0, "worker startup cannot time out before a camera exists");
+  run.tick(30000, 1);
+  assert.equal(run.workers.length, 0);
+  assert.equal(run.readbacks.length, 0);
+  assert.equal(run.hook.error, null);
+  run.video.readyState = 2;
+  run.tick(1, 1.1);
+  assert.equal(run.workers.length, 1);
+  assert.equal(run.operations().length, 0);
+  run.ready();
+  run.tick(1, 1.2);
+  assert.equal(run.operations().at(-1).type, "detect");
+  assert.equal(run.hook.status, "detecting");
+  run.cleanup();
+});
+
+test("pausing before camera startup defers the worker until an explicit resume", () => {
+  const run = setup({ cameraReady: false });
+  run.hook.pause();
+  run.video.readyState = 2;
+  run.tick(30000, 2);
+  assert.equal(run.workers.length, 0);
+  assert.equal(run.hook.status, "paused");
+  run.hook.resume();
+  assert.equal(run.workers.length, 1);
+  run.ready();
+  run.tick(1, 2.1);
+  assert.equal(run.operations().at(-1).type, "detect");
+  run.cleanup();
+});
+
+test("retry after worker failure waits for a replacement camera without reloading in a loop", () => {
+  const run = setup();
+  run.ready();
+  const oldWorker = run.workers[0];
+  oldWorker.onerror();
+  run.video.readyState = 0;
+  run.hook.resume();
+  run.tick(30000, 2);
+  assert.equal(run.workers.length, 1);
+  assert.equal(run.hook.error, null);
+  run.video.readyState = 2;
+  run.tick(1, 2.1);
+  assert.equal(run.workers.length, 2);
+  oldWorker.emit({ type: "ready" });
+  assert.equal(run.operations().length, 0);
+  run.ready();
+  run.tick(1, 2.2);
+  assert.equal(run.operations().at(-1).type, "detect");
+  run.cleanup();
+});
+
+test("live frame buffers transfer ownership while detection and seed snapshots remain intact", () => {
+  const run = setup();
+  run.ready();
+  run.tick();
+  const detect = run.operations().at(-1);
+  const snapshot = run.hook.snapshotRef.current;
+  const snapshotPixels = run.readbacks[0];
+  const bytes = 960 * 540 * 4;
+  assert.equal(snapshot.rgba, snapshotPixels);
+  assert.equal(snapshotPixels.byteLength, bytes);
+  assert.equal(detect.rgba.byteLength, bytes);
+  run.reply(detect, { type: "detected", proposal });
+  run.hook.seed(points);
+  const seed = run.operations().at(-1);
+  assert.equal(seed.type, "seed");
+  assert.equal(snapshotPixels.byteLength, bytes, "seeding transfers a copy of its immutable reference");
+  assert.equal(seed.rgba.byteLength, bytes);
+  run.video.currentTime = 2;
+  run.reply(seed, { type: "seeded", status: "tracking", points });
+  const frame = run.operations().at(-1);
+  assert.equal(frame.type, "frame");
+  assert.equal(run.readbacks.at(-1).byteLength, 0, "a disposable live readback transfers directly instead of allocating a copy");
+  assert.equal(frame.rgba.byteLength, bytes);
+  assert.equal(new Uint8ClampedArray(frame.rgba)[0], 2);
+  assert.equal(snapshotPixels.byteLength, bytes);
+  assert.equal(snapshotPixels[0], 1, "later live transfers cannot detach or mutate the original reference");
+  run.reply(frame, { type: "pose", status: "tracking", points });
+  assert.deepEqual(run.hook.poseRef.current.points, points);
   run.cleanup();
 });

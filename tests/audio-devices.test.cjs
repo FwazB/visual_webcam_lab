@@ -19,12 +19,46 @@ function stream() {
   let stops = 0;
   return { getTracks: () => [{ stop: () => { stops++; } }], stops: () => stops };
 }
-function load(mediaDevices) {
+function loadModule(mediaDevices, browserWindow) {
   const loaded = { exports: {} };
-  vm.runInNewContext(source, { exports: loaded.exports, module: loaded, DOMException, navigator: { mediaDevices } });
-  return loaded.exports.listAudioInputs;
+  vm.runInNewContext(source, { exports: loaded.exports, module: loaded, DOMException, navigator: { mediaDevices }, window: browserWindow });
+  return loaded.exports;
 }
+const load = mediaDevices => loadModule(mediaDevices).listAudioInputs;
 const isAbort = (error) => error.name === "AbortError";
+
+test("blocked preference storage does not block input selection or switching", () => {
+  const denied = () => { throw new DOMException("Storage blocked", "SecurityError"); };
+  for (const browserWindow of [
+    { get localStorage() { return denied(); } },
+    { localStorage: { getItem: denied, setItem: denied, removeItem: denied } },
+  ]) {
+    const devices = loadModule({}, browserWindow);
+    assert.equal(devices.pickPreferredDevice([spark]), spark);
+    assert.equal(devices.pickPreferredDevice([{ deviceId: "other", label: "USB audio" }]), null);
+    assert.doesNotThrow(() => devices.storeDevice(spark));
+    assert.doesNotThrow(() => devices.storeDevice(null));
+  }
+});
+
+test("a full preference store keeps the current choice usable and normal preferences still work", () => {
+  const data = new Map();
+  let full = false;
+  const devices = loadModule({}, { localStorage: {
+    getItem: key => data.get(key) ?? null,
+    setItem(key, value) { if (full) throw new DOMException("Full", "QuotaExceededError"); data.set(key, value); },
+    removeItem: key => data.delete(key),
+  } });
+  const other = { deviceId: "other", label: "USB audio" };
+  devices.storeDevice(other);
+  assert.equal(devices.pickPreferredDevice([spark, other]), other);
+  const changedId = { ...other, deviceId: "new-id" };
+  assert.equal(devices.pickPreferredDevice([spark, changedId]), changedId);
+  full = true;
+  assert.doesNotThrow(() => devices.storeDevice(spark));
+  devices.storeDevice(null);
+  assert.equal(devices.pickPreferredDevice([spark, other]), spark);
+});
 
 test("normal discovery releases its permission probe and returns only audio inputs", async () => {
   const probe = stream();

@@ -19,9 +19,3 @@ export function cameraViewport(width: number, height: number, videoWidth: number
 export function imageToCamera(view: CameraViewport, point: NeckPoint): NeckPoint {
   return { x: view.left + (1 - point.x) * view.width, y: view.top + point.y * view.height };
 }
-
-export function cameraToImage(view: CameraViewport, point: NeckPoint): NeckPoint | null {
-  const x = 1 - (point.x - view.left) / view.width;
-  const y = (point.y - view.top) / view.height;
-  return Number.isFinite(x) && Number.isFinite(y) && x >= 0 && x <= 1 && y >= 0 && y <= 1 ? { x, y } : null;
-}

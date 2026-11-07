@@ -14,20 +14,29 @@ function storage(): Storage | null {
 }
 
 function getStoredDevice(): { id: string | null; label: string | null } {
-  const s = storage();
-  return { id: s?.getItem(ID_KEY) ?? null, label: s?.getItem(LABEL_KEY) ?? null };
+  try {
+    const s = storage();
+    return { id: s?.getItem(ID_KEY) ?? null, label: s?.getItem(LABEL_KEY) ?? null };
+  } catch {
+    return { id: null, label: null };
+  }
 }
 
 export function storeDevice(device: MediaDeviceInfo | null): void {
-  const s = storage();
-  if (!s) return;
-  if (!device) {
-    s.removeItem(ID_KEY);
-    s.removeItem(LABEL_KEY);
-    return;
+  try {
+    const s = storage();
+    if (!s) return;
+    if (!device) {
+      s.removeItem(ID_KEY);
+      s.removeItem(LABEL_KEY);
+      return;
+    }
+    s.setItem(ID_KEY, device.deviceId);
+    s.setItem(LABEL_KEY, device.label);
+  } catch {
+    // Remembering a preference is optional; blocked/full storage must not
+    // prevent connecting the input selected for this session.
   }
-  s.setItem(ID_KEY, device.deviceId);
-  s.setItem(LABEL_KEY, device.label);
 }
 
 /**
