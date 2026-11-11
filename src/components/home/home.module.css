@@ -571,7 +571,10 @@
 
 @media (max-width: 420px) {
   .heroNote {
-    bottom: -52px;
+    bottom: -64px;
+  }
+  .things {
+    padding-top: 108px;
   }
 }
 
