@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
 import type { HandDetection } from "@/hooks/useHandTracking";
 import type { GuitarPitch } from "@/hooks/useGuitarPitch";
-import { useNeckTracking, type NeckCameraIdentity } from "@/hooks/useNeckTracking";
+import { useNeckTracking, type NeckCameraIdentity, type NeckProposal } from "@/hooks/useNeckTracking";
 import type { InstrumentProfile } from "@/lib/instrument/profile";
 import { midiToName } from "@/lib/instrument/pitch";
 import { cameraViewport, imageToCamera } from "@/lib/instrument/cameraCoordinates";
@@ -54,6 +54,17 @@ function validPoint(point: { x: number; y: number; z?: number } | undefined): po
     && (point.z === undefined || Number.isFinite(point.z));
 }
 
+function referenceFromProposal(proposal: NeckProposal, camera: CameraIdentity): Reference {
+  const geometry = createNeckGeometry(proposal.points);
+  const frets = proposal.frets.map(({ a, b }) => {
+    const first = imageToNeck(geometry, a), last = imageToNeck(geometry, b);
+    if (!first || !last) throw new Error("The detected frets did not fit the neck. Waiting for a fresh detection.");
+    return { a: first, b: last };
+  });
+  if (frets.length < 2) throw new Error("Show several visible fret lines and try again.");
+  return { camera, frets };
+}
+
 /** Live hand landmarks plus observed neck geometry; no invented fret identities. */
 export default function RealFretboardOverlay({
   compact = false, profile, videoRef, handsRef, handsUpdatedAtRef, targetRef, pitch, ready, trackingLoading, trackingError, onRetryHandTracking,
@@ -61,19 +72,27 @@ export default function RealFretboardOverlay({
   const surfaceRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [reference, setReference] = useState<Reference | null>(null);
+  const referenceRef = useRef<Reference | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [readout, setReadout] = useState(initialReadout);
   const neck = useNeckTracking(videoRef, handsRef, handsUpdatedAtRef);
   const acceptedProposalRef = useRef<typeof neck.proposal>(null);
+  const acceptedReplacementRef = useRef<typeof neck.replacementRef.current>(null);
   const observedCameraRef = useRef<CameraIdentity | null>(null);
   const cameraWasLiveRef = useRef(false);
   const blockedHandsThroughRef = useRef(-Infinity);
+
+  function updateReference(next: Reference | null) {
+    referenceRef.current = next;
+    setReference(next);
+  }
 
   function toggleTracking() {
     if (neck.status === "paused" || neck.status === "error") neck.resume();
     else neck.pause();
     acceptedProposalRef.current = null;
-    setReference(null);
+    acceptedReplacementRef.current = null;
+    updateReference(null);
     setError(null);
   }
 
@@ -86,19 +105,13 @@ export default function RealFretboardOverlay({
       if (!ready || !cameraAvailable(camera) || !sameCamera(camera, neck.snapshotRef.current?.camera ?? null)) {
         throw new Error("The camera changed or stopped. Waiting for a fresh image.");
       }
-      const geometry = createNeckGeometry(proposal.points);
-      const frets = proposal.frets.map(({ a, b }) => {
-        const first = imageToNeck(geometry, a), last = imageToNeck(geometry, b);
-        if (!first || !last) throw new Error("The detected frets did not fit the neck. Try finding it again.");
-        return { a: first, b: last };
-      });
-      if (frets.length < 2) throw new Error("Show several visible fret lines and try again.");
-      setReference({ camera: camera!, frets });
+      updateReference(referenceFromProposal(proposal, camera!));
+      acceptedReplacementRef.current = null;
       setError(null);
       neck.seed(proposal.points);
     } catch (cause) {
       neck.reset();
-      setReference(null);
+      updateReference(null);
       setError(cause instanceof Error ? cause.message : "The fretboard could not be tracked. Try finding it again.");
     }
   }, [neck, neck.proposal, ready, videoRef]);
@@ -118,16 +131,33 @@ export default function RealFretboardOverlay({
       if (sourceChanged || (cameraWasLiveRef.current && !live)) blockedHandsThroughRef.current = handsUpdatedAtRef.current;
       observedCameraRef.current = camera;
       cameraWasLiveRef.current = live;
-      const changed = !!reference && (!live || !sameCamera(reference.camera, camera));
+      let drawingReference = referenceRef.current;
+      const replacement = neck.replacementRef.current;
+      if (replacement && replacement !== acceptedReplacementRef.current) {
+        acceptedReplacementRef.current = replacement;
+        if (live && sameCamera(replacement.camera, camera)) {
+          try {
+            // The worker has already seeded this wider reference. Adopt its
+            // frets before drawing its pose, without another seed or stale grid.
+            drawingReference = referenceFromProposal(replacement.proposal, replacement.camera);
+            updateReference(drawingReference);
+          } catch {
+            neck.reset();
+            drawingReference = null;
+            updateReference(null);
+          }
+        }
+      }
+      const changed = !!drawingReference && (!live || !sameCamera(drawingReference.camera, camera));
       if (changed) {
         blockedHandsThroughRef.current = handsUpdatedAtRef.current;
-        setReference(null);
+        updateReference(null);
         setError(null);
       }
       const pose = neck.poseRef.current;
       const poseAge = pose ? clock - pose.capturedAt : Infinity;
       let geometry: NeckGeometry | null = null;
-      if (reference && !changed && neck.status === "tracking" && pose && poseAge >= 0 && poseAge <= 250) {
+      if (drawingReference && !changed && neck.status === "tracking" && pose && poseAge >= 0 && poseAge <= 250) {
         try { geometry = createNeckGeometry(pose.points); } catch { /* An invalid pose never draws a grid. */ }
       }
       // Inference timestamps use performance.now(), which can be later than RAF's timestamp.
@@ -183,12 +213,32 @@ export default function RealFretboardOverlay({
         ctx!.fillStyle = color; ctx!.strokeStyle = "#000000"; ctx!.lineWidth = 1.5;
         ctx!.beginPath(); ctx!.arc(p.x, p.y, radius, 0, Math.PI * 2); ctx!.fill(); ctx!.stroke();
       }
-      if (geometry && reference) {
+      if (geometry && drawingReference) {
+        // Keep the supported boundary readable against both dark wood and
+        // reflections. This spans the observed section, not an assumed neck length.
+        const boundary = [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 1, y: 1 }, { x: 0, y: 1 }]
+          .map(point => neckToImage(geometry, point));
+        if (boundary.every(point => point !== null)) {
+          ctx.beginPath();
+          boundary.forEach((point, index) => {
+            const p = screen(point!);
+            if (index === 0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y);
+          });
+          ctx.closePath();
+          ctx.fillStyle = "rgba(250,204,21,0.06)";
+          ctx.fill();
+          ctx.strokeStyle = "rgba(0,0,0,0.65)"; ctx.lineWidth = 5; ctx.stroke();
+          ctx.strokeStyle = "rgba(250,204,21,0.95)"; ctx.lineWidth = 2; ctx.stroke();
+        }
         for (let string = 0; string < profile.stringCount; string++) {
           const y = string / (profile.stringCount - 1);
           line(neckToImage(geometry, { x: 0, y }), neckToImage(geometry, { x: 1, y }), "rgba(255,255,255,0.75)", 1.5);
         }
-        for (const fret of reference.frets) line(neckToImage(geometry, fret.a), neckToImage(geometry, fret.b), "rgba(250,204,21,0.8)", 1.5);
+        for (const fret of drawingReference.frets) {
+          const a = neckToImage(geometry, fret.a), b = neckToImage(geometry, fret.b);
+          line(a, b, "rgba(0,0,0,0.55)", 3.5);
+          line(a, b, "rgba(250,204,21,0.8)", 1.5);
+        }
       }
       hands.forEach((hand, handIndex) => {
         for (const [a, b] of HAND_CONNECTIONS) {
@@ -220,7 +270,7 @@ export default function RealFretboardOverlay({
           : neck.status === "error" ? "Neck tracking stopped. Hand tracking and audio remain independent."
             : !ready ? "Waiting for the camera. Neck detection starts automatically."
               : neck.status === "loading" ? "Loading neck tracking · your camera stays live."
-                : reference && neck.status === "tracking" ? `Following the neck · ${reference.frets.length} observed fret lines`
+                : reference && neck.status === "tracking" ? `Tracking the visible section · ${reference.frets.length} observed fret lines`
                   : "Looking for the fretboard automatically. Show a clear stretch of neck with visible frets."}</p>
         {(error || neck.error) && <p role="alert" className="mt-2 rounded-md border border-amber-300/20 bg-amber-300/10 px-3 py-2 text-sm text-amber-200">{neck.error ?? error}</p>}
       </div>
@@ -235,11 +285,13 @@ export default function RealFretboardOverlay({
         <p className="mt-1"><span className="text-zinc-400">Heard</span> · {readout.heard}</p>
         {compact ? <details className="mt-2 text-xs text-zinc-400"><summary className="cursor-pointer">Tracking details</summary>
           <p role="status" className="mt-1">{trackingError ?? readout.detail}</p>
-          <p className="mt-1">White strings · yellow frets · purple hands · cyan fingertips over the neck.</p>
+          <p className="mt-1">Yellow outline and observed frets · white string guides · purple hands · cyan fingertips over the neck.</p>
+          <p className="mt-1">The outline can grow as more frets become visible.</p>
           <p className="mt-1">Fret numbers and string pitches are not inferred from the camera.</p>
         </details> : <>
           <p role="status" className="mt-2 text-xs text-zinc-300">{trackingError ?? readout.detail}</p>
-          <p className="mt-1 text-[11px] text-zinc-400">White = {profile.stringCount}-string guide · yellow = observed frets · purple = hand landmarks · cyan = fingertips over the neck</p>
+          <p className="mt-1 text-[11px] text-zinc-400">White = {profile.stringCount}-string guide · yellow = outline and observed frets · purple = hand landmarks · cyan = fingertips over the neck</p>
+          <p className="mt-1 text-[11px] text-zinc-400">The outline can grow as more frets become visible.</p>
           <p className="mt-1 text-[11px] text-zinc-500">Fret numbers and string pitches are not inferred from this camera outline.</p>
         </>}
       </div>

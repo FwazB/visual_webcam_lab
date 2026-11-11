@@ -64,7 +64,9 @@
       this.matcher = null;
       try {
         // The neck is narrow: default ORB's 31px border discards useful detail.
-        this.orb = new cv.ORB(1200, 1.2, 8, 8, 0, 2, cv.ORB_HARRIS_SCORE, 21, 10);
+        // Keep a bounded allowance for faint upper-neck detail when dense
+        // lower frets compete for features; spatial confidence stays unchanged.
+        this.orb = new cv.ORB(1800, 1.2, 8, 8, 0, 2, cv.ORB_HARRIS_SCORE, 21, 10);
         this.matcher = new cv.BFMatcher(cv.NORM_HAMMING, false);
       } catch (error) {
         this.orb?.delete();
@@ -189,10 +191,21 @@
       // than the narrow neck. Search near the last verified pose first, while
       // continuing to match against the immutable original descriptors.
       if (this.lastPose) {
-        const xs = this.lastPose.map((p) => p.x), ys = this.lastPose.map((p) => p.y);
-        const left = Math.max(0, Math.min(...xs) - 0.06), right = Math.min(1, Math.max(...xs) + 0.06);
-        const top = Math.max(0, Math.min(...ys) - 0.06), bottom = Math.min(1, Math.max(...ys) + 0.06);
-        const region = [{ x: left, y: top }, { x: left, y: bottom }, { x: right, y: top }, { x: right, y: bottom }];
+        // A diagonal neck's axis-aligned box also covers the player's face and
+        // room. Keep the local feature budget in a padded neck-shaped corridor.
+        const pixels = this.lastPose.map((p) => ({ x: p.x * width, y: p.y * height }));
+        const along = { x: (pixels[2].x + pixels[3].x - pixels[0].x - pixels[1].x) / 2,
+          y: (pixels[2].y + pixels[3].y - pixels[0].y - pixels[1].y) / 2 };
+        const across = { x: (pixels[1].x + pixels[3].x - pixels[0].x - pixels[2].x) / 2,
+          y: (pixels[1].y + pixels[3].y - pixels[0].y - pixels[2].y) / 2 };
+        const length = Math.hypot(along.x, along.y), span = Math.hypot(across.x, across.y);
+        const padding = Math.max(16, Math.min(width, height) * 0.06);
+        const region = pixels.map((point, i) => ({
+          x: Math.max(0, Math.min(1, (point.x + (i < 2 ? -1 : 1) * along.x / length * padding
+            + (i % 2 ? 1 : -1) * across.x / span * padding) / width)),
+          y: Math.max(0, Math.min(1, (point.y + (i < 2 ? -1 : 1) * along.y / length * padding
+            + (i % 2 ? 1 : -1) * across.y / span * padding) / height)),
+        }));
         const previouslyLost = this.wasLost;
         const nearby = this.matchFrame(rgba, width, height, exclusions, region);
         if (nearby.status !== "lost") {

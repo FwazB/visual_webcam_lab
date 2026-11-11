@@ -231,3 +231,32 @@ test("all native allocations and nested match vectors release on success, loss, 
   } finally { tracker.dispose(); }
   assert.equal(counted.active.size, 0);
 });
+
+test("a long diagonal neck tracks inside a textured room without spending its local feature budget on the background", () => {
+  const base = makeNeckImage({ width: 960, height: 540 });
+  const points = [{ x: 185, y: 38 }, { x: 150, y: 90 }, { x: 790, y: 440 }, { x: 755, y: 492 }];
+  function room(image) {
+    const rgba = new Uint8ClampedArray(image.rgba);
+    const a = { x: (image.points[0].x + image.points[1].x) / 2, y: (image.points[0].y + image.points[1].y) / 2 };
+    const b = { x: (image.points[2].x + image.points[3].x) / 2, y: (image.points[2].y + image.points[3].y) / 2 };
+    const dx = b.x - a.x, dy = b.y - a.y, length = Math.hypot(dx, dy);
+    let state = 17539;
+    for (let y = 0; y < image.height; y += 4) for (let x = 0; x < image.width; x += 4) {
+      state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
+      const color = Math.floor(state / 2 ** 32 * 255);
+      for (let oy = 0; oy < 4 && y + oy < image.height; oy++) for (let ox = 0; ox < 4 && x + ox < image.width; ox++) {
+        if (Math.abs((x + ox - a.x) * dy - (y + oy - a.y) * dx) / length < 47) continue;
+        rgba.set([color, color, color, 255], ((y + oy) * image.width + x + ox) * 4);
+      }
+    }
+    return { ...image, rgba };
+  }
+  const reference = room(warpImage(cv, base, points));
+  const next = room(warpImage(cv, base, points.map(point => ({ x: point.x + 8, y: point.y - 5 }))));
+  const hand = [{ x: .36, y: .29, width: .13, height: .25 }];
+  const tracker = new NeckTracker(cv);
+  try {
+    seed(tracker, reference, hand);
+    nearCorners(tracker.update(next.rgba, next.width, next.height, hand), next, 3);
+  } finally { tracker.dispose(); }
+});

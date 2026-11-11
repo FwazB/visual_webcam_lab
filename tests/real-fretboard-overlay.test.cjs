@@ -48,7 +48,7 @@ function setup({ cameraAvailable = true, profile = GUITAR_STANDARD, fretCount = 
     setTransform() {},
     clearRect() { marks.length = 0; lines.length = 0; labels.length = 0; snapshotDraws = 0; },
     measureText: (value) => ({ width: value.length * 7 }),
-    beginPath() { pathPoints = []; }, moveTo(x, y) { pathPoints.push({ x, y }); }, lineTo(x, y) { pathPoints.push({ x, y }); },
+    beginPath() { pathPoints = []; }, closePath() {}, moveTo(x, y) { pathPoints.push({ x, y }); }, lineTo(x, y) { pathPoints.push({ x, y }); },
     stroke() { if (pathPoints.length === 2) lines.push({ points: [...pathPoints], color: this.strokeStyle }); }, fill() {},
     strokeText() {}, fillText(value) { labels.push(value); },
     arc(x, y, radius) { marks.push({ x, y, radius, color: this.fillStyle }); },
@@ -71,7 +71,7 @@ function setup({ cameraAvailable = true, profile = GUITAR_STANDARD, fretCount = 
   let seedPoints = null;
   let automaticPose = true;
   const neck = {
-    poseRef: { current: null }, snapshotRef: { current: null },
+    poseRef: { current: null }, snapshotRef: { current: null }, replacementRef: { current: null },
     status: "idle", error: null, proposal: null,
     freeze() {
       this.reset();
@@ -86,7 +86,7 @@ function setup({ cameraAvailable = true, profile = GUITAR_STANDARD, fretCount = 
       this.status = "proposal";
     },
     seed(points) { seedCount++; seedPoints = points; this.snapshotRef.current = null; this.proposal = null; this.status = "searching"; },
-    reset() { this.poseRef.current = null; this.snapshotRef.current = null; seedPoints = null; this.proposal = null; this.status = "idle"; },
+    reset() { this.poseRef.current = null; this.snapshotRef.current = null; this.replacementRef.current = null; seedPoints = null; this.proposal = null; this.status = "idle"; },
     pause() { this.reset(); this.status = "paused"; },
     resume() { this.reset(); this.error = null; },
   };
@@ -164,7 +164,7 @@ function setup({ cameraAvailable = true, profile = GUITAR_STANDARD, fretCount = 
       render();
       flush();
     },
-    frame(time, performanceTime = time) {
+    frame(time, performanceTime = time, flushUpdates = true) {
       now = performanceTime;
       if (automaticPose && seedPoints) {
         neck.poseRef.current = { points: seedPoints, capturedAt: now, mediaTime: video.currentTime };
@@ -174,7 +174,7 @@ function setup({ cameraAvailable = true, profile = GUITAR_STANDARD, fretCount = 
       const callbacks = [...scheduled.values()];
       scheduled.clear();
       callbacks.forEach((callback) => callback(time));
-      flush();
+      if (flushUpdates) flush();
     },
     hear(midi, at) {
       props.pitch.frameRef.current = {
@@ -203,6 +203,74 @@ function find(run) {
 }
 const stringLines = run => run.lines.filter(line => line.color === "rgba(255,255,255,0.75)");
 const fretLines = run => run.lines.filter(line => line.color === "rgba(250,204,21,0.8)");
+
+function expandedReference(run) {
+  const points = [{ x: .1, y: .3 }, { x: .1, y: .7 }, { x: .9, y: .3 }, { x: .9, y: .7 }];
+  return {
+    proposal: { points, wireCount: 5,
+      frets: [0, .15, .4, .7, 1].map(t => ({ a: { x: .1 + .8 * t, y: .3 }, b: { x: .1 + .8 * t, y: .7 } })) },
+    camera: { video: run.video, source: run.video.srcObject, track: run.video.srcObject.getVideoTracks()[0],
+      width: run.video.videoWidth, height: run.video.videoHeight },
+  };
+}
+
+test("a wider tracked reference adopts its observed frets before drawing the new pose without reseeding", () => {
+  const run = setup();
+  find(run);
+  run.frame(100);
+  const replacement = expandedReference(run);
+  run.neck.replacementRef.current = replacement;
+  run.trackPose(replacement.proposal.points, 150);
+  run.frame(150);
+  assert.deepEqual(fretLines(run).map(line => Math.round(line.points[0].x)), [900, 780, 580, 340, 100]);
+  assert.match(run.text, /5 observed fret lines/);
+  assert.equal(run.seedCount, 1, "worker already seeded the expanded reference");
+  run.frame(200);
+  assert.deepEqual(fretLines(run).map(line => Math.round(line.points[0].x)), [900, 780, 580, 340, 100]);
+  run.cleanup();
+});
+
+test("a slow coverage refresh updates reference metadata but waits for a fresh pose to draw", () => {
+  const run = setup();
+  find(run);
+  run.frame(100);
+  const replacement = expandedReference(run);
+  run.neck.replacementRef.current = replacement;
+  run.trackPose(null, 150);
+  run.frame(500);
+  assert.equal(fretLines(run).length, 0);
+  run.trackPose(replacement.proposal.points, 550);
+  run.frame(550);
+  assert.deepEqual(fretLines(run).map(line => Math.round(line.points[0].x)), [900, 780, 580, 340, 100]);
+  run.cleanup();
+});
+
+test("a deferred React render cannot put the old fret set onto the expanded pose", () => {
+  const run = setup();
+  find(run);
+  run.frame(100);
+  const replacement = expandedReference(run);
+  run.neck.replacementRef.current = replacement;
+  run.trackPose(replacement.proposal.points, 150);
+  run.frame(150, 150, false);
+  run.frame(200);
+  assert.deepEqual(fretLines(run).map(line => Math.round(line.points[0].x)), [900, 780, 580, 340, 100]);
+  run.cleanup();
+});
+
+test("coverage metadata from a previous camera cannot establish a new neck reference", () => {
+  const run = setup();
+  find(run);
+  run.frame(100);
+  const replacement = expandedReference(run);
+  run.video.srcObject = sourceWithTrack();
+  run.neck.replacementRef.current = replacement;
+  run.trackPose(replacement.proposal.points, 150);
+  run.frame(150);
+  assert.equal(fretLines(run).length, 0);
+  assert.equal(run.seedCount, 1);
+  run.cleanup();
+});
 
 test("the heard note remains independent without a decoded camera image", () => {
   const run = setup({ cameraAvailable: false });

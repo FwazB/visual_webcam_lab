@@ -178,7 +178,8 @@
         if (axes.every((angle) => angleDistance(angle, line.angle) > PI / 45)) axes.push(line.angle);
         if (axes.length === 10) break;
       }
-      const lines = [], pixels = gray.data;
+      let lines = [];
+      const pixels = gray.data;
       for (const angle of axes) {
         const ax = Math.cos(angle), ay = Math.sin(angle), transverse = (angle + PI / 2) % PI;
         ridge.data.fill(0);
@@ -196,7 +197,10 @@
           const b = { x: values[i * 4 + 2], y: values[i * 4 + 3] };
           const length = Math.hypot(b.x - a.x, b.y - a.y);
           const foundAngle = (Math.atan2(b.y - a.y, b.x - a.x) + PI) % PI;
-          if (length < 18 || length > diagonal * 0.14 || angleDistance(foundAngle, transverse) > PI / 30) continue;
+          // Perspective does not preserve right angles. A diagonal neck can
+          // have visible frets more than six degrees from the apparent normal.
+          // The later cadence, rail-fit and string checks establish the neck.
+          if (length < 18 || length > diagonal * 0.14 || angleDistance(foundAngle, transverse) > PI / 12) continue;
           const dx = (b.x - a.x) / length, dy = (b.y - a.y) / length;
           // Hough can stop midway across a fret. Follow its visible ridge to
           // the actual endpoint; reaching the image edge means it is cropped.
@@ -225,6 +229,34 @@
         }
       }
 
+      // Repeated Hough detections of one physical ridge can have different
+      // overhanging endpoints. Merge them before ordering wires, rather than
+      // allowing a duplicate to become a tiny extra fret gap.
+      const clusters = [];
+      for (const line of lines) {
+        const cluster = clusters.find(({ representative: other }) => {
+          if (angleDistance(line.angle, other.angle) > PI / 36) return false;
+          const direction = { x: Math.cos(other.angle), y: Math.sin(other.angle) };
+          const delta = difference(line.center, other.center);
+          return Math.abs(cross(direction, delta)) < 3.2
+            && Math.abs(dot(direction, delta)) < Math.min(line.length, other.length) * 0.4;
+        });
+        if (cluster) cluster.members.push(line);
+        else clusters.push({ representative: line, members: [line] });
+      }
+      lines = clusters.map(({ representative, members }) => {
+        const direction = { x: Math.cos(representative.angle), y: Math.sin(representative.angle) };
+        const normal = { x: -direction.y, y: direction.x };
+        const offsets = members.map((line) => dot(line.center, normal));
+        const starts = members.map((line) => Math.min(dot(line.a, direction), dot(line.b, direction)));
+        const ends = members.map((line) => Math.max(dot(line.a, direction), dot(line.b, direction)));
+        const n = median(offsets), start = median(starts), end = median(ends);
+        const a = { x: direction.x * start + normal.x * n, y: direction.y * start + normal.y * n };
+        const b = { x: direction.x * end + normal.x * n, y: direction.y * end + normal.y * n };
+        return { a, b, length: end - start, angle: representative.angle,
+          center: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 } };
+      });
+
       function fit(points) {
         const meanT = points.reduce((sum, p) => sum + p.t, 0) / points.length;
         const meanN = points.reduce((sum, p) => sum + p.n, 0) / points.length;
@@ -237,57 +269,69 @@
       }
 
       function runs(wires) {
-        const found = [];
+        const found = new Map();
         for (const ordered of [wires, wires.slice().reverse()]) {
           for (let i = 0; i < ordered.length - 5; i++) {
             for (let j = i + 1; j < Math.min(ordered.length - 4, i + 4); j++) {
               for (let k = j + 1; k < Math.min(ordered.length - 3, j + 4); k++) {
                 const firstGap = Math.abs(ordered[j].t - ordered[i].t);
                 const secondGap = Math.abs(ordered[k].t - ordered[j].t);
-                let ratio = secondGap / firstGap;
-                if (firstGap < 7 || ratio < 0.82 || ratio > 0.99) continue;
-                const run = [ordered[i], ordered[j], ordered[k]];
-                let gap = secondGap, at = k, missing = 0, estimates = 1;
-                let pendingStart = -1, confirmations = 0;
-                for (let next = k + 1; next < ordered.length; next++) {
-                  const observed = Math.abs(ordered[next].t - ordered[at].t), expected = gap * ratio;
-                  const tolerance = Math.max(1.8, expected * 0.12);
-                  if (observed < expected - tolerance) continue;
-                  if (observed > expected + tolerance) {
-                    // A hand may hide up to two wires. The next visible wire
-                    // must fit the summed shrinking spacing, then two further
-                    // observed wires must confirm the cadence. Hidden positions
-                    // never become output segments.
-                    if (pendingStart >= 0 || missing >= 2) break;
-                    let skipped = 0, predicted = expected;
-                    for (let extra = 1; extra <= 2 - missing; extra++) {
-                      predicted += gap * ratio ** (extra + 1);
-                      if (Math.abs(observed - predicted) <= Math.max(2.2, predicted * 0.08)) { skipped = extra; break; }
+                const observedRatio = secondGap / firstGap;
+                if (firstGap < 7 || observedRatio < 0.82 || observedRatio > 1.06) continue;
+                // The first three pixel positions are noisy. Also try the
+                // equal-temperament spacing as a seed, then adapt it to the
+                // observed perspective. No predicted fret is ever emitted.
+                for (const initialRatio of [observedRatio, 2 ** (-1 / 12)]) {
+                  let ratio = initialRatio;
+                  const run = [ordered[i], ordered[j], ordered[k]];
+                  let gap = secondGap, at = k, missing = 0, estimates = 1;
+                  let pendingStart = -1, confirmations = 0;
+                  const fittedGaps = [firstGap, secondGap];
+                  while (at < ordered.length - 1) {
+                    let match = null, predicted = 0;
+                    // Prefer the next actual wire before considering a hand-sized
+                    // gap. Ignore unrelated ridges instead of ending the run at
+                    // the first outlier. Every accepted bridge needs a separate
+                    // three-wire cadence on its far side.
+                    const maxSteps = pendingStart >= 0 ? 1 : 6 - missing;
+                    for (let steps = 1; steps <= maxSteps && !match; steps++) {
+                      predicted += gap * ratio ** steps;
+                      const tolerance = steps === 1 ? Math.max(1.8, predicted * 0.12) : Math.max(2.2, predicted * 0.06);
+                      let error = Infinity;
+                      for (let next = at + 1; next < ordered.length; next++) {
+                        const observed = Math.abs(ordered[next].t - ordered[at].t);
+                        if (observed > predicted + tolerance) break;
+                        if (steps === 1 && (observed / gap < 0.78 || observed / gap > 1.08)) continue;
+                        const difference = Math.abs(observed - predicted);
+                        if (difference <= tolerance && difference < error) {
+                          match = { next, observed, steps, predicted }; error = difference;
+                        }
+                      }
                     }
-                    if (!skipped) break;
-                    pendingStart = run.length;
-                    confirmations = 0;
-                    missing += skipped;
+                    if (!match) break;
+                    const { next, observed, steps } = match;
+                    if (steps > 1) {
+                      pendingStart = run.length; confirmations = 0; missing += steps - 1;
+                      gap = gap * ratio ** steps * observed / match.predicted;
+                    } else {
+                      const localRatio = observed / gap;
+                      gap = observed;
+                      ratio = (ratio * estimates + localRatio) / ++estimates;
+                      if (pendingStart >= 0 && ++confirmations >= 2) pendingStart = -1;
+                    }
+                    fittedGaps.push(gap);
                     run.push(ordered[next]); at = next;
-                    gap = gap * ratio ** (skipped + 1) * observed / predicted;
-                    continue;
                   }
-                  const localRatio = observed / gap;
-                  if (localRatio < 0.78 || localRatio > 1.08) continue;
-                  run.push(ordered[next]); gap = observed; at = next;
-                  ratio = (ratio * estimates + localRatio) / ++estimates;
-                  if (pendingStart >= 0 && ++confirmations >= 2) pendingStart = -1;
+                  if (pendingStart >= 0) { run.length = pendingStart; fittedGaps.length = pendingStart - 1; }
+                  if (run.length < 6) continue;
+                  const contraction = (fittedGaps.at(-1) + fittedGaps.at(-2)) / (fittedGaps[0] + fittedGaps[1]);
+                  if (contraction <= 0.90 && contraction >= 0.30) found.set(run.map((wire) => wire.t).join(","), run);
                 }
-                if (pendingStart >= 0) run.length = pendingStart;
-                if (run.length < 6) continue;
-                const gaps = run.slice(1).map((p, n) => Math.abs(p.t - run[n].t));
-                const contraction = (gaps.at(-1) + gaps.at(-2)) / (gaps[0] + gaps[1]);
-                if (contraction <= 0.90 && contraction >= 0.30) found.push(run);
               }
             }
           }
         }
-        return found.sort((a, b) => b.length - a.length).slice(0, 12);
+        return Array.from(found.values()).sort((a, b) => b.length - a.length).slice(0, 12);
       }
 
       // Transverse fret endpoints describe the wood edges, not string centers.
@@ -331,10 +375,12 @@
           const angle = seed.angle - PI / 2 + adjustment;
           const axis = { x: Math.cos(angle), y: Math.sin(angle) }, normal = { x: -axis.y, y: axis.x };
           const centerN = dot(seed.center, normal), centerT = dot(seed.center, axis);
-          const family = lines.filter((line) => angleDistance(line.angle, seed.angle) < PI / 24
+          // Keep both visible sides of a hand in the same search family. The
+          // fitted rails still have to agree across the complete observed run.
+          const family = lines.filter((line) => angleDistance(line.angle, seed.angle) < PI / 18
             && line.length > seed.length * 0.58 && line.length < seed.length * 1.65
-            && Math.abs(dot(line.center, normal) - centerN) < seed.length * 0.30
-            && Math.abs(dot(line.center, axis) - centerT) < seed.length * 8);
+            && Math.abs(dot(line.center, normal) - centerN) < seed.length * 0.60
+            && Math.abs(dot(line.center, axis) - centerT) < seed.length * 14);
           if (family.length < 6 || family.length > 100) continue;
           const supports = family.map((line) => ({
             t: dot(line.center, axis),

@@ -29,6 +29,8 @@ export interface NeckProposal {
   /** Observed wire segments in sensor coordinates, from the first end to the last. */
   frets: { a: NeckPoint; b: NeckPoint }[];
 }
+/** Atomically replaced worker reference, in the coordinates of its own seed frame. */
+export interface NeckReferenceReplacement { proposal: NeckProposal; camera: NeckCameraIdentity }
 
 interface Controls { freeze(): boolean; find(): void; seed(points: NeckPoint[]): void; reset(): void; pause(): void; resume(): void }
 interface Source {
@@ -44,6 +46,8 @@ interface Operation {
   epoch: number;
   frame: NeckSnapshot;
   points?: NeckPoint[];
+  wireCount?: number;
+  refresh?: boolean;
 }
 interface Flight extends Operation { frameId: number }
 
@@ -51,6 +55,7 @@ const FRESH_MS = 250;
 const FRAME_INTERVAL_MS = 1000 / 15;
 const SEARCH_INTERVAL_MS = 1500;
 const REACQUIRE_MS = 3000;
+const COVERAGE_INTERVAL_MS = 5000;
 
 function pointFrom(value: unknown): NeckPoint | null {
   if (!value || typeof value !== "object") return null;
@@ -106,6 +111,7 @@ export function useNeckTracking(
 ) {
   const poseRef = useRef<NeckPose | null>(null);
   const snapshotRef = useRef<NeckSnapshot | null>(null);
+  const replacementRef = useRef<NeckReferenceReplacement | null>(null);
   const controlsRef = useRef<Controls | null>(null);
   const [status, setStatus] = useState<NeckTrackingStatus>("loading");
   const [error, setError] = useState<string | null>(null);
@@ -124,6 +130,8 @@ export function useNeckTracking(
     let nextSearchAt = 0;
     let lastSearchMediaTime = -Infinity;
     let lostSince: number | null = null;
+    let nextCoverageAt = Infinity;
+    let detectedProposal: NeckProposal | null = null;
     let pending: Operation | null = null;
     let flight: Flight | null = null;
     let source: Source | null = null;
@@ -152,6 +160,9 @@ export function useNeckTracking(
       lastSampleAt = -Infinity;
       clearPose();
       snapshotRef.current = null;
+      replacementRef.current = null;
+      detectedProposal = null;
+      nextCoverageAt = Infinity;
       setProposal(null);
       if (ready && worker) worker.postMessage({ type: "reset", epoch });
       // An obsolete request still owns the worker until its reply, so new frames never queue behind it.
@@ -163,6 +174,7 @@ export function useNeckTracking(
       awaitingProposal = false;
       clearPose();
       snapshotRef.current = null;
+      replacementRef.current = null;
       nextSearchAt = performance.now() + SEARCH_INTERVAL_MS;
       setProposal(null);
       setError(enabled ? message : null);
@@ -245,7 +257,7 @@ export function useNeckTracking(
 
     function send(operation: Operation) {
       if (disposed || !worker || !ready || flight || operation.epoch !== epoch) return;
-      const { frame, type, points } = operation;
+      const { frame, type, points, wireCount, refresh } = operation;
       const id = ++frameId;
       // Reference snapshots survive detection and seeding; disposable live frames transfer ownership.
       const rgba = type === "frame" ? frame.rgba.buffer as ArrayBuffer : frame.rgba.slice().buffer;
@@ -255,7 +267,7 @@ export function useNeckTracking(
       }, 5000);
       try {
         worker.postMessage({ type, epoch, frameId: id, capturedAt: frame.capturedAt, mediaTime: frame.mediaTime,
-          width: frame.width, height: frame.height, rgba, points, exclusions: frameExclusions.get(frame) ?? [] }, [rgba]);
+          width: frame.width, height: frame.height, rgba, points, wireCount, refresh, exclusions: frameExclusions.get(frame) ?? [] }, [rgba]);
       } catch {
         fail("Fretboard tracking could not receive the camera frame. Retry neck tracking.", true);
       }
@@ -277,7 +289,9 @@ export function useNeckTracking(
         if (!frame) return;
         lastSampleAt = frame.capturedAt;
         lastMediaTime = frame.mediaTime;
-        send({ type: "frame", epoch, frame });
+        const refresh = lostSince === null && now >= nextCoverageAt;
+        if (refresh) nextCoverageAt = now + COVERAGE_INTERVAL_MS;
+        send({ type: "frame", epoch, frame, refresh });
       } catch {
         fail("The camera frame could not be read. Check camera access.");
       }
@@ -335,9 +349,11 @@ export function useNeckTracking(
         const snapshot = snapshotRef.current;
         const copied = pointsFrom(points);
         if (!snapshot || !copied) { fail("Waiting for a fresh fretboard image before tracking."); return; }
+        const wireCount = detectedProposal && copied.every((point, i) => point.x === detectedProposal!.points[i].x
+          && point.y === detectedProposal!.points[i].y) ? detectedProposal.wireCount : 0;
         advanceEpoch();
         snapshotRef.current = snapshot;
-        pending = { type: "seed", epoch, frame: snapshot, points: copied };
+        pending = { type: "seed", epoch, frame: snapshot, points: copied, wireCount };
         setError(null);
         setStatus("searching");
         flush();
@@ -417,6 +433,7 @@ export function useNeckTracking(
           if (completed.type === "detect" && data.type === "detected") {
             const detected = proposalFrom(data.proposal);
             if (detected) {
+              detectedProposal = detected;
               awaitingProposal = true;
               setProposal(detected);
               setStatus("proposal");
@@ -430,14 +447,27 @@ export function useNeckTracking(
             snapshotRef.current = null;
             clearPose();
             active = true;
+            nextCoverageAt = performance.now() + COVERAGE_INTERVAL_MS;
             lostSince = performance.now();
             lastMediaTime = completed.frame.mediaTime;
             lastSampleAt = -Infinity;
             setStatus("searching");
             sample(performance.now());
           } else if (completed.type === "frame" && data.type === "pose") {
-            const age = performance.now() - data.capturedAt;
             const points = pointsFrom(data.points);
+            if (data.replacement !== undefined) {
+              const replacement = proposalFrom(data.replacement);
+              if (!replacement || !completed.refresh || data.status !== "tracking" || !points
+                || points.some((point, i) => point.x !== replacement.points[i].x || point.y !== replacement.points[i].y)) {
+                fail("Fretboard tracking returned an invalid reference. Looking for a fresh image.");
+                return;
+              }
+              // Even a slow refresh must replace the fret coordinates before a
+              // later fresh pose can use the new worker reference. It never
+              // extends the lifetime of the displayed camera geometry.
+              replacementRef.current = { proposal: replacement, camera: completed.frame.camera };
+            }
+            const age = performance.now() - data.capturedAt;
             if (!Number.isFinite(age) || age < 0 || age > FRESH_MS || !points
               || (data.status !== "tracking" && data.status !== "reacquired")) {
               markLost();
@@ -487,6 +517,7 @@ export function useNeckTracking(
       clearTimeout(operationTimer);
       clearPose();
       snapshotRef.current = null;
+      replacementRef.current = null;
       worker?.terminate();
       worker = null;
     };
@@ -498,5 +529,5 @@ export function useNeckTracking(
   const reset = useCallback(() => controlsRef.current?.reset(), []);
   const pause = useCallback(() => controlsRef.current?.pause(), []);
   const resume = useCallback(() => controlsRef.current?.resume(), []);
-  return { poseRef, status, error, proposal, snapshotRef, freeze, find, seed, reset, pause, resume };
+  return { poseRef, status, error, proposal, snapshotRef, replacementRef, freeze, find, seed, reset, pause, resume };
 }

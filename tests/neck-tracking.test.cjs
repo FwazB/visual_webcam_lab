@@ -756,3 +756,67 @@ test("live frame buffers transfer ownership while detection and seed snapshots r
   assert.deepEqual(run.hook.poseRef.current.points, points);
   run.cleanup();
 });
+
+test("healthy tracking periodically checks coverage without resetting the working reference", () => {
+  const run = setup();
+  let request = run.startTracking();
+  for (let i = 0; i < 51; i++) {
+    run.reply(request, { type: "pose", status: "tracking", points });
+    run.tick(100, 2 + i / 10);
+    request = run.operations().at(-1);
+  }
+  const refreshes = run.operations().filter(operation => operation.refresh);
+  assert.equal(refreshes.length, 1, "coverage work is bounded to one check in five seconds");
+  assert.equal(refreshes[0].type, "frame", "coverage discovery does not freeze or reset tracking");
+  assert.equal(run.hook.status, "tracking");
+  assert.equal(run.hook.snapshotRef.current, null);
+  assert.equal(run.operations().filter(operation => operation.type === "seed").length, 1);
+  run.cleanup();
+});
+
+test("a slow coverage replacement updates reference metadata but waits for a fresh live pose", () => {
+  const run = setup();
+  let request = run.startTracking();
+  while (!request.refresh) {
+    run.reply(request, { type: "pose", status: "tracking", points });
+    run.tick(100, run.video.currentTime + 0.1);
+    request = run.operations().at(-1);
+  }
+  const replacement = observedProposal(20);
+  run.advance(400);
+  run.reply(request, { type: "pose", status: "tracking", points, replacement });
+  assert.deepEqual(run.hook.replacementRef.current.proposal, replacement);
+  assert.equal(run.hook.replacementRef.current.camera.video, run.video);
+  assert.equal(run.hook.poseRef.current, null, "coverage detection never extends the 250ms pose lifetime");
+  replacement.frets[3].a.x = 0;
+  assert.notEqual(run.hook.replacementRef.current.proposal.frets[3].a.x, 0, "replacement data is copied");
+  run.tick(1, run.video.currentTime + 0.1);
+  const later = run.operations().at(-1);
+  assert.equal(later.refresh, false);
+  run.reply(later, { type: "pose", status: "tracking", points });
+  assert.deepEqual(run.hook.poseRef.current.points, points);
+  run.hook.pause();
+  assert.equal(run.hook.replacementRef.current, null);
+  run.cleanup();
+});
+
+test("unsolicited or malformed replacement cannot pair a new pose with old fret coordinates", () => {
+  for (const kind of ["unsolicited", "malformed", "mismatched"]) {
+    const run = setup();
+    let request = run.startTracking();
+    if (kind !== "unsolicited") {
+      while (!request.refresh) {
+        run.reply(request, { type: "pose", status: "tracking", points });
+        run.tick(100, run.video.currentTime + 0.1);
+        request = run.operations().at(-1);
+      }
+    }
+    const replacement = kind === "malformed" ? { ...proposal, frets: [] } : proposal;
+    const responsePoints = kind === "mismatched" ? points.map(point => ({ ...point, x: point.x + .01 })) : points;
+    run.reply(request, { type: "pose", status: "tracking", points: responsePoints, replacement });
+    assert.equal(run.hook.poseRef.current, null);
+    assert.equal(run.hook.replacementRef.current, null);
+    assert.equal(run.hook.status, "error");
+    run.cleanup();
+  }
+});

@@ -163,6 +163,56 @@ test("fret ridge sequences span short occlusions without drawing the hidden wire
   }
 });
 
+test("a hand-sized gap retains every visible wire on both sides, including mirrored input", () => {
+  const base = makeNeckImage({ texture: false, lastFret: 16, stringColor: [105, 100, 90] });
+  const image = warpImage(cv, base, [
+    { x: 100, y: 170 }, { x: 100, y: 230 }, { x: 540, y: 170 }, { x: 540, y: 230 },
+  ]);
+  const at = i => 100 + 440 * (1 - 2 ** (-i / 12)) / (1 - 2 ** (-16 / 12));
+  for (const hidden of [[5, 6, 7], [5, 6, 7, 8], [5, 6, 7, 8, 9]]) {
+    const left = (at(hidden[0] - 1) + at(hidden[0])) / 2;
+    const right = (at(hidden.at(-1)) + at(hidden.at(-1) + 1)) / 2;
+    const occluded = cover(image, { x: left, y: 150, width: right - left, height: 100 }, [78, 58, 38]);
+    const flipped = warpImage(cv, occluded, image.points.map(p => ({ x: image.width - 1 - p.x, y: p.y })));
+    const visible = Array.from({ length: 17 }, (_, i) => i).filter(i => !hidden.includes(i));
+    for (const [frame, mirrored] of [[occluded, false], [flipped, true]]) {
+      const proposal = detectNeck(cv, frame.rgba, frame.width, frame.height);
+      checkProposal(frame, proposal);
+      assert.equal(proposal.wireCount, visible.length, "do not alias every other fret into a shorter spacing sequence");
+      for (const [i, fret] of proposal.frets.entries()) {
+        for (const point of [fret.a, fret.b]) {
+          const x = mirrored ? frame.width - 1 - point.x * frame.width : point.x * frame.width;
+          assert.ok(Math.abs(x - at(visible[i])) < 3, "each segment stays on an observed wire");
+          assert.ok(x < left || x > right, "never draw a predicted wire behind the hand");
+        }
+      }
+    }
+  }
+});
+
+test("fret ridges need not appear perpendicular to the neck under perspective", () => {
+  const base = makeNeckImage({ texture: false, lastFret: 16, stringColor: [105, 100, 90] });
+  // The projected fret/neck angle is about 102 degrees, not 90 degrees.
+  const image = warpImage(cv, base, [
+    { x: 150, y: 30 }, { x: 100, y: 72 }, { x: 530, y: 330 }, { x: 480, y: 372 },
+  ]);
+  const flipped = warpImage(cv, image, image.points.map(p => ({ x: image.width - 1 - p.x, y: p.y })));
+  for (const frame of [image, flipped]) {
+    const proposal = detectNeck(cv, frame.rgba, frame.width, frame.height);
+    checkProposal(frame, proposal);
+    assert.equal(proposal.wireCount, 17, "the complete visible run survives the perspective-angle gate");
+    for (const [i, fret] of proposal.frets.entries()) {
+      const t = (1 - 2 ** (-i / 12)) / (1 - 2 ** (-16 / 12));
+      for (const [side, key] of ["a", "b"].entries()) {
+        const start = frame.points[side], end = frame.points[side + 2];
+        const expected = { x: start.x + (end.x - start.x) * t, y: start.y + (end.y - start.y) * t };
+        const actual = { x: fret[key].x * frame.width, y: fret[key].y * frame.height };
+        assert.ok(Math.hypot(actual.x - expected.x, actual.y - expected.y) < 3, "observed wire endpoints follow the projected guitar");
+      }
+    }
+  }
+});
+
 test("an occlusion near the neck end needs two later observed wires to confirm an extension", () => {
   const image = warpImage(cv, makeNeckImage({ texture: false, lastFret: 16, stringColor: [105, 100, 90] }), [
     { x: 100, y: 170 }, { x: 100, y: 230 }, { x: 540, y: 170 }, { x: 540, y: 230 },

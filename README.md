@@ -100,18 +100,35 @@ and every fret segment supported by the detection, preserving the observed
 spacing. It does not add hidden frets or assign absolute fret numbers to an
 unidentified stretch of neck.
 
-The detector is experimental and can miss a neck or propose the wrong region.
-When individual strings are faint, it also searches for bright fret wires and
-refines their outline against visible outer-string evidence. Incomplete or
-cropped evidence can require another view; the detector does not invent missing
-string edges.
+The detector is custom OpenCV geometry code, separate from MediaPipe's hand
+model. It uses Canny edges and Hough line segments to find string rails and
+shrinking fret spacing. When strings are faint, it searches for bright fret
+ridges and verifies their outline against visible outer-string evidence.
+Separated visible sections can join across an occlusion when their spacing and
+rails agree; missing wires are not added to the result. The yellow boundary
+shows the supported section, with white string guides and observed yellow frets.
+This remains an experimental detector: incomplete or cropped evidence can
+require another view, and it can still miss a neck or propose the wrong region.
 
 After detection, an OpenCV worker matches features against the original neck image
-and estimates a perspective transform as the guitar moves. It searches near the
-last verified neck position first, then the full image when needed, so background
-detail does not consume the neck's feature budget. Hand regions are
+and estimates a perspective transform as the guitar moves. It searches a padded
+quadrilateral aligned with the last verified neck first, then the full image
+when needed, so the face and room inside a diagonal neck's bounding rectangle
+do not consume its feature budget. Hand regions are
 excluded from the feature search when fresh hand observations are available.
-The immutable reference limits cumulative drift. Weak or stale matches hide
+The bounded 1,800-feature ORB budget retains upper-neck matches even when the
+body end has much stronger texture; inlier, reprojection and spatial-support
+checks still gate every pose.
+The immutable reference limits cumulative drift. While tracking, a bounded
+coverage search checks every five seconds for a longer section of the same
+neck, alternating a smaller image with the original tracking resolution because
+fine ridges can survive differently at each scale. A candidate must preserve
+the old region, agree with its direction and
+width, add observed frets, and successfully seed a new tracker before the
+reference is replaced. A missed coverage search retains the working reference.
+The overlay adopts the new fret coordinates together with the new pose. A slow
+coverage search can briefly hide the outline under the same freshness limit;
+camera video and MediaPipe hands remain independent. Weak or stale matches hide
 the neck grid; tracking keeps searching for the same reference and can reacquire
 it without another setup. Blur, strong viewpoint changes and low-detail necks
 can still lose tracking. Camera source, track or resolution changes require a
