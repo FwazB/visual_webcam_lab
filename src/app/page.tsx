@@ -6,7 +6,6 @@ import LiveStamp from "@/components/home/LiveStamp";
 import Reveal from "@/components/home/Reveal";
 import StringsHero from "@/components/home/StringsHero";
 import styles from "@/components/home/home.module.css";
-import { GUITAR_STANDARD } from "@/lib/instrument/profile";
 import { pitchClassHue } from "@/lib/instrument/pitch";
 import { PROJECTS, STRUNG_PROJECTS } from "@/lib/home/projects";
 
@@ -53,7 +52,8 @@ export default function Home() {
               const hue = pitchClassHue(p.pitchClass);
               const stringIndex = STRUNG_PROJECTS.findIndex((s) => s.id === p.id);
               const where = p.external ? "TouchDesigner" : "web";
-              const meta = stringIndex >= 0 ? `${GUITAR_STANDARD.stringLabels[stringIndex]} string · ${where}` : where;
+              const string = STRUNG_PROJECTS[stringIndex];
+              const meta = string ? `${string.voice === "cloud" ? "virtual " : ""}${string.stringLabel} string · ${where}` : where;
               const body = (
                 <>
                   <Doodle id={p.doodle} hue={hue} className={styles.doodle} />

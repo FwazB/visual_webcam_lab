@@ -1,5 +1,5 @@
-// Everything the homepage lists. The first six ride a guitar string each,
-// in standard-tuning order (low E first).
+// Six familiar guitar strings plus a virtual low A for Pocket Operators.
+import { GUITAR_STANDARD } from "@/lib/instrument/profile";
 
 export type DoodleId = "guitar" | "bass" | "cassette" | "headphones" | "ascii" | "eye" | "projector";
 
@@ -17,8 +17,14 @@ export interface Project {
 
 const REPO = "https://github.com/FwazB/visual_webcam_lab/tree/main";
 
-/** One project per string, low E to high e. */
-export const STRUNG_PROJECTS: Project[] = [
+export interface StringProject extends Project {
+  stringLabel: string;
+  midi: number;
+  gauge: number;
+  voice: "pluck" | "cloud";
+}
+
+const GUITAR_PROJECTS: Project[] = [
   {
     id: "guitar",
     title: "Guitar trainer",
@@ -72,6 +78,30 @@ export const STRUNG_PROJECTS: Project[] = [
     external: true,
     doodle: "eye",
     pitchClass: 4,
+  },
+];
+
+/** The virtual string is homepage navigation, not a change to trainer tuning. */
+export const STRUNG_PROJECTS: StringProject[] = [
+  ...GUITAR_PROJECTS.map((project, index): StringProject => ({
+    ...project,
+    stringLabel: GUITAR_STANDARD.stringLabels[index],
+    midi: GUITAR_STANDARD.tuning[index],
+    gauge: [3.4, 2.9, 2.4, 2, 1.6, 1.3][index],
+    voice: "pluck",
+  })),
+  {
+    id: "pocket-operators",
+    title: "Pocket Operators",
+    blurb: "Make a beat on Rhythm, sample with K.O., and find your way into the studio.",
+    href: "/pocket-operators",
+    external: false,
+    doodle: "cassette",
+    pitchClass: 9,
+    stringLabel: "A",
+    midi: 33,
+    gauge: 2.5,
+    voice: "cloud",
   },
 ];
 

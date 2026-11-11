@@ -40,6 +40,7 @@ const NAV_ROUTES = [
   { id: "bass-standard", href: "/bass", label: "Bass" },
   { id: "studio", href: "/studio", label: "Studio" },
   { id: "for-you", href: "/for-you", label: "For you" },
+  { id: "pocket-operators", href: "/pocket-operators", label: "Pocket Operators" },
 ];
 
 interface Target extends FretPosition {
@@ -447,11 +448,12 @@ export default function FretLab({ profile }: FretLabProps) {
             />
           ))}
         </div>}
-        <nav className="flex gap-1 flex-shrink-0">
+        <nav aria-label="Main navigation" className="flex flex-wrap gap-1">
           {NAV_ROUTES.map((r) => (
             <Link
               key={r.id}
               href={r.href}
+              aria-current={profile.id === r.id ? "page" : undefined}
               className={`text-xs px-3 py-1.5 rounded-full border border-white/10 transition active:scale-95 ${
                 profile.id === r.id ? "bg-white text-black" : "bg-white/10 text-zinc-400 hover:text-white"
               }`}

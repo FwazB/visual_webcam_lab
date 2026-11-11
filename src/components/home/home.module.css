@@ -171,7 +171,7 @@
 
 .hero {
   position: relative;
-  height: clamp(340px, 52vh, 560px);
+  height: clamp(430px, 60vh, 630px);
   margin-top: clamp(16px, 3vw, 32px);
   touch-action: pan-y;
   user-select: none;
@@ -245,6 +245,40 @@
 
 .labelTitle {
   white-space: nowrap;
+}
+
+/* The seventh string is a digital intruder in the printed-paper instrument. */
+.cloudLabel {
+  position: relative;
+  color: #effdff;
+  background: linear-gradient(115deg, #12283d, #302044 70%, #1c163b);
+  border-color: #80eef5;
+  box-shadow: -5px 3px 0 #b68ced66, 0 0 20px #8770ed55;
+  text-shadow: 1px 0 #c086e9;
+}
+
+.cloudLabel::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(0deg, transparent 0 5px, #bda7ef12 5px 6px);
+}
+
+.cloudLabel .labelLetter {
+  color: #11273b;
+  background: #8af4ff;
+  border-color: #b5f7ff;
+  mix-blend-mode: normal;
+}
+
+.soundError {
+  position: absolute;
+  bottom: -58px;
+  right: 0;
+  max-width: 42ch;
+  font-size: 12px;
+  text-align: right;
 }
 
 @media (hover: hover) and (pointer: fine) {
@@ -534,6 +568,12 @@
 }
 
 /* ---------- Reduced motion: keep fades, drop movement ---------- */
+
+@media (max-width: 420px) {
+  .heroNote {
+    bottom: -52px;
+  }
+}
 
 @media (prefers-reduced-motion: reduce) {
   .titlePink {

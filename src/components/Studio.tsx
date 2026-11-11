@@ -608,12 +608,13 @@ export default function Studio() {
   return (
     <div className="fixed inset-0 bg-black text-white overflow-y-auto flex flex-col">
       <div className="p-3 sm:p-4 flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-white/10">
-        <div className="flex items-baseline gap-3">
+        <div className="flex flex-wrap items-baseline gap-3">
           <h1 className="text-lg sm:text-xl font-bold tracking-tight"><Link href="/" className="hover:text-zinc-300">studio</Link></h1>
-          <nav className="flex gap-1">
+          <nav aria-label="Main navigation" className="flex flex-wrap gap-1">
             <Link href="/guitar" className="text-xs px-2.5 py-1 rounded-full bg-white/10 text-zinc-400 hover:text-white">Guitar</Link>
             <Link href="/bass" className="text-xs px-2.5 py-1 rounded-full bg-white/10 text-zinc-400 hover:text-white">Bass</Link>
             <Link href="/for-you" className="text-xs px-2.5 py-1 rounded-full bg-white/10 text-zinc-400 hover:text-white">For you</Link>
+            <Link href="/pocket-operators" className="text-xs px-2.5 py-1 rounded-full bg-white/10 text-zinc-400 hover:text-white">Pocket Operators</Link>
           </nav>
         </div>
 

@@ -13,7 +13,7 @@ const localScripts = new Map(await Promise.all(publicScripts.map(async (path) =>
   path, await readFile(new URL(`../public${path}`, import.meta.url)),
 ])));
 
-for (const path of ["/", "/guitar", "/bass", "/studio", "/for-you", "/for-you/privacy", "/ascii", ...publicScripts]) {
+for (const path of ["/", "/guitar", "/bass", "/studio", "/pocket-operators", "/for-you", "/for-you/privacy", "/ascii", ...publicScripts]) {
   const response = await fetch(new URL(path, base), { signal: AbortSignal.timeout(15000) });
   assert.equal(response.status, 200, `${path} must load`);
   assert.equal(response.headers.get("x-content-type-options"), "nosniff");
@@ -45,10 +45,10 @@ for (const path of ["/", "/guitar", "/bass", "/studio", "/for-you", "/for-you/pr
   } else {
     // Most pages use next/dynamic with SSR disabled. HTTP checks can verify
     // their shell/assets; this does not exercise rendered controls or devices.
-    assert.match(body, /<title>body\.synth<\/title>/);
+    assert.match(body, path === "/pocket-operators" ? /<title>Pocket Operator guide \| body\.synth<\/title>/ : /<title>body\.synth<\/title>/);
     if (path === "/") {
       // The homepage is server-rendered: every project link is in the HTML.
-      for (const href of ["/guitar", "/bass", "/studio", "/for-you", "/ascii"]) assert.ok(body.includes(`href="${href}"`), `/ must link to ${href}`);
+      for (const href of ["/guitar", "/bass", "/studio", "/for-you", "/ascii", "/pocket-operators"]) assert.ok(body.includes(`href="${href}"`), `/ must link to ${href}`);
     }
     const scripts = [...body.matchAll(/<script[^>]+src="([^"]+)"/g)];
     assert.ok(scripts.length > 0, `${path} must reference application scripts`);
