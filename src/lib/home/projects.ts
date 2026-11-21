@@ -74,7 +74,7 @@ const GUITAR_PROJECTS: Project[] = [
   {
     id: "fuzz",
     title: "Fuzz",
-    blurb: "Control the length of the camera trails in Fuzz. The note you play sets their color.",
+    blurb: "Stretch your webcam trails with head tilt, or pair with TouchDesigner for pitch-colored visuals.",
     href: "/fuzz",
     external: false,
     doodle: "eye",

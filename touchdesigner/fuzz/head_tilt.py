@@ -24,7 +24,8 @@ def supports_mac_motion():
 
 
 def mac_helper_path():
-    return (Path(project.folder) / "headphones/.build/Fuzz Head Motion.app"
+    directory = Path(project.folder) if "project" in globals() else Path(__file__).resolve().parent
+    return (directory / "headphones/.build/Fuzz Head Motion.app"
             / "Contents/MacOS/FuzzHeadMotion")
 
 
@@ -144,6 +145,8 @@ class TiltReceiver:
                     continue
                 candidate = POSE.unpack(data)[5]
                 if math.isfinite(candidate) and abs(candidate) <= 180:
+                    if self.center is None:
+                        self.center = candidate
                     roll = candidate
         except BlockingIOError:
             pass

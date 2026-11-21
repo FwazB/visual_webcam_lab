@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useTiltStep } from "@/hooks/useTiltStep";
 import styles from "@/app/pocket-operators/guide.module.css";
 
 const parts = [
@@ -12,6 +13,7 @@ const parts = [
 /** An instructional reference, deliberately independent of audio and hardware. */
 export default function PocketPattern() {
   const [selected, setSelected] = useState(0);
+  useTiltStep((direction) => setSelected((index) => (index + direction + parts.length) % parts.length));
   const part = parts[selected];
 
   return (

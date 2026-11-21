@@ -7,6 +7,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { useTiltStep } from "@/hooks/useTiltStep";
 import { midiToHz, pitchClassHue } from "@/lib/instrument/pitch";
 import { cloudString, karplusStrong } from "@/lib/home/pluck";
 import { STRUNG_PROJECTS } from "@/lib/home/projects";
@@ -61,6 +62,15 @@ export default function StringsHero() {
     }, delay);
     timersRef.current.add(timer);
   }, []);
+
+  useTiltStep((direction) => {
+    const engine = engineRef.current;
+    if (!engine) return;
+    STRUNG_PROJECTS.forEach((_, i) => {
+      const index = direction > 0 ? i : STRUNG_PROJECTS.length - 1 - i;
+      schedule(() => engine.pluck(index, 0.45, direction * engine.gap() * 0.27), i * 32);
+    });
+  });
 
   useEffect(() => {
     mountedRef.current = true;

@@ -54,6 +54,38 @@ test("creation requests activation before loading the worklet without awaiting b
   engine.close();
 });
 
+test("live pan moves only clip playback and restores its direct output at center", async t => {
+  const run = environment(t);
+  const panValues = [];
+  const panner = {
+    pan: { setTargetAtTime(value) { panValues.push(value); } },
+    connect(output) { this.output = output; },
+    disconnect() { this.output = null; },
+  };
+  let panNodes = 0;
+  run.ctx.createStereoPanner = () => { panNodes++; return panner; };
+  const engine = await StudioEngine.create();
+  const [master, click] = run.gains;
+  const input = run.stream();
+  engine.attachInput(input);
+  engine.setPlaybackPan(0);
+  assert.equal(panNodes, 0);
+  engine.setPlaybackPan(-0.65);
+  engine.setPlaybackPan(1);
+  assert.equal(panNodes, 1);
+  assert.deepEqual(panValues, [-0.65, 1]);
+  assert.deepEqual(master.connections, [panner]);
+  assert.equal(panner.output, run.ctx.destination);
+  assert.deepEqual(click.connections, [run.ctx.destination]);
+  assert.deepEqual(engine.input.connections, [run.recorder]);
+  engine.setPlaybackPan(0);
+  assert.equal(panner.output, null);
+  assert.deepEqual(master.connections, [run.ctx.destination]);
+  engine.close();
+  engine.setPlaybackPan(0.5);
+  assert.equal(panNodes, 1);
+});
+
 test("resume is invoked synchronously and transport refuses paused or closed audio", async (t) => {
   let release;
   const run = environment(t, { state: "suspended", resume: () => new Promise((resolve) => { release = resolve; }) });

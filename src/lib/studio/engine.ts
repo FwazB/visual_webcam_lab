@@ -35,6 +35,7 @@ export class StudioEngine {
   readonly ctx: AudioContext;
   mode: TransportMode = "stopped";
   private master: GainNode;
+  private playbackPanner: StereoPannerNode | null = null;
   private clickOut: GainNode;
   private recorder: AudioWorkletNode;
   private trackGains = new Map<string, GainNode>();
@@ -162,6 +163,28 @@ export class StudioEngine {
     stream?.getTracks().forEach((track) => track.stop());
   }
 
+  /** Pan the live mix of clips. The click, recording input and offline export have separate paths. */
+  setPlaybackPan(amount: number): void {
+    if (this.closed || this.ctx.state === "closed") return;
+    const pan = Number.isFinite(amount) ? Math.max(-1, Math.min(1, amount)) : 0;
+    if (pan === 0) {
+      if (this.playbackPanner) {
+        this.master.disconnect(this.playbackPanner);
+        this.playbackPanner.disconnect();
+        this.playbackPanner = null;
+        this.master.connect(this.ctx.destination);
+      }
+      return;
+    }
+    if (!this.playbackPanner) {
+      this.playbackPanner = this.ctx.createStereoPanner();
+      this.playbackPanner.connect(this.ctx.destination);
+      this.master.disconnect(this.ctx.destination);
+      this.master.connect(this.playbackPanner);
+    }
+    this.playbackPanner.pan.setTargetAtTime(pan, this.ctx.currentTime, 0.03);
+  }
+
   /** Output latency plus the input latency the browser reports (s). */
   estimatedLatency(): number {
     const settings = this.stream?.getAudioTracks()[0]?.getSettings() as (MediaTrackSettings & { latency?: number }) | undefined;
@@ -287,6 +310,8 @@ export class StudioEngine {
       this.halt();
       for (const gain of this.trackGains.values()) gain.disconnect();
       this.trackGains.clear();
+      this.playbackPanner?.disconnect();
+      this.playbackPanner = null;
     } finally {
       this.detachInput();
       this.onStopped?.();

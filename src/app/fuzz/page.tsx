@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import Link from "next/link";
 import FuzzController from "@/components/FuzzController";
+import BrowserFuzz from "@/components/BrowserFuzz";
 import { FUZZ_PROJECT_URL } from "@/lib/home/projects";
 import styles from "./page.module.css";
 
@@ -30,7 +31,11 @@ export default function FuzzPage() {
           </nav>
           <h1 className={styles.title}>Fuzz</h1>
         </header>
-        <FuzzController />
+        <BrowserFuzz />
+        <details className={styles.desktop}>
+          <summary>TouchDesigner output</summary>
+          <FuzzController />
+        </details>
       </div>
     </main>
   );

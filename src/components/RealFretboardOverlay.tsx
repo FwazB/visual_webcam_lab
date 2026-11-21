@@ -6,6 +6,8 @@ import type { GuitarPitch } from "@/hooks/useGuitarPitch";
 import { useNeckTracking, type NeckCameraIdentity, type NeckProposal } from "@/hooks/useNeckTracking";
 import type { InstrumentProfile } from "@/lib/instrument/profile";
 import { midiToName } from "@/lib/instrument/pitch";
+import { useHeadMotion } from "@/lib/headMotion";
+import { headTiltAmount } from "@/lib/headMotionGestures";
 import { cameraViewport, imageToCamera } from "@/lib/instrument/cameraCoordinates";
 import { readHeardMidi } from "@/lib/instrument/neckEvidence";
 import { createNeckGeometry, imageToNeck, neckToImage, type NeckGeometry, type NeckPoint } from "@/lib/instrument/neckMapping";
@@ -75,6 +77,7 @@ export default function RealFretboardOverlay({
   const referenceRef = useRef<Reference | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [readout, setReadout] = useState(initialReadout);
+  const hintEmphasis = Math.abs(headTiltAmount(useHeadMotion()));
   const neck = useNeckTracking(videoRef, handsRef, handsUpdatedAtRef);
   const acceptedProposalRef = useRef<typeof neck.proposal>(null);
   const acceptedReplacementRef = useRef<typeof neck.replacementRef.current>(null);
@@ -279,7 +282,10 @@ export default function RealFretboardOverlay({
         <canvas ref={canvasRef} aria-hidden="true" className="absolute inset-0 w-full h-full" />
       </div>
       <div className="border-t border-white/10 bg-zinc-950 px-3 py-2.5 text-sm">
-        {readout.target && <p className="mb-2 text-xs text-yellow-200">Target · {readout.target}</p>}
+        {readout.target && <p className="mb-2 text-xs text-yellow-200" style={hintEmphasis > 0
+          ? { fontSize: `${0.75 + 1.25 * hintEmphasis}rem`, lineHeight: 1.3 } : undefined}>
+          Target · {readout.target}
+        </p>}
         <p><span className="text-zinc-400">Seen</span> · {trackingError ? "Tracking unavailable" : trackingLoading ? "Loading hand tracking…" : readout.seen}</p>
         {trackingError && onRetryHandTracking && <button type="button" onClick={onRetryHandTracking} className="mt-2 rounded-md bg-white/10 px-3 py-2 text-xs hover:bg-white/20">Retry hand tracking</button>}
         <p className="mt-1"><span className="text-zinc-400">Heard</span> · {readout.heard}</p>

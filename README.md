@@ -32,7 +32,7 @@ a local research tool rather than a production accuracy claim.
   Matches your top tracks to verified lesson guides and ranks those sections
   by instrument, chosen comfort level, and practice goal.
 - `/ascii`: body-mask ASCII webcam experiment.
-- `/fuzz` pairs the Mac browser with TouchDesigner. Head tilt from AirPods connected to the Mac controls trail length. An iPhone sender is available when the AirPods are connected to the phone.
+- `/fuzz` shows live camera trails directly in the browser. Open **TouchDesigner output** to control the separate desktop project.
 - `/`: homepage. Six guitar strings, one per project: move the mouse across
   them to strum (tap on touch screens), tap **sound off** to hear them. The
   strings flash in the same circle-of-fifths colors as Fuzz. Below them, a
@@ -52,6 +52,41 @@ npm run dev
 
 Open <http://localhost:3000/guitar>, allow the camera, click **Connect guitar**
 and allow the microphone.
+
+## AirPods on the website
+
+From the repository root on the Mac where you open Body Synth, run:
+
+```sh
+python3 scripts/head-motion.py
+```
+
+Keep that Terminal window open. Follow its pairing link or enter its code in
+**AirPods** on the website. Connect motion-capable AirPods to your Mac, select
+**This Mac**, hold your playing posture, and click **Start**. Allow local
+network and motion access if prompted. The Mac reader needs macOS 14 or later
+and the Xcode Command Line Tools for its first build.
+
+If your AirPods are connected to your iPhone, choose **iPhone** instead. Enter
+the phone’s Wi-Fi IPv4 address, click **Start**, then enter the displayed Mac
+address in the [iPhone sender](touchdesigner/fuzz/README.md#airpods-head-tilt).
+Both devices must be on the same Wi-Fi.
+
+| Where you are | What head tilt does |
+| --- | --- |
+| Homepage | Strums the seven strings. Enable sound to hear them. |
+| Guitar and bass | Enlarges the current target note, string and fret. |
+| Studio | Pans clip playback left or right while you listen. |
+| ASCII camera | Makes the character grid coarser or finer around the Density setting. |
+| Fuzz | Lengthens the browser camera trail toward either shoulder. Click **Start camera** to see it. |
+| For You | Steps between practice cards. Press Enter to open the selected lesson. |
+| Pocket Operators | Steps through the kick, snare and hi-hat in the pattern guide. |
+
+For strums and steps, tilt about 15° and return to center before the next
+gesture. **Set center** recalibrates. Closing the panel leaves tracking on
+while you move between instruments in the same tab. **Stop**, switching to
+another tab, or closing the site releases tracking. Motion travels between
+the browser and the local bridge on `127.0.0.1:9982`.
 
 ## Spark PEDAL / guitar input
 
@@ -300,7 +335,7 @@ audio input, so it works without the browser. If the hosted page cannot reach
 the loopback bridge, use the localhost app; no browser security flags are
 needed.
 
-- On macOS 14 or later, connect motion-capable AirPods to the Mac and build the local helper once with `sh touchdesigner/fuzz/headphones/build.sh` from the repository root. Open the Fuzz project, pair **/fuzz**, leave **AirPods connected to → This Mac** selected, and choose **Start tracking**. The first reading sets center. If the AirPods are connected to your iPhone, select **iPhone** to use the phone sender. [Controller guide](touchdesigner/fuzz/README.md#website-head-tilt-controller)
+- For the desktop Fuzz scene, open **TouchDesigner output** on `/fuzz` and pair the project using its Fuzz code. The site-wide **AirPods** control above drives the web instruments. [TouchDesigner controller guide](touchdesigner/fuzz/README.md#website-head-tilt-controller)
 - [Fuzz guide](touchdesigner/fuzz/README.md): device selection, pitch colors,
   Light Maps (build its helper with `sh touchdesigner/fuzz/lights/build_mask_helper.sh`),
   speaker monitoring, rebuilding, and safe export.

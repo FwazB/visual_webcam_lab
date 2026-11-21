@@ -1,0 +1,46 @@
+.dock {
+  position: fixed;
+  z-index: 60;
+  bottom: max(.7rem, env(safe-area-inset-bottom));
+  right: max(.7rem, env(safe-area-inset-right));
+  font: .9rem/1.4 var(--font-geist-sans), sans-serif;
+  color: #22306b;
+}
+.left { right: auto; left: max(.7rem, env(safe-area-inset-left)); }
+.launcher, .panel { background: #faf6ec; border: 1px solid #22306b; box-shadow: 2px 3px 0 #11182d75; }
+.launcher {
+  display: flex; align-items: center; gap: .4rem; min-height: 36px;
+  padding: .3rem .7rem; border-radius: 1.5rem; font-weight: 700; cursor: pointer;
+}
+.dot, .live { width: .5rem; height: .5rem; border: 1.5px solid currentColor; border-radius: 50%; }
+.live { background: #388745; }
+.dock :focus-visible { outline: 3px solid #bb3785; outline-offset: 2px; }
+.panel {
+  box-sizing: border-box; position: absolute; bottom: calc(100% + .55rem); right: 0;
+  width: min(21rem, calc(100vw - 1.7rem)); max-height: calc(100dvh - 4.5rem);
+  overflow: auto; overscroll-behavior: contain; border-radius: .55rem; padding: 1rem;
+}
+.left .panel { right: auto; left: 0; }
+.heading, .actions { display: flex; gap: .5rem; align-items: center; }
+.heading { justify-content: space-between; }
+.heading h2 { font-size: 1.18rem; font-weight: 750; line-height: 1.1; }
+.close { min-width: 36px; min-height: 36px; font-size: 1.35rem; line-height: 1; cursor: pointer; }
+.hint { margin: .4rem 0 .8rem; }
+.form { display: grid; gap: .55rem; }
+.form label { display: grid; gap: .15rem; font-size: .84rem; font-weight: 650; }
+.form input, .form select, .actions button, .primary {
+  min-height: 40px; padding: .4rem .65rem; border: 1px solid #22306b; border-radius: .3rem;
+}
+.form input, .form select { width: 100%; background: white; color: #22306b; font-size: 1rem; }
+.actions button, .primary { cursor: pointer; font-weight: 650; }
+.primary { color: white; background: #22306b; }
+.primary:disabled { opacity: .5; cursor: default; }
+.reading { display: grid; gap: .15rem; }
+.reading output { font: 600 2rem/1.2 var(--font-geist-mono), monospace; }
+.actions { margin-top: .5rem; }
+.status { margin-top: .6rem; overflow-wrap: anywhere; }
+.setup { margin-top: .6rem; font-size: .82rem; }
+.setup summary { cursor: pointer; padding-block: .4rem; }
+.setup p { margin-block: .4rem; }
+.setup code { display: block; overflow-wrap: anywhere; }
+.srOnly { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }

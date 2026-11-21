@@ -32,6 +32,7 @@ function setup({ cameraAvailable = true, profile = GUITAR_STANDARD, fretCount = 
   let stateIndex = 0, refIndex = 0, effectIndex = 0;
   let pendingEffects = [], dirty = false, mounted = true;
   let now = 0, nextFrame = 1, tree;
+  let tilt = null;
   const surface = { clientWidth: 1000, clientHeight: 600 };
   const markingButton = { focus() {} };
   const video = {
@@ -114,6 +115,7 @@ function setup({ cameraAvailable = true, profile = GUITAR_STANDARD, fretCount = 
   const loaded = { exports: {} };
   new Function("require", "module", "exports", "requestAnimationFrame", "cancelAnimationFrame", "performance", "window", compile)(
     (name) => name === "react" ? react : name === "react/jsx-runtime" ? { jsx, jsxs: jsx, Fragment: "fragment" }
+      : name === "@/lib/headMotion" ? { useHeadMotion: () => tilt }
       : name === "@/hooks/useNeckTracking" ? { useNeckTracking: () => neck } : require(name),
     loaded, loaded.exports,
     (callback) => { const id = nextFrame++; scheduled.set(id, callback); return id; },
@@ -143,6 +145,7 @@ function setup({ cameraAvailable = true, profile = GUITAR_STANDARD, fretCount = 
     get snapshotDraws() { return snapshotDraws; },
     get seedCount() { return seedCount; },
     render,
+    setTilt(degrees) { tilt = degrees; render(); },
     acquire() { neck.find(); render(); flush(); },
     get referencePoints() { return seedPoints; },
     trackPose(points, at) { automaticPose = false; neck.poseRef.current = points ? { points, capturedAt: at, mediaTime: video.currentTime } : null; },
@@ -332,6 +335,26 @@ test("only observed irregular fret segments are reprojected with the tracked nec
   assert.equal(fretLines(run).length, 4, "gaps between observed wires are never filled with invented frets");
   assert.deepEqual(fretLines(run).map(line => Math.round(line.points[0].x)), [750, 660, 498, 150]);
   run.cleanup();
+});
+
+test("tilt enlarges the current guitar or bass target and releases it at center or on disconnect", () => {
+  for (const profile of [GUITAR_STANDARD, BASS_STANDARD]) {
+    const run = setup({ profile });
+    run.props.targetRef.current = { string: 1, fret: 2, midi: profile.tuning[1] + 2 };
+    run.frame(100);
+    const target = () => descendants(run.tree).find(node => node.type === "p" && textOf(node).startsWith("Target ·"));
+    const hint = textOf(target());
+    assert.match(hint, /fret 2/);
+    for (const degrees of [-25, 25, 10, 3, null]) {
+      run.setTilt(degrees);
+      assert.equal(textOf(target()), hint);
+      const size = target().props.style?.fontSize;
+      if (Math.abs(degrees) === 25) assert.equal(size, "2rem");
+      else if (degrees === 10) assert.ok(parseFloat(size) > 0.75 && parseFloat(size) < 2);
+      else assert.equal(size, undefined);
+    }
+    run.cleanup();
+  }
 });
 
 test("on-neck fingertips remain observations independent of lesson targets and heard pitch", () => {

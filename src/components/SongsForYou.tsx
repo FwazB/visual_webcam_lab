@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import Link from "next/link";
+import { useTiltStep } from "@/hooks/useTiltStep";
 import { disconnectSpotify, finishSpotifyLogin, getTopTracks, startSpotifyLogin, type SpotifyTrack } from "@/lib/spotify/client";
 import { recommendSongs, starterSongs, type PracticeRecommendation } from "@/lib/practice/recommendations";
 import type { PracticeGoal, PracticeInstrument, PracticeLevel } from "@/lib/practice/catalog";
@@ -32,7 +33,7 @@ function SongCard({ pick, instrument, index }: { pick: PracticeRecommendation; i
   const song = pick.catalog!;
   const part = pick.arrangement!;
   return (
-    <article className="flex flex-col rounded-2xl border border-white/10 bg-zinc-950 p-5 sm:p-6">
+    <article data-practice-card className="flex flex-col rounded-2xl border border-white/10 bg-zinc-950 p-5 focus-within:border-emerald-300 sm:p-6">
       <div className="mb-6 flex items-center justify-between gap-3">
         <span className="font-mono text-sm text-zinc-500">{String(index + 1).padStart(2, "0")}</span>
         <span className={`rounded-full px-3 py-1 text-xs ${pick.fit === "play-now" ? "bg-emerald-400/10 text-emerald-300" : pick.fit === "stretch" ? "bg-yellow-300/10 text-yellow-200" : "bg-white/5 text-zinc-400"}`}>{FIT_LABELS[pick.fit]}</span>
@@ -65,6 +66,19 @@ export default function SongsForYou() {
   const assessed = picks.filter((pick) => pick.status === "matched" && pick.arrangement);
   const unassessed = picks.filter((pick) => pick.status !== "matched");
   const redirectUri = `${window.location.origin}/for-you`;
+  const pageRef = useRef<HTMLElement>(null);
+
+  useTiltStep((direction) => {
+    if (document.activeElement?.matches("input, select, textarea")) return;
+    const cards = Array.from(pageRef.current?.querySelectorAll<HTMLElement>("[data-practice-card]") ?? []);
+    if (!cards.length) return;
+    const current = cards.findIndex((card) => card.contains(document.activeElement));
+    const next = current < 0 ? (direction > 0 ? 0 : cards.length - 1)
+      : (current + direction + cards.length) % cards.length;
+    // Put the lesson link in reach of Enter without following it during a tilt.
+    cards[next].querySelector("a")?.focus({ preventScroll: true });
+    cards[next].scrollIntoView({ block: "nearest" });
+  });
 
   useEffect(() => {
     try { localStorage.setItem(PREFERENCES_KEY, JSON.stringify(preferences)); } catch { /* Session preferences still work when storage is unavailable. */ }
@@ -132,7 +146,7 @@ export default function SongsForYou() {
   }
 
   return (
-    <main className="fixed inset-0 overflow-y-auto bg-black text-white">
+    <main ref={pageRef} className="fixed inset-0 overflow-y-auto bg-black text-white">
       <header className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 px-5 py-4 sm:px-8">
         <Link href="/" className="font-semibold tracking-tight">body.synth <span className="ml-2 font-normal text-zinc-500">/ songs</span></Link>
         <nav aria-label="Main navigation" className="flex flex-wrap gap-1 text-xs">

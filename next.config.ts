@@ -15,7 +15,7 @@ const csp = [
   "default-src 'self'",
   `script-src 'self' blob: 'unsafe-inline' 'wasm-unsafe-eval' ${mediaPipeRuntime}${isDev ? " 'unsafe-eval'" : ""}`,
   "script-src-attr 'none'",
-  `connect-src 'self' ${mediaPipeRuntime} https://storage.googleapis.com/mediapipe-models/ https://accounts.spotify.com https://api.spotify.com ws://127.0.0.1:9980${isDev ? " ws: wss:" : ""}`,
+  `connect-src 'self' ${mediaPipeRuntime} https://storage.googleapis.com/mediapipe-models/ https://accounts.spotify.com https://api.spotify.com ws://127.0.0.1:9980 http://127.0.0.1:9982/motion${isDev ? " ws: wss:" : ""}`,
   "worker-src 'self' blob:",
   "frame-src 'none'",
   "media-src 'self' blob: mediastream:",

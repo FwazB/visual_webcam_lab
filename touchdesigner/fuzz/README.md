@@ -43,7 +43,10 @@ capture is independent and stops when its page is closed.
 ## Website head-tilt controller
 
 Open **Fuzz** on the Body Synth homepage on the Mac running TouchDesigner.
-The high E string also opens `/fuzz`. The website pairs with the local Fuzz
+The high E string also opens `/fuzz`. Expand **TouchDesigner output** to pair
+the desktop scene. For browser camera trails or the other instruments, use
+the [site-wide AirPods control](../../README.md#airpods-on-the-website).
+The desktop panel pairs with the local Fuzz
 bridge so you can start tracking, see the live angle, set center, and stop.
 
 ### AirPods head tilt
@@ -356,7 +359,7 @@ Real-note pitch accuracy, moving-person alignment and physical projector
 alignment remain hardware tests.
 
 The Mac and iPhone head-tilt build has SHA-256
-`a7aa0941959a7df6d9e1efb7dbb2fd2ff7dfbc364a210ae9b3f9f78765220fa1`.
+`967d3e6ce10699baddfac0acadfdef3fe245707d151e5957a01383a3a55b197b`.
 After re-expansion, its embedded bridge and receiver matched the source.
 Synthetic local motion sent through the Mac reader’s pipe drove the packaged
 trail from baseline to full tilt. Recenter and signal loss restored baseline,

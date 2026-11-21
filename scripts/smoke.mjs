@@ -34,6 +34,7 @@ for (const path of ["/", "/guitar", "/bass", "/studio", "/pocket-operators", "/f
     assert.doesNotMatch(csp, /https?:|blob:|'unsafe-inline'/);
   } else {
     assert.match(csp, /connect-src[^;]*ws:\/\/127\.0\.0\.1:9980/);
+    assert.match(csp, /connect-src[^;]*http:\/\/127\.0\.0\.1:9982\/motion(?: |;)/);
     assert.match(csp, /script-src[^;]*blob:[^;]*'wasm-unsafe-eval'/);
     assert.match(csp, /script-src-attr 'none'/);
     assert.match(csp, /frame-src 'none'/);
@@ -50,11 +51,14 @@ for (const path of ["/", "/guitar", "/bass", "/studio", "/pocket-operators", "/f
     // Most pages use next/dynamic with SSR disabled. HTTP checks can verify
     // their shell/assets; this does not exercise rendered controls or devices.
     assert.ok(body.includes(`<title>${pageTitles[path] ?? "body.synth"}</title>`), `${path} must have its page title`);
+    assert.equal(body.includes('aria-label="AirPods head motion"'), path !== "/for-you/privacy",
+      `${path} must have the appropriate site-wide motion controls`);
     if (path === "/") {
       // The homepage is server-rendered: every project link is in the HTML.
       for (const href of ["/guitar", "/bass", "/studio", "/for-you", "/ascii", "/pocket-operators", "/fuzz"]) assert.ok(body.includes(`href="${href}"`), `/ must link to ${href}`);
     }
     if (path === "/fuzz") {
+      assert.match(body, /<button\b[^>]*>Start camera<\/button>/);
       assert.match(body, /<h2\b[^>]*>AirPods head tilt<\/h2>/);
       const macOption = body.match(/<option\b[^>]*>This Mac<\/option>/)?.[0] ?? "";
       assert.match(macOption, /value="mac"/);

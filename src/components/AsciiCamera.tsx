@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useBodySegmentation } from "@/hooks/useBodySegmentation";
+import { useHeadMotion } from "@/lib/headMotion";
+import { headTiltAmount } from "@/lib/headMotionGestures";
 
 // ASCII style presets
 const STYLES = {
@@ -51,6 +53,9 @@ export default function AsciiCamera() {
   const [theme, setTheme] = useState<ThemeKey>("color");
   const [style, setStyle] = useState<StyleKey>("dense");
   const [density, setDensity] = useState(DEFAULT_DENSITY);
+  const tilt = headTiltAmount(useHeadMotion());
+  const densityRange = tilt < 0 ? density : DENSITY_STEPS.length - 1 - density;
+  const renderedDensity = density + Math.round(tilt * densityRange);
   const rafRef = useRef<number>(0);
 
   const { isLoading, maskRef, maskSizeRef, startSegmentation } =
@@ -113,7 +118,7 @@ export default function AsciiCamera() {
     if (!ctx) return;
 
     // Calculate grid dimensions from display size and density
-    const [cellW, cellH] = DENSITY_STEPS[density];
+    const [cellW, cellH] = DENSITY_STEPS[renderedDensity];
     const displayW = canvas.width;
     const displayH = canvas.height;
     const cols = Math.floor(displayW / cellW);
@@ -190,7 +195,7 @@ export default function AsciiCamera() {
         ctx.fillText(char, col * cellW, row * cellH);
       }
     }
-  }, [maskRef, maskSizeRef, theme, style, density]);
+  }, [maskRef, maskSizeRef, theme, style, renderedDensity]);
 
   // Start/stop render loop
   useEffect(() => {

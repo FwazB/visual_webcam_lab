@@ -4,13 +4,15 @@
 // Spark over a click, arrange and trim them on a timeline, export a WAV mix.
 // The project autosaves in this browser.
 
-import { useEffect, useReducer, useRef, useState } from "react";
+import { useEffect, useReducer, useRef, useState, type RefObject } from "react";
 import Link from "next/link";
 import AudioDevicePicker from "@/components/AudioDevicePicker";
 import { useStudioEngine } from "@/hooks/useStudioEngine";
 import { useStudioLatency } from "@/hooks/useStudioLatency";
 import { channelsOf, computePeaks, encodeWav, PEAKS_PER_SECOND, toAudioBuffer } from "@/lib/studio/audio";
-import { renderMix, type RecordedTake, type TransportMode } from "@/lib/studio/engine";
+import { renderMix, type RecordedTake, type StudioEngine, type TransportMode } from "@/lib/studio/engine";
+import { useHeadMotion } from "@/lib/headMotion";
+import { headTiltAmount } from "@/lib/headMotionGestures";
 import {
   addClip,
   addTrack,
@@ -86,6 +88,17 @@ function message(err: unknown): string {
 const btn = "text-[11px] font-mono px-2.5 py-1.5 rounded transition active:scale-95 disabled:opacity-40";
 const btnIdle = `${btn} bg-white/10 hover:bg-white/20 text-white`;
 const toggle = (on: boolean) => `${btn} ${on ? "bg-white text-black" : "bg-white/10 hover:bg-white/20 text-zinc-300"}`;
+
+function PlaybackPan({ engineRef, mode }: { engineRef: RefObject<StudioEngine | null>; mode: TransportMode }) {
+  const tilt = useHeadMotion();
+  const pan = headTiltAmount(tilt);
+  useEffect(() => {
+    engineRef.current?.setPlaybackPan(mode === "stopped" ? 0 : pan);
+  }, [engineRef, mode, pan]);
+  if (tilt === null || mode === "stopped") return null;
+  const position = pan === 0 ? "center" : `${Math.round(Math.abs(pan) * 100)}% ${pan < 0 ? "left" : "right"}`;
+  return <span className="text-zinc-400">Playback pan · {position}</span>;
+}
 
 export default function Studio() {
   const [history, dispatch] = useReducer(reducer, undefined, (): History => ({ past: [], present: emptyProject(), future: [] }));
@@ -635,6 +648,7 @@ export default function Studio() {
             <span ref={barsRef} className="inline-block w-20 text-emerald-300">1.1</span>
             <span ref={clockRef} className="text-zinc-400">0:00.0</span>
           </div>
+          <PlaybackPan engineRef={engineRef} mode={mode} />
         </div>
 
         <div className="flex flex-wrap items-center gap-1.5 text-[11px] font-mono">

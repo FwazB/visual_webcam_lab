@@ -55,3 +55,12 @@
   letter-spacing: -.065em;
   text-shadow: 2px 2px #ff48b0;
 }
+
+.browser { border-top: 3px solid currentColor; padding-block: 1rem 1.5rem; }
+.browser h2 { font-size: clamp(1.6rem, 4vw, 2.25rem); font-weight: 750; letter-spacing: -.045em; }
+.browser p { max-width: 55ch; margin-block: .55rem 1rem; }
+.browser canvas { width: min(100%, 44rem); border-radius: .4rem; margin: .5rem 0 1rem; }
+.browser canvas:not([hidden]) { display: block; }
+.browser button { min-height: 44px; background: #22306b; color: #fffaf1; padding: .45rem 1rem; border-radius: .3rem; cursor: pointer; }
+.desktop { border-top: 1px solid #22306b55; margin-bottom: 3.5rem; }
+.desktop > summary { cursor: pointer; padding-block: 1rem; font-weight: 650; }
