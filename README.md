@@ -32,6 +32,7 @@ a local research tool rather than a production accuracy claim.
   Matches your top tracks to verified lesson guides and ranks those sections
   by instrument, chosen comfort level, and practice goal.
 - `/ascii`: body-mask ASCII webcam experiment.
+- `/fuzz` pairs the Mac browser with TouchDesigner to control trails using AirPods motion from the iPhone sender.
 - `/`: homepage. Six guitar strings, one per project: move the mouse across
   them to strum (tap on touch screens), tap **sound off** to hear them. The
   strings flash in the same circle-of-fifths colors as Fuzz. Below them, a
@@ -299,6 +300,7 @@ audio input, so it works without the browser. If the hosted page cannot reach
 the loopback bridge, use the localhost app; no browser security flags are
 needed.
 
+- Pair the AirPods to the iPhone, then use **Fuzz** on the Mac website to start tracking, set center, or stop. [Controller guide](touchdesigner/fuzz/README.md#website-head-tilt-controller)
 - [Fuzz guide](touchdesigner/fuzz/README.md): device selection, pitch colors,
   Light Maps (build its helper with `sh touchdesigner/fuzz/lights/build_mask_helper.sh`),
   speaker monitoring, rebuilding, and safe export.

@@ -1,11 +1,15 @@
 """Protocol/security regression tests; no TouchDesigner installation required."""
 
 import json
+import select
+import socket
+import struct
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
 import bridge_callbacks as bridge
+import head_tilt
 
 
 class Parameter:
@@ -53,7 +57,7 @@ class Parent(Storage):
         self.store("pairingCode", "test-only-pairing-code")
 
     def op(self, name):
-        return self.nodes[name]
+        return self.nodes.get(name)
 
 
 class Server(Storage):
@@ -124,6 +128,105 @@ class BridgeTests(unittest.TestCase):
         self.assertEqual(messages[0]["capabilities"]["parameters"], list(bridge.DEFAULT_PARAMETERS))
         self.assertEqual(messages[1]["state"]["parameters"], bridge.DEFAULT_PARAMETERS)
         self.assertFalse(messages[1]["state"]["running"])
+
+    def install_tilt(self):
+        base = self.server.base
+        base.nodes["head_tilt"] = SimpleNamespace(module=head_tilt)
+        base.par = SimpleNamespace(Headtilt=Parameter(False), View=Parameter("fuzz"),
+                                   Phoneip=Parameter("127.0.0.1"))
+        receiver = head_tilt.TiltReceiver()
+        listen = receiver.listen
+        receiver.listen = lambda phone: listen(phone, port=0)
+        self.addCleanup(receiver.close)
+        self.enterContext(patch.object(head_tilt, "receiver", receiver))
+        self.enterContext(patch.object(head_tilt, "_web_owner", None))
+        return receiver
+
+    def test_tilt_is_discovered_only_and_one_reply_goes_to_requester(self):
+        self.install_tilt()
+        self.pair()
+        welcome, snapshot = [message for _, message in self.server.sent]
+        self.assertIn("tracking.headTilt", welcome["capabilities"]["parameters"])
+        self.assertNotIn("tracking.headTilt", snapshot["state"]["parameters"])
+        self.send({"type": "parameter.set", "parameter": "tracking.headTilt", "value": 1})
+        self.assertEqual(self.server.sent[-1][1]["code"], "unsupported_parameter")
+        bridge.onWebSocketOpen(self.server, "other", "/body-synth")
+        self.pair("other")
+        self.server.sent.clear()
+        self.send({"type": "tilt.start", "phone": "127.0.0.1"})
+        target, event = self.server.sent[0]
+        self.assertEqual(len(self.server.sent), 1)
+        self.assertEqual((target, event["type"], event["name"]), ("client", "event", "tilt.status"))
+        self.assertEqual(event["payload"], {"enabled": True, "owned": True, "status": event["payload"]["status"],
+                                             "degrees": None})
+        self.send({"type": "tilt.status"}, "other")
+        self.assertFalse(self.server.sent[-1][1]["payload"]["owned"])
+        for kind in ("tilt.start", "tilt.center", "tilt.stop"):
+            self.send({"type": kind, "phone": "127.0.0.1"}, "other")
+            self.assertEqual(self.server.sent[-1][1]["code"], "tilt_control")
+        self.assertFalse(self.server.base.par.Headtilt.eval())
+        self.assertNotIn("127.0.0.1", json.dumps(bridge._state(self.server)))
+        bridge.onWebSocketClose(self.server, "client")
+        self.send({"type": "tilt.status"}, "other")
+        self.assertEqual(self.server.sent[-1][1]["payload"], {"enabled": False, "owned": False,
+                                                              "status": "Off", "degrees": None})
+
+    def test_web_stop_or_disconnect_preserves_manual_input(self):
+        receiver = self.install_tilt()
+        self.pair()
+        self.send({"type": "tilt.start", "phone": "127.0.0.1"})
+        self.send({"type": "tilt.stop"})
+        self.assertIsNone(receiver.socket)
+        self.assertEqual(receiver.amount, 0)
+        self.send({"type": "tilt.start", "phone": "127.0.0.1"})
+        self.server.base.par.Headtilt.val = True
+        self.send({"type": "tilt.status"})
+        self.assertTrue(self.server.sent[-1][1]["payload"]["enabled"])
+        self.assertFalse(self.server.sent[-1][1]["payload"]["owned"])
+        manual_socket = receiver.socket
+        self.send({"type": "tilt.stop"})
+        self.assertEqual(self.server.sent[-1][1]["code"], "tilt_control")
+        bridge.onWebSocketClose(self.server, "client")
+        bridge.onServerStop(self.server)
+        self.assertIs(receiver.socket, manual_socket)
+
+    def test_paired_page_reads_real_udp_tilt_centers_and_releases(self):
+        receiver = self.install_tilt()
+        self.pair()
+        self.send({"type": "tilt.start", "phone": "127.0.0.1"})
+        address = "127.0.0.1:" + str(receiver.socket.getsockname()[1])
+        self.assertIn(address, self.server.sent[-1][1]["payload"]["status"])
+        self.send({"type": "tilt.center"})
+        self.assertIsNone(self.server.sent[-1][1]["payload"]["degrees"])
+        self.assertIn(address, self.server.sent[-1][1]["payload"]["status"])
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sender:
+            for roll, expected in ((-8, 0), (12, 20)):
+                sender.sendto(struct.pack("<6d", 0, 0, 0, 0, 0, roll), receiver.socket.getsockname())
+                self.assertTrue(select.select([receiver.socket], [], [], 1)[0])
+                self.send({"type": "tilt.status"})
+                self.assertEqual(self.server.sent[-1][1]["payload"]["degrees"], expected)
+                self.assertIn(address, self.server.sent[-1][1]["payload"]["status"])
+        self.send({"type": "tilt.center"})
+        self.assertEqual(self.server.sent[-1][1]["payload"]["degrees"], 0)
+        self.assertIn(address, self.server.sent[-1][1]["payload"]["status"])
+        with patch.object(bridge.time, "monotonic", return_value=101):
+            self.send({"type": "tilt.status"})
+        self.assertIsNone(self.server.sent[-1][1]["payload"]["degrees"])
+        self.assertIn(address, self.server.sent[-1][1]["payload"]["status"])
+        self.send({"type": "tilt.stop"})
+        self.assertIsNone(receiver.socket)
+        self.assertNotIn(address, self.server.sent[-1][1]["payload"]["status"])
+
+    def test_tilt_needs_authentication_and_valid_phone_before_listening(self):
+        receiver = self.install_tilt()
+        self.send({"type": "tilt.start", "phone": "127.0.0.1"})
+        self.assertEqual(self.server.sent[-1][1]["code"], "authentication")
+        bridge.onWebSocketOpen(self.server, "client", "/body-synth")
+        self.pair()
+        for phone in (None, False, 1, {}, "8.8.8.8", "0.0.0.0", "224.0.0.1", "localhost", "192.168.1.333"):
+            self.send({"type": "tilt.start", "phone": phone})
+            self.assertEqual(self.server.sent[-1][1]["code"], "tilt_control")
+            self.assertIsNone(receiver.socket)
 
     def test_unknown_path_closed_without_state(self):
         bridge.onWebSocketOpen(self.server, "other", "/")

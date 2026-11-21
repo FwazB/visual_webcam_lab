@@ -1,13 +1,17 @@
 import {
   BODY_SYNTH_PROTOCOL_VERSION,
   FUZZ_PARAMETER_IDS,
+  HEAD_TILT_CAPABILITY,
   isFuzzParameterValue,
+  isHeadTiltPhoneAddress,
+  isHeadTiltStatus,
   parseEngineMessage,
   type AppToEngineMessage,
   type EngineCapabilities,
   type EngineState,
   type FuzzChordId,
   type FuzzParameterId,
+  type HeadTiltStatus,
 } from "./protocol";
 
 export const TOUCHDESIGNER_URL = "ws://127.0.0.1:9980/body-synth";
@@ -33,6 +37,7 @@ interface TouchDesignerSnapshot {
   error: string | null;
   state: EngineState | null;
   capabilities: EngineCapabilities | null;
+  headTilt: HeadTiltStatus | null;
 }
 
 type Timer = ReturnType<typeof setTimeout>;
@@ -44,8 +49,15 @@ interface ClientOptions {
 }
 
 const INITIAL_SNAPSHOT: TouchDesignerSnapshot = {
-  status: "disconnected", error: null, state: null, capabilities: null,
+  status: "disconnected", error: null, state: null, capabilities: null, headTilt: null,
 };
+
+const TILT_ERRORS = new Map([
+  ["Enter the iPhone’s local Wi-Fi IPv4 address.", "Enter the IPv4 address shown in the iPhone’s Wi-Fi settings and try again."],
+  ["Select the Fuzz view in TouchDesigner.", "Select the Fuzz view in TouchDesigner, then start tracking again."],
+  ["An existing session controls head tilt.", "Stop tracking in the other session or turn off manual head tilt in TouchDesigner, then try again."],
+  ["Start head tilt before setting center.", "Start tracking before setting the center."],
+]);
 
 /** Explicit, memory-only pairing. This bridge carries control messages, never media. */
 export class TouchDesignerClient {
@@ -147,8 +159,23 @@ export class TouchDesignerClient {
     return this.command({ type: "parameter.set", parameter, value });
   };
 
+  startHeadTilt = (phone: string): boolean =>
+    isHeadTiltPhoneAddress(phone) && this.command({ type: "tilt.start", phone });
+
+  centerHeadTilt = (): boolean => this.snapshot.headTilt?.owned === true && this.command({ type: "tilt.center" });
+  stopHeadTilt = (): boolean => this.snapshot.headTilt?.owned === true && this.command({ type: "tilt.stop" });
+  requestHeadTiltStatus = (): boolean => this.command({ type: "tilt.status" });
+
   private command(message: AppToEngineMessage): boolean {
-    return this.snapshot.status === "ready" && this.send(message);
+    const tiltCommand = message.type.startsWith("tilt.");
+    if (tiltCommand && !this.snapshot.capabilities?.parameters.includes(HEAD_TILT_CAPABILITY)) {
+      return false;
+    }
+    if (this.snapshot.status !== "ready" || !this.send(message)) return false;
+    if (tiltCommand && message.type !== "tilt.status" && this.snapshot.error) {
+      this.update({ ...this.snapshot, error: null });
+    }
+    return true;
   }
 
   private send(message: AppToEngineMessage): boolean {
@@ -178,6 +205,13 @@ export class TouchDesignerClient {
       return;
     }
     if (message.type === "error") {
+      if (message.code === "tilt_control" && message.recoverable && this.snapshot.status === "ready"
+        && this.snapshot.capabilities?.parameters.includes(HEAD_TILT_CAPABILITY)) {
+        const error = TILT_ERRORS.get(message.message) ??
+          "Check the iPhone’s Wi-Fi address and that UDP port 4242 is available on the Mac, then try again.";
+        this.update({ ...this.snapshot, error });
+        return;
+      }
       // Do not reflect an engine message that might contain the pairing code.
       const error = ["authentication", "unauthorized", "pairing_failed"].includes(message.code)
         ? "Pairing was rejected. Check the code shown in TouchDesigner and reconnect."
@@ -233,6 +267,13 @@ export class TouchDesignerClient {
         parameters: { ...previous.parameters, ...message.changes.parameters },
       };
       this.update({ ...this.snapshot, state, error: null });
+    } else if (message.type === "event" && message.name === "tilt.status"
+      && this.snapshot.capabilities?.parameters.includes(HEAD_TILT_CAPABILITY)) {
+      if (!isHeadTiltStatus(message.payload)) {
+        this.fail("TouchDesigner sent an invalid head tilt status. Update the Fuzz project and reconnect.");
+        return;
+      }
+      this.update({ ...this.snapshot, headTilt: message.payload });
     } else if (message.type === "pong" && message.sentAt === this.pendingPing) {
       this.pendingPing = null;
       this.lastPongAt = this.now();

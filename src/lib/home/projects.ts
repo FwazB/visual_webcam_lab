@@ -16,6 +16,7 @@ export interface Project {
 }
 
 const REPO = "https://github.com/FwazB/visual_webcam_lab/tree/main";
+export const FUZZ_PROJECT_URL = `${REPO}/touchdesigner/fuzz`;
 
 export interface StringProject extends Project {
   stringLabel: string;
@@ -73,9 +74,9 @@ const GUITAR_PROJECTS: Project[] = [
   {
     id: "fuzz",
     title: "Fuzz",
-    blurb: "Camera feedback colored by the note you play. E is yellow, A is green.",
-    href: `${REPO}/touchdesigner/fuzz`,
-    external: true,
+    blurb: "Control the length of the camera trails in Fuzz. The note you play sets their color.",
+    href: "/fuzz",
+    external: false,
     doodle: "eye",
     pitchClass: 4,
   },

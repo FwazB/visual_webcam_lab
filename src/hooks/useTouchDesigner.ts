@@ -15,6 +15,10 @@ export function useTouchDesigner() {
     sendNoteHit: client.sendNoteHit,
     setPlaying: client.setPlaying,
     setParameter: client.setParameter,
+    startHeadTilt: client.startHeadTilt,
+    centerHeadTilt: client.centerHeadTilt,
+    stopHeadTilt: client.stopHeadTilt,
+    requestHeadTiltStatus: client.requestHeadTiltStatus,
   }), [client, snapshot]);
 }
 

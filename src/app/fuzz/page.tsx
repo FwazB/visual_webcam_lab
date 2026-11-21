@@ -1,0 +1,37 @@
+import type { Metadata, Viewport } from "next";
+import Link from "next/link";
+import FuzzController from "@/components/FuzzController";
+import { FUZZ_PROJECT_URL } from "@/lib/home/projects";
+import styles from "./page.module.css";
+
+export const metadata: Metadata = {
+  title: "Fuzz | body.synth",
+  description: "Control Fuzz trails from your Mac using head tilt from AirPods connected to your iPhone.",
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 5,
+  userScalable: true,
+  themeColor: "#f2ecdf",
+};
+
+export default function FuzzPage() {
+  return (
+    <main className={styles.page}>
+      <div className={styles.inner}>
+        <header>
+          <nav className={styles.navigation} aria-label="Fuzz navigation">
+            <Link className={styles.brand} href="/" aria-label="body.synth home">body.synth</Link>
+            <a className={styles.projectLink} href={FUZZ_PROJECT_URL}>
+              TouchDesigner project <span aria-hidden="true">↗</span>
+            </a>
+          </nav>
+          <h1 className={styles.title}>Fuzz</h1>
+        </header>
+        <FuzzController />
+      </div>
+    </main>
+  );
+}

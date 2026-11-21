@@ -1,5 +1,6 @@
 export const BODY_SYNTH_PROTOCOL_VERSION = 1 as const;
 export const MAX_ENGINE_MESSAGE_LENGTH = 16_384;
+export const HEAD_TILT_CAPABILITY = "tracking.headTilt" as const;
 export const FUZZ_PARAMETER_IDS = [
   "visual.fuzz.amount",
   "visual.fuzz.feedback",
@@ -7,6 +8,13 @@ export const FUZZ_PARAMETER_IDS = [
 ] as const;
 export type FuzzParameterId = (typeof FUZZ_PARAMETER_IDS)[number];
 export type FuzzChordId = "c9sus4" | "dm7" | "gm";
+
+export type HeadTiltStatus = {
+  enabled: boolean;
+  owned: boolean;
+  status: string;
+  degrees: number | null;
+};
 
 type EngineModule =
   | "tracking"
@@ -62,6 +70,8 @@ export type AppToEngineMessage =
       playing: boolean;
       positionSeconds?: number;
     })
+  | (MessageBase<"tilt.start"> & { phone: string })
+  | MessageBase<"tilt.center" | "tilt.stop" | "tilt.status">
   | (MessageBase<"event"> & {
       name: "song.chord";
       payload: { chordId: FuzzChordId };
@@ -134,6 +144,19 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isText(value: unknown, maxLength = 256): value is string {
   return typeof value === "string" && value.length > 0 && value.length <= maxLength;
+}
+
+export function isHeadTiltPhoneAddress(value: unknown): value is string {
+  if (typeof value !== "string" || value.length > 15) return false;
+  const parts = value.split(".");
+  return parts.length === 4 && parts.every((part) =>
+    /^(0|[1-9]\d{0,2})$/.test(part) && Number(part) <= 255);
+}
+
+export function isHeadTiltStatus(value: unknown): value is HeadTiltStatus {
+  return isRecord(value) && Object.keys(value).length === 4
+    && typeof value.enabled === "boolean" && typeof value.owned === "boolean" && isText(value.status)
+    && (value.degrees === null || (isNonNegative(value.degrees) && value.degrees <= 180));
 }
 
 function isNonNegative(value: unknown): value is number {

@@ -4,6 +4,10 @@ import { readFile } from "node:fs/promises";
 
 const base = new URL(process.argv[2] ?? "http://127.0.0.1:3000");
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
+const pageTitles = {
+  "/fuzz": "Fuzz | body.synth",
+  "/pocket-operators": "Pocket Operator guide | body.synth",
+};
 const publicScripts = [
   "/worklets/pitch-processor.js", "/worklets/recorder-processor.js",
   "/vision/fretboard-worker.js", "/vision/neck-tracker.js",
@@ -13,7 +17,7 @@ const localScripts = new Map(await Promise.all(publicScripts.map(async (path) =>
   path, await readFile(new URL(`../public${path}`, import.meta.url)),
 ])));
 
-for (const path of ["/", "/guitar", "/bass", "/studio", "/pocket-operators", "/for-you", "/for-you/privacy", "/ascii", ...publicScripts]) {
+for (const path of ["/", "/guitar", "/bass", "/studio", "/pocket-operators", "/for-you", "/for-you/privacy", "/ascii", "/fuzz", ...publicScripts]) {
   const response = await fetch(new URL(path, base), { signal: AbortSignal.timeout(15000) });
   assert.equal(response.status, 200, `${path} must load`);
   assert.equal(response.headers.get("x-content-type-options"), "nosniff");
@@ -45,10 +49,16 @@ for (const path of ["/", "/guitar", "/bass", "/studio", "/pocket-operators", "/f
   } else {
     // Most pages use next/dynamic with SSR disabled. HTTP checks can verify
     // their shell/assets; this does not exercise rendered controls or devices.
-    assert.match(body, path === "/pocket-operators" ? /<title>Pocket Operator guide \| body\.synth<\/title>/ : /<title>body\.synth<\/title>/);
+    assert.ok(body.includes(`<title>${pageTitles[path] ?? "body.synth"}</title>`), `${path} must have its page title`);
     if (path === "/") {
       // The homepage is server-rendered: every project link is in the HTML.
-      for (const href of ["/guitar", "/bass", "/studio", "/for-you", "/ascii", "/pocket-operators"]) assert.ok(body.includes(`href="${href}"`), `/ must link to ${href}`);
+      for (const href of ["/guitar", "/bass", "/studio", "/for-you", "/ascii", "/pocket-operators", "/fuzz"]) assert.ok(body.includes(`href="${href}"`), `/ must link to ${href}`);
+    }
+    if (path === "/fuzz") {
+      assert.match(body, /<h2\b[^>]*>AirPods head tilt<\/h2>/);
+      assert.match(body, /<label\b[^>]*>Fuzz pairing code<\/label>/);
+      assert.match(body, /<button\b[^>]*>Pair with Fuzz<\/button>/);
+      assert.ok(body.includes('href="https://github.com/FwazB/visual_webcam_lab/tree/main/touchdesigner/fuzz"'));
     }
     const scripts = [...body.matchAll(/<script[^>]+src="([^"]+)"/g)];
     assert.ok(scripts.length > 0, `${path} must reference application scripts`);

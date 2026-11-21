@@ -40,6 +40,48 @@ Opening this project activates camera/audio input and a paired, loopback-only
 control server. Close the project to release its devices. Browser camera/audio
 capture is independent and stops when its page is closed.
 
+## Website head-tilt controller
+
+Open **Fuzz** on the Body Synth homepage on the Mac running TouchDesigner.
+The high E string also opens `/fuzz`. The website pairs with the local Fuzz
+bridge so you can start tracking, see the live angle, set center, and stop.
+The native sender reads motion from AirPods paired to the iPhone and sends
+their roll angle directly to the Mac over Wi-Fi.
+
+### AirPods head tilt
+
+In the Fuzz view, tilting either ear toward your shoulder lengthens the colored
+camera trail. Your usual playing posture sets the center. The first 3° leave the
+trail alone, and 25° reaches the longest trail. Guitar pitch still sets the color.
+
+**Install Fuzz Head Tilt.** On a Mac with full Xcode and iOS support,
+open the **FuzzTilt** project. Select your signing team in **Signing & Capabilities**,
+choose your connected iPhone (iOS 16 or later) as the run destination, and press **Run**. Use a
+unique bundle identifier if Xcode requests one. Enable Developer Mode on the
+iPhone if prompted. [FuzzTilt project](../../ios/FuzzTilt.xcodeproj) · [Apple’s device setup](https://developer.apple.com/documentation/xcode/running-your-app-on-simulated-or-physical-devices)
+
+1. Connect motion-capable AirPods to your iPhone and put the iPhone and Mac on
+   the same Wi-Fi. On iPhone, open **Settings → Wi-Fi → ⓘ** beside the connected
+   network and find **IP Address** under IPv4.
+2. Open this folder’s **fuzz.toe**, select the Fuzz view, and leave its manual
+   **Enable head tilt** switch off. In the website’s AirPods panel, enter the
+   [local pairing code](#run-the-engine) and select **Pair with Fuzz**. Enter
+   the iPhone’s Wi-Fi address and select **Start tracking**. The website shows
+   the Mac address to enter on the phone.
+3. On iPhone, open **Fuzz Head Tilt**, enter the **Mac’s IPv4 address** (the port is
+   already set to **4242**), and tap **Start sending**. Allow motion and local
+   network access when prompted. Hold your usual playing posture until Fuzz
+   shows **Tracking**. Fuzz takes the first received roll as neutral.
+4. Play a clean A, then tilt and return to center. The website shows the angle.
+   Hold a new posture and select **Set center** to recalibrate. **Stop tracking**
+   releases the receiver. For the clearest first test, leave Feedback at 0.65.
+
+The iPhone reads the AirPods through Core Motion and sends just their roll angle
+over local Wi-Fi. Keep the app in the foreground while playing. If the angle
+changes on the phone but the website keeps waiting for tilt, check both
+IP addresses and local-network access. Fuzz listens while enabled in the Fuzz
+view. A half-second gap returns the trail to normal feedback. [Apple’s headphone motion API](https://developer.apple.com/documentation/coremotion/cmheadphonemotionmanager)
+
 ## Hear the guitar through the MacBook
 
 Select the USB-connected Spark in `audio_in` → **Device**, then select
@@ -149,6 +191,9 @@ that shared file:
 
    ```python
    b = op('/project1/fuzz')
+   b.par.Headtilt = False
+   b.par.Phoneip = ''
+   b.op('head_tilt').module.receiver.close()
    b.op('audio_in').par.active = False
    b.op('pitch_callbacks').module.reset()
    b.op('PITCH').cook(force=True)
@@ -219,8 +264,12 @@ The Web Server DAT listens on **127.0.0.1 only**. It accepts the `/body-synth`
 WebSocket path and requires a version-1 `hello` with the local pairing code
 before commands. Welcome and a complete state snapshot confirm connection.
 
-Only Amount, Feedback, Blackout, song chord/hit events, transport, and heartbeat
-messages are accepted. The bridge validates types, finite numbers, ranges,
+The paired bridge accepts Amount, Feedback, Blackout, song chord/hit events,
+transport, heartbeat, and head-tilt commands. The browser that starts head
+tracking can set center or stop it. Disconnecting that browser releases its
+receiver. A manual TouchDesigner session takes priority.
+
+The bridge validates types, finite numbers, ranges,
 and an 8 KB message limit. It allows at most 8 pending handshakes and 16 total
 connections. A connection must pair within 5 seconds; an independent wall-clock
 timer expires silent clients even while the project timeline is paused.
@@ -233,9 +282,8 @@ operator paths. HTTP requests expose no state. This runtime bridge is separate
 from the development MCP on port 9981.
 The Lights-page controls are local TouchDesigner parameters.
 
-The public HTTPS trainer may be unable to open a plain local WebSocket in
-some browsers. If connection is blocked, use the locally served trainer; do
-not disable browser security. See the trainer's connection panel for status.
+If a browser blocks the connection from the HTTPS site to the local Fuzz
+WebSocket, run Body Synth on the Mac and open the same route on localhost.
 
 ## Local preview and optional projector feed
 
@@ -282,10 +330,19 @@ to the MacBook speakers when **Monitor guitar** is on. That `fuzz.toe`
 reopened at 1280×720 without operator errors, with fresh pairing and the bridge
 on `127.0.0.1`, and passed the credential and cache scans above.
 
-Artifact hashes are in [the security audit](../../docs/security-audit.md).
+Earlier artifact hashes are in [the security audit](../../docs/security-audit.md).
 The 2026-11-01 bridge update was synchronized into the shared artifact with
 `toeexpand`/`toecollapse`, re-expanded, and checked for source equality and clean
 storage/caches. Its timeout and capacity behavior passed standalone regression
 tests; this update was not reopened in the native application.
 Real-note pitch accuracy, moving-person alignment and physical projector
 alignment remain hardware tests.
+
+The head-tilt build has SHA-256
+`7fa4137ac78646421739bc5841c04caa7d61cf261ba24313408546746dd9dc2d`. After
+re-expansion, its embedded receiver and lifecycle callbacks matched the source.
+A loopback test using those callbacks and the packaged opacity expression
+confirmed neutral, full tilt, signal loss, and port release. The web bridge tests
+also exercised pairing, setting center, and releasing the receiver when its
+controlling browser disconnects. Live TouchDesigner
+playback with an iPhone and AirPods still needs a hardware check.

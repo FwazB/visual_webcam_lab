@@ -271,11 +271,32 @@ setpar(startup, "create", False)
 setpar(startup, "framestart", False)
 setpar(startup, "frameend", False)
 
+# Head motion adds to the trail in the Fuzz view. The UDP receiver only
+# opens after the player enters their phone address and enables it.
+head_tilt = ensure(base, "textDAT", "head_tilt")
+if head_tilt.text:
+    head_tilt.module.receiver.close()
+head_tilt.text = (FUZZ_DIRECTORY / "head_tilt.py").read_text()
+head_tilt.module.configure(base)
+tilt_lifecycle = ensure(base, "executeDAT", "tilt_lifecycle")
+tilt_lifecycle.text = '''def onStart():
+    me.parent().op('head_tilt').module.configure(me.parent())
+
+def onFrameStart(frame):
+    me.parent().op('head_tilt').module.update(me.parent())
+
+def onExit():
+    me.parent().op('head_tilt').module.receiver.close()
+'''
+setpar(tilt_lifecycle, "start", True)
+setpar(tilt_lifecycle, "exit", True)
+setpar(tilt_lifecycle, "framestart", True)
+
 # ------------------------------------------------------------- mappings ----
 # Pitch controls color; onsets and authenticated hits still push the warp.
 setexpr(warp, "displaceweightx", "op('CONTROLS')['amount'] * (min(max(op('ONSET')[0], 0), 1) * 0.08 + mod.bridge_callbacks.hit_level(op('bridge')) * 0.04)")
 setexpr(warp, "displaceweighty", "op('CONTROLS')['amount'] * (min(max(op('ONSET')[0], 0), 1) * 0.08 + mod.bridge_callbacks.hit_level(op('bridge')) * 0.04)")
-setexpr(dim, "opacity", "min(0.98, op('CONTROLS')['feedback'] * (0.9 + min(max(op('AUDIO_LEVEL')[0], 0.0), 1.0) * 0.1))")
+setexpr(dim, "opacity", "mod.head_tilt.opacity(min(0.98, op('CONTROLS')['feedback'] * (0.9 + min(max(op('AUDIO_LEVEL')[0], 0.0), 1.0) * 0.1)), absTime.frame)")
 setpar(hue, "hueoffset", 0.0)
 setexpr(hue, "saturationmult", "1.0 - op('PITCH')['amount'] * parent().par.Tint")
 for component, channel in zip("rgb", "rgb"):
@@ -326,6 +347,7 @@ rows = [
     ([audio, rms, gain, smooth, audio_out, speaker_monitor], -140),
     ([slope, onset, onset_out], -300),
     ([pitch_module, pitch_callbacks, pitch, pitch_monitor], -620),
+    ([head_tilt, tilt_lifecycle], -780),
     ([chord, controls, bridge, callbacks, startup, preview, shared_out], -460),
 ]
 for nodes, y in rows:

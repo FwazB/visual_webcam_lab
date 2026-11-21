@@ -33,6 +33,14 @@ CAPABILITIES = {
     "audioDevices": [],
     "outputDisplays": [],
 }
+TILT_COMMANDS = ("tilt.start", "tilt.center", "tilt.stop", "tilt.status")
+
+
+def _tilt_module(server):
+    # A standalone bridge or an older scene can still pair and run the trainer.
+    node = server.parent().op("head_tilt")
+    module = getattr(node, "module", None)
+    return module if callable(getattr(module, "web_command", None)) else None
 
 
 def _clients(server):
@@ -179,6 +187,10 @@ def onWebSocketClose(webServerDAT, client):
     if not _pending(webServerDAT):
         _cancel_expiry(webServerDAT)
     was_authenticated = _clients(webServerDAT).pop(client, False)
+    if was_authenticated:
+        tilt = _tilt_module(webServerDAT)
+        if tilt is not None:
+            tilt.release_web(client)
     if was_authenticated and not any(_clients(webServerDAT).values()):
         _reset_hit(webServerDAT)
         _state(webServerDAT)["running"] = False
@@ -187,6 +199,9 @@ def onWebSocketClose(webServerDAT, client):
 
 def onServerStop(webServerDAT):
     _cancel_expiry(webServerDAT)
+    tilt = _tilt_module(webServerDAT)
+    if tilt is not None:
+        tilt.release_web()
     webServerDAT.store("fuzzClients", {})
     webServerDAT.store("fuzzPending", {})
     _reset_hit(webServerDAT)
@@ -298,9 +313,12 @@ def onWebSocketReceiveText(webServerDAT, client, data):
         _pending(webServerDAT).pop(client, None)
         if not _pending(webServerDAT):
             _cancel_expiry(webServerDAT)
+        capabilities = CAPABILITIES
+        if _tilt_module(webServerDAT) is not None:
+            capabilities = {**CAPABILITIES, "parameters": [*DEFAULT_PARAMETERS, "tracking.headTilt"]}
         _send(webServerDAT, client, {
             "type": "welcome", "protocolVersion": PROTOCOL_VERSION,
-            "engineVersion": "fuzz-1", "capabilities": CAPABILITIES,
+            "engineVersion": "fuzz-1", "capabilities": capabilities,
         })
         _snapshot(webServerDAT, client)
         return
@@ -318,6 +336,17 @@ def onWebSocketReceiveText(webServerDAT, client, data):
         _send(webServerDAT, client, {
             "type": "pong", "sentAt": sent_at, "receivedAt": time.time() * 1000,
         })
+    elif kind in TILT_COMMANDS:
+        tilt = _tilt_module(webServerDAT)
+        if tilt is None:
+            _error(webServerDAT, client, "unsupported_message", "Open the Fuzz project with web head tilt support.")
+            return
+        try:
+            payload = tilt.web_command(webServerDAT.parent(), client, kind, message.get("phone"))
+        except ValueError as error:
+            _error(webServerDAT, client, "tilt_control", str(error)[:200])
+            return
+        _send(webServerDAT, client, {"type": "event", "name": "tilt.status", "payload": payload})
     elif kind == "parameter.set":
         parameter = message.get("parameter")
         value = message.get("value")

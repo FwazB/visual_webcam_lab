@@ -1,0 +1,61 @@
+.form > label, .instrument > label {
+  margin-bottom: .4rem;
+  font-weight: 650;
+}
+.panel :focus-visible {
+  outline: 3px solid #7d2176;
+  outline-offset: 3px;
+}
+.panel {
+  border-top: 3px solid #22306b;
+  padding-block: 1rem;
+}
+.panel h2 {
+  font-size: clamp(1.55rem, 4vw, 2.25rem);
+  font-weight: 750;
+  line-height: 1.12;
+  letter-spacing: -.045em;
+}
+.panel p { max-width: 60ch; }
+.intro { margin-block: .5rem 1.2rem; }
+.form { display: grid; gap: .35rem; }
+.row, .connection {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .5rem;
+}
+.panel input, .panel button {
+  min-height: 44px;
+  border: 1px solid #22306b;
+  padding: .45rem .8rem;
+  border-radius: .3rem;
+}
+.panel input { background: #fffaf1; width: min(100%, 16rem); }
+.panel button { color: #fffaf1; background: #22306b; cursor: pointer; }
+.panel button:disabled { opacity: .5; cursor: default; }
+.connection { justify-content: space-between; }
+.connection button {
+  background: transparent;
+  color: #22306b;
+}
+.instrument {
+  margin: 1rem 0;
+  padding: clamp(1rem, 4vw, 1.8rem);
+  background: #22306b;
+  color: #fffaf1;
+  border-radius: .35rem;
+}
+.readout { display: flex; gap: 1.25rem; align-items: center; }
+.readout output {
+  min-width: 3.5ch;
+  font: 600 clamp(2.3rem, 7vw, 4.75rem)/1.25 var(--font-geist-mono), monospace;
+  letter-spacing: -.08em;
+}
+.readout meter { width: min(100%, 24rem); min-width: 0; height: 2rem; }
+.instrument p, .help { font-size: .9rem; }
+.help { margin: .75rem 0; }
+.help summary { cursor: pointer; padding-block: .5rem; }
+.help p, .status, .error { margin-block: .55rem; }
+.help code { overflow-wrap: anywhere; }
+.error { color: #8d1943; }

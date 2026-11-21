@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { HEAD_TILT_CAPABILITY } from "./protocol";
 import {
   CONNECTION_TIMEOUT_MS,
   HANDSHAKE_TIMEOUT_MS,
@@ -85,16 +86,116 @@ function setup() {
     }
     now = end;
   };
-  const ready = () => {
+  const ready = (handshake = welcome) => {
     client.connect(PAIRING_CODE);
     const socket = sockets[sockets.length - 1];
     socket.open();
-    socket.receive(welcome);
+    socket.receive(handshake);
     socket.receive(snapshot);
     return socket;
   };
   return { client, sockets, timers, advance, ready };
 }
+
+const tiltWelcome = {
+  ...welcome,
+  capabilities: { ...welcome.capabilities, parameters: [...welcome.capabilities.parameters, HEAD_TILT_CAPABILITY] },
+};
+const tiltPayload = { enabled: true, owned: true, status: "Tracking", degrees: 12.5 };
+const tiltEvent = { type: "event", name: "tilt.status", payload: tiltPayload };
+
+test("head tilt commands require completed pairing and the optional Fuzz capability", () => {
+  const { client, ready } = setup();
+  assert.equal(client.startHeadTilt("192.168.1.42"), false);
+  const legacy = ready();
+  const initialCount = legacy.messages.length;
+  assert.equal(client.startHeadTilt("192.168.1.42"), false);
+  assert.equal(client.centerHeadTilt(), false);
+  assert.equal(client.stopHeadTilt(), false);
+  assert.equal(client.requestHeadTiltStatus(), false);
+  assert.equal(legacy.messages.length, initialCount);
+  legacy.receive(tiltEvent);
+  assert.equal(client.getSnapshot().headTilt, null);
+  assert.equal(client.getSnapshot().status, "ready");
+
+  const socket = ready(tiltWelcome);
+  for (const invalid of ["", "192.168.1.256", "192.168.01.42", "localhost", "192.168.1.42:4242"]) {
+    assert.equal(client.startHeadTilt(invalid), false);
+  }
+  assert.equal(client.startHeadTilt("192.168.1.42"), true);
+  assert.equal(client.centerHeadTilt(), false);
+  socket.receive({ ...tiltEvent, payload: { ...tiltPayload, owned: false } });
+  assert.equal(client.stopHeadTilt(), false);
+  socket.receive(tiltEvent);
+  assert.equal(client.centerHeadTilt(), true);
+  assert.equal(client.requestHeadTiltStatus(), true);
+  assert.equal(client.stopHeadTilt(), true);
+  assert.deepEqual(socket.messages.slice(2), [
+    { type: "tilt.start", phone: "192.168.1.42" }, { type: "tilt.center" },
+    { type: "tilt.status" }, { type: "tilt.stop" },
+  ]);
+  client.disconnect();
+});
+
+test("head tilt readings clear on signal loss and cannot leak across sessions", () => {
+  const { client, ready } = setup();
+  const socket = ready(tiltWelcome);
+  socket.receive(tiltEvent);
+  assert.deepEqual(client.getSnapshot().headTilt, tiltPayload);
+  socket.receive({ ...tiltEvent, payload: { ...tiltPayload, status: "Signal lost", degrees: null } });
+  assert.equal(client.getSnapshot().headTilt?.degrees, null);
+  socket.receive(tiltEvent);
+  const oldReceive = socket.onmessage!;
+  client.disconnect();
+  assert.equal(client.getSnapshot().headTilt, null);
+  const newSocket = ready(tiltWelcome);
+  oldReceive({ data: JSON.stringify(tiltEvent) } as MessageEvent);
+  assert.equal(client.getSnapshot().headTilt, null);
+  newSocket.receive(tiltEvent);
+  newSocket.onclose?.({} as CloseEvent);
+  assert.equal(client.getSnapshot().headTilt, null);
+});
+
+test("rejects malformed advertised head tilt status before exposing it", () => {
+  for (const payload of [
+    undefined, {}, { ...tiltPayload, enabled: 1 }, { ...tiltPayload, degrees: "12" },
+    { ...tiltPayload, degrees: 181 }, { ...tiltPayload, degrees: -1 }, { ...tiltPayload, owned: undefined },
+    { ...tiltPayload, status: "" }, { ...tiltPayload, unexpected: 0 },
+  ]) {
+    const { client, ready } = setup();
+    const socket = ready(tiltWelcome);
+    socket.receive(tiltEvent);
+    socket.receive({ ...tiltEvent, payload });
+    assert.equal(client.getSnapshot().status, "error");
+    assert.equal(client.getSnapshot().headTilt, null);
+  }
+});
+
+test("head tilt errors explain recovery and survive status polling until a control is retried", () => {
+  const { client, ready } = setup();
+  const socket = ready(tiltWelcome);
+  const rejected = { type: "error", code: "tilt_control", message: "Select the Fuzz view in TouchDesigner.", recoverable: true };
+  socket.receive(rejected);
+  const error = client.getSnapshot().error;
+  assert.match(error!, /Select the Fuzz view/);
+  assert.equal(client.getSnapshot().status, "ready");
+  client.requestHeadTiltStatus();
+  socket.receive(tiltEvent);
+  assert.equal(client.getSnapshot().error, error);
+  assert.equal(client.centerHeadTilt(), true);
+  assert.equal(client.getSnapshot().error, null);
+
+  socket.receive({ ...rejected, message: PAIRING_CODE });
+  assert.match(client.getSnapshot().error!, /Wi-Fi address/);
+  assert.ok(!client.getSnapshot().error?.includes(PAIRING_CODE));
+  assert.equal(client.stopHeadTilt(), true);
+  assert.equal(client.getSnapshot().error, null);
+
+  const legacy = ready();
+  legacy.receive(rejected);
+  assert.match(client.getSnapshot().error!, /TouchDesigner rejected a command/);
+  client.disconnect();
+});
 
 test("stays disconnected until explicit pairing; requires welcome and complete snapshot", () => {
   const { client, sockets } = setup();
