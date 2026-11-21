@@ -6,7 +6,7 @@ import styles from "./page.module.css";
 
 export const metadata: Metadata = {
   title: "Fuzz | body.synth",
-  description: "Control Fuzz trails from your Mac using head tilt from AirPods connected to your iPhone.",
+  description: "Control Fuzz trails with head tilt from AirPods connected to your Mac or iPhone.",
 };
 
 export const viewport: Viewport = {

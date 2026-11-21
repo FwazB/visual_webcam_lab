@@ -56,6 +56,11 @@ for (const path of ["/", "/guitar", "/bass", "/studio", "/pocket-operators", "/f
     }
     if (path === "/fuzz") {
       assert.match(body, /<h2\b[^>]*>AirPods head tilt<\/h2>/);
+      const macOption = body.match(/<option\b[^>]*>This Mac<\/option>/)?.[0] ?? "";
+      assert.match(macOption, /value="mac"/);
+      assert.match(macOption, /\bselected\b/, "direct Mac tracking must be selected on first load");
+      assert.ok(body.includes("sh touchdesigner/fuzz/headphones/build.sh"));
+      assert.match(body, /<option\b[^>]*value="iphone"[^>]*>iPhone<\/option>/);
       assert.match(body, /<label\b[^>]*>Fuzz pairing code<\/label>/);
       assert.match(body, /<button\b[^>]*>Pair with Fuzz<\/button>/);
       assert.ok(body.includes('href="https://github.com/FwazB/visual_webcam_lab/tree/main/touchdesigner/fuzz"'));

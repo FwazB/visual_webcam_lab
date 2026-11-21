@@ -2,16 +2,19 @@
 
 import { useEffect, useState } from "react";
 import { useTouchDesigner } from "@/hooks/useTouchDesigner";
-import { HEAD_TILT_CAPABILITY, isHeadTiltPhoneAddress } from "@/lib/touchdesigner/protocol";
+import { HEAD_TILT_CAPABILITY, MAC_HEAD_TILT_CAPABILITY, isHeadTiltPhoneAddress } from "@/lib/touchdesigner/protocol";
 import styles from "./FuzzController.module.css";
 
 export default function FuzzController() {
   const engine = useTouchDesigner();
   const [code, setCode] = useState("");
   const [phone, setPhone] = useState("");
+  const [selectedSource, setSelectedSource] = useState<"mac" | "iphone">("mac");
   const ready = engine.status === "ready";
   const pairing = engine.status === "connecting" || engine.status === "handshaking";
   const supported = ready && engine.capabilities?.parameters.includes(HEAD_TILT_CAPABILITY);
+  const supportsMac = engine.capabilities?.parameters.includes(MAC_HEAD_TILT_CAPABILITY);
+  const source = ready && !supportsMac ? "iphone" : selectedSource;
   const { requestHeadTiltStatus, disconnect } = engine;
   const tilt = engine.headTilt;
 
@@ -34,7 +37,16 @@ export default function FuzzController() {
   return (
     <section className={styles.panel} aria-labelledby="airpods-title">
       <h2 id="airpods-title">AirPods head tilt</h2>
-      <p className={styles.intro}>Pair this page with Fuzz on your Mac. Connect your AirPods to your iPhone, then use Fuzz Head Tilt on the phone to send your movement while you play.</p>
+      <p className={styles.intro}>Pair this page with Fuzz on your Mac. Tilt your head toward either shoulder to lengthen the trail, then return to center to let it fade.</p>
+      {(!ready || supported) && !tilt?.enabled && <div className={styles.source}>
+        <label htmlFor="airpods-source">AirPods connected to</label>
+        <select id="airpods-source" value={source} disabled={pairing || (ready && !supportsMac)}
+          onChange={(event) => setSelectedSource(event.target.value === "mac" ? "mac" : "iphone")}>
+          {(!ready || supportsMac) && <option value="mac">This Mac</option>}
+          <option value="iphone">iPhone</option>
+        </select>
+        {ready && !supportsMac && <p>This Fuzz project supports the iPhone sender. Open the updated Fuzz project for direct Mac tracking.</p>}
+      </div>}
       {!ready ? (
         <form className={styles.form} onSubmit={(event) => {
           event.preventDefault();
@@ -73,33 +85,39 @@ export default function FuzzController() {
               </div>
               <form className={styles.form} onSubmit={(event) => {
                 event.preventDefault();
-                if (tilt && !tilt.enabled) engine.startHeadTilt(phone.trim());
+                if (!tilt || tilt.enabled) return;
+                if (source === "mac") engine.startMacHeadTilt();
+                else engine.startHeadTilt(phone.trim());
               }}>
-                <label htmlFor="fuzz-phone">iPhone Wi-Fi address</label>
+                {source === "iphone" && !tilt?.enabled && <label htmlFor="fuzz-phone">iPhone Wi-Fi address</label>}
                 <div className={styles.row}>
-                  <input id="fuzz-phone" value={phone} inputMode="decimal" autoCapitalize="none" spellCheck={false}
-                    autoComplete="off" disabled={!tilt || tilt.enabled} placeholder="192.168.1.25"
-                    onChange={(event) => setPhone(event.target.value)} />
+                  {source === "iphone" && !tilt?.enabled && <input id="fuzz-phone" value={phone} autoCapitalize="none" spellCheck={false}
+                    autoComplete="off" disabled={!tilt} placeholder="192.168.1.25"
+                    onChange={(event) => setPhone(event.target.value)} />}
                   {tilt?.owned ? <>
                     <button type="button" onClick={engine.centerHeadTilt}>Set center</button>
                     <button type="button" onClick={engine.stopHeadTilt}>Stop tracking</button>
-                  </> : <button type="submit" disabled={!tilt || tilt.enabled || !isHeadTiltPhoneAddress(phone.trim())}>Start tracking</button>}
+                  </> : <button type="submit" disabled={!tilt || tilt.enabled || (source === "iphone" && !isHeadTiltPhoneAddress(phone.trim()))}>Start tracking</button>}
                 </div>
               </form>
               <p className={styles.status}>{tilt?.status ?? "Reading Fuzz status…"}{tilt?.enabled && !tilt.owned && " · Controlled in another session"}</p>
-              <details className={styles.help}>
+              {source === "iphone" && <details className={styles.help}>
                 <summary>Connect the iPhone sender</summary>
                 <p>Put both devices on the same Wi-Fi. On iPhone, open Settings → Wi-Fi and tap the info button beside your network to find its IPv4 address. Enter that address above and select Start tracking.</p>
                 <p>Enter the Mac’s IPv4 address shown by Fuzz in the iPhone app and tap Start sending. Hold your playing posture until Tracking appears, then tilt toward either shoulder to lengthen the trail. Keep the sender open while playing.</p>
-              </details>
+              </details>}
             </>
           ) : <p>Open the <code>touchdesigner/fuzz/fuzz.toe</code> supplied with this version of Body Synth, then disconnect and pair again to use head tilt.</p>}
         </>
       )}
-      <details className={styles.help}>
+      {source === "mac" ? <details className={styles.help}>
+        <summary>Set up head tracking on Mac</summary>
+        <p>On macOS 14 or later, connect your motion-capable AirPods to this Mac. In Terminal, run <code>sh touchdesigner/fuzz/headphones/build.sh</code> from the Body Synth repository once.</p>
+        <p>Open <code>touchdesigner/fuzz/fuzz.toe</code>, pair this page, and select Start tracking. Allow Motion &amp; Fitness access when prompted. Hold your playing posture for the first reading, or use Set center while playing.</p>
+      </details> : <details className={styles.help}>
         <summary>Set up Fuzz Head Tilt on iPhone</summary>
         <p>On your Mac, open <code>ios/FuzzTilt.xcodeproj</code> in Xcode. Choose your signing team and iPhone, then run the app. Connect your motion-capable AirPods to the iPhone and allow Motion &amp; Fitness and Local Network access when prompted.</p>
-      </details>
+      </details>}
       {pairing && <p role="status">Pairing with TouchDesigner…</p>}
       {engine.error && <p role="alert" className={styles.error}>{engine.error}</p>}
     </section>

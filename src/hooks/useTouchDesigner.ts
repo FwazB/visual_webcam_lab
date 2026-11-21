@@ -16,6 +16,7 @@ export function useTouchDesigner() {
     setPlaying: client.setPlaying,
     setParameter: client.setParameter,
     startHeadTilt: client.startHeadTilt,
+    startMacHeadTilt: client.startMacHeadTilt,
     centerHeadTilt: client.centerHeadTilt,
     stopHeadTilt: client.stopHeadTilt,
     requestHeadTiltStatus: client.requestHeadTiltStatus,

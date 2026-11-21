@@ -18,6 +18,10 @@
 }
 .panel p { max-width: 60ch; }
 .intro { margin-block: .5rem 1.2rem; }
+.source { display: flex; align-items: center; flex-wrap: wrap; gap: .5rem 1rem; margin-bottom: 1rem; }
+.source label { font-weight: 650; }
+.source p { flex-basis: 100%; font-size: .9rem; }
+.source select { min-height: 44px; background: #fffaf1; border: 1px solid #22306b; padding: .45rem .7rem; }
 .form { display: grid; gap: .35rem; }
 .row, .connection {
   display: flex;

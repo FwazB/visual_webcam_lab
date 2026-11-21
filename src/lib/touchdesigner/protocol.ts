@@ -1,6 +1,7 @@
 export const BODY_SYNTH_PROTOCOL_VERSION = 1 as const;
 export const MAX_ENGINE_MESSAGE_LENGTH = 16_384;
 export const HEAD_TILT_CAPABILITY = "tracking.headTilt" as const;
+export const MAC_HEAD_TILT_CAPABILITY = "tracking.headTiltMac" as const;
 export const FUZZ_PARAMETER_IDS = [
   "visual.fuzz.amount",
   "visual.fuzz.feedback",
@@ -71,7 +72,7 @@ export type AppToEngineMessage =
       positionSeconds?: number;
     })
   | (MessageBase<"tilt.start"> & { phone: string })
-  | MessageBase<"tilt.center" | "tilt.stop" | "tilt.status">
+  | MessageBase<"tilt.startMac" | "tilt.center" | "tilt.stop" | "tilt.status">
   | (MessageBase<"event"> & {
       name: "song.chord";
       payload: { chordId: FuzzChordId };

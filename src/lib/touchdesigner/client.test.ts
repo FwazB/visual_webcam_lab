@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { HEAD_TILT_CAPABILITY } from "./protocol";
+import { HEAD_TILT_CAPABILITY, MAC_HEAD_TILT_CAPABILITY } from "./protocol";
 import {
   CONNECTION_TIMEOUT_MS,
   HANDSHAKE_TIMEOUT_MS,
@@ -103,6 +103,34 @@ const tiltWelcome = {
 };
 const tiltPayload = { enabled: true, owned: true, status: "Tracking", degrees: 12.5 };
 const tiltEvent = { type: "event", name: "tilt.status", payload: tiltPayload };
+
+test("direct Mac tracking needs both advertised capabilities and sends no phone address", () => {
+  const { client, ready } = setup();
+  assert.equal(client.startMacHeadTilt(), false);
+  const macWithoutStatus = {
+    ...welcome,
+    capabilities: { ...welcome.capabilities, parameters: [...welcome.capabilities.parameters, MAC_HEAD_TILT_CAPABILITY] },
+  };
+  for (const reply of [welcome, tiltWelcome, macWithoutStatus]) {
+    const socket = ready(reply);
+    const count = socket.messages.length;
+    assert.equal(client.startMacHeadTilt(), false);
+    assert.equal(socket.messages.length, count);
+  }
+  const socket = ready({
+    ...tiltWelcome,
+    capabilities: { ...tiltWelcome.capabilities, parameters: [...tiltWelcome.capabilities.parameters, MAC_HEAD_TILT_CAPABILITY] },
+  });
+  assert.equal(client.startMacHeadTilt(), true);
+  assert.deepEqual(socket.messages.at(-1), { type: "tilt.startMac" });
+  socket.receive({ type: "error", code: "tilt_control", message: "Build the Mac head motion helper first.", recoverable: true });
+  assert.match(client.getSnapshot().error!, /build command/);
+  assert.equal(client.getSnapshot().status, "ready");
+  assert.equal(client.startHeadTilt("192.168.1.42"), true);
+  assert.equal(client.getSnapshot().error, null);
+  assert.deepEqual(socket.messages.at(-1), { type: "tilt.start", phone: "192.168.1.42" });
+  client.disconnect();
+});
 
 test("head tilt commands require completed pairing and the optional Fuzz capability", () => {
   const { client, ready } = setup();

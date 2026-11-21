@@ -45,14 +45,31 @@ capture is independent and stops when its page is closed.
 Open **Fuzz** on the Body Synth homepage on the Mac running TouchDesigner.
 The high E string also opens `/fuzz`. The website pairs with the local Fuzz
 bridge so you can start tracking, see the live angle, set center, and stop.
-The native sender reads motion from AirPods paired to the iPhone and sends
-their roll angle directly to the Mac over Wi-Fi.
 
 ### AirPods head tilt
 
 In the Fuzz view, tilting either ear toward your shoulder lengthens the colored
 camera trail. Your usual playing posture sets the center. The first 3° leave the
 trail alone, and 25° reaches the longest trail. Guitar pitch still sets the color.
+
+**With AirPods connected to the Mac** (macOS 14 or later):
+
+1. Build the motion reader once with the Xcode Command Line Tools. From the
+   repository root, run `sh touchdesigner/fuzz/headphones/build.sh`. Keep the
+   built reader in the `headphones` folder alongside this project.
+2. Wear your motion-capable AirPods and select them in the Mac’s Control Center.
+   Open **fuzz.toe** and pair the website using the [Fuzz code](#run-the-engine).
+3. On the website, choose **This Mac**, hold your normal playing posture, and
+   select **Start tracking**. Grant motion access when macOS prompts. Tilt
+   toward either shoulder and watch the angle and the trail change together.
+   **Set center** recalibrates. **Stop tracking** releases the motion reader.
+
+Apple’s automatic switching determines which device has the AirPods connection.
+While the Mac has the connection, Core Motion supplies head roll locally. If
+you switch the AirPods to your phone, select **iPhone** on the website and use
+the sender below. [Apple’s headphone motion API](https://developer.apple.com/documentation/coremotion/cmheadphonemotionmanager) · [Switch AirPods between devices](https://support.apple.com/guide/airpods/switch-airpods-between-apple-devices-dev228ba3df8/web)
+
+**With AirPods connected to the iPhone**:
 
 **Install Fuzz Head Tilt.** On a Mac with full Xcode and iOS support,
 open the **FuzzTilt** project. Select your signing team in **Signing & Capabilities**,
@@ -65,7 +82,7 @@ iPhone if prompted. [FuzzTilt project](../../ios/FuzzTilt.xcodeproj) · [Apple�
    network and find **IP Address** under IPv4.
 2. Open this folder’s **fuzz.toe**, select the Fuzz view, and leave its manual
    **Enable head tilt** switch off. In the website’s AirPods panel, enter the
-   [local pairing code](#run-the-engine) and select **Pair with Fuzz**. Enter
+   [local pairing code](#run-the-engine), select **Pair with Fuzz**, and choose **iPhone**. Enter
    the iPhone’s Wi-Fi address and select **Start tracking**. The website shows
    the Mac address to enter on the phone.
 3. On iPhone, open **Fuzz Head Tilt**, enter the **Mac’s IPv4 address** (the port is
@@ -338,11 +355,10 @@ tests; this update was not reopened in the native application.
 Real-note pitch accuracy, moving-person alignment and physical projector
 alignment remain hardware tests.
 
-The head-tilt build has SHA-256
-`7fa4137ac78646421739bc5841c04caa7d61cf261ba24313408546746dd9dc2d`. After
-re-expansion, its embedded receiver and lifecycle callbacks matched the source.
-A loopback test using those callbacks and the packaged opacity expression
-confirmed neutral, full tilt, signal loss, and port release. The web bridge tests
-also exercised pairing, setting center, and releasing the receiver when its
-controlling browser disconnects. Live TouchDesigner
-playback with an iPhone and AirPods still needs a hardware check.
+The Mac and iPhone head-tilt build has SHA-256
+`a7aa0941959a7df6d9e1efb7dbb2fd2ff7dfbc364a210ae9b3f9f78765220fa1`.
+After re-expansion, its embedded bridge and receiver matched the source.
+Synthetic local motion sent through the Mac reader’s pipe drove the packaged
+trail from baseline to full tilt. Recenter and signal loss restored baseline,
+and Stop released the subprocess. The iPhone path has been exercised with
+local UDP packets. A live session with physical AirPods still needs verification.

@@ -1,9 +1,14 @@
-"""Optional OpenTrack UDP roll input for the Fuzz trail. State lives in this DAT."""
+"""Local Mac headphone motion or iPhone UDP roll for the Fuzz trail."""
 
 import ipaddress
+import json
 import math
+import os
+from pathlib import Path
+import platform
 import socket
 import struct
+import subprocess
 import time
 
 PORT = 4242
@@ -11,6 +16,16 @@ POSE = struct.Struct("<6d")  # x, y, z, yaw, pitch, roll (angles in degrees)
 STALE_SECONDS = 0.5
 DEAD_ZONE = 3.0
 FULL_TILT = 25.0
+
+
+def supports_mac_motion():
+    version = platform.mac_ver()[0]
+    return bool(version) and int(version.split(".")[0]) >= 14
+
+
+def mac_helper_path():
+    return (Path(project.folder) / "headphones/.build/Fuzz Head Motion.app"
+            / "Contents/MacOS/FuzzHeadMotion")
 
 
 def valid_phone(phone):
@@ -26,12 +41,30 @@ def valid_phone(phone):
 class TiltReceiver:
     def __init__(self):
         self.socket = None
+        self.helper = None
         self.close()
 
+    @property
+    def enabled(self):
+        return self.socket is not None or self.helper is not None
+
     def close(self):
+        if self.helper is not None:
+            helper, self.helper = self.helper, None
+            helper.stdin.close()
+            helper.stdout.close()
+            if helper.poll() is None:
+                helper.terminate()
+            try:
+                helper.wait(timeout=0.3)
+            except subprocess.TimeoutExpired:
+                helper.kill()
+                helper.wait()
         if self.socket is not None:
             self.socket.close()
             self.socket = None
+        self.partial_line = b""
+        self.helper_status = None
         self.phone = None
         self.destination = None
         self.center = None
@@ -40,6 +73,22 @@ class TiltReceiver:
         self.last_sample = None
         self.amount = 0.0
         self.status = "Off"
+
+    def start_mac(self):
+        if not supports_mac_motion():
+            raise ValueError("Mac head tracking requires macOS 14 or later.")
+        executable = mac_helper_path()
+        if not os.access(executable, os.X_OK):
+            raise ValueError("Build the Mac head motion helper first.")
+        self.close()
+        try:
+            self.helper = subprocess.Popen([str(executable)], stdin=subprocess.PIPE,
+                                           stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+            os.set_blocking(self.helper.stdout.fileno(), False)
+        except OSError:
+            self.close()
+            raise ValueError("Build the Mac head motion helper first.") from None
+        self.status = "Waiting for AirPods connected to this Mac"
 
     def listen(self, phone, port=PORT):
         self.close()
@@ -80,6 +129,10 @@ class TiltReceiver:
         self.status = "Centered" if self.center is not None else "Hold neutral · waiting for tilt"
 
     def poll(self, now):
+        self.expire(now)
+        if self.helper is not None:
+            self.poll_mac(now)
+            return
         if self.socket is None:
             return
         roll = None
@@ -98,9 +151,47 @@ class TiltReceiver:
             self.fail(error)
             return
 
-        self.expire(now)
-        if roll is None:
+        if roll is not None:
+            self.apply_roll(roll, now)
+
+    def poll_mac(self, now):
+        try:
+            data = os.read(self.helper.stdout.fileno(), 8192)
+        except BlockingIOError:
             return
+        except OSError:
+            data = b""
+        if not data:
+            message = self.helper_status or "Mac motion reader stopped. Start tracking to retry."
+            self.close()
+            self.status = message
+            return
+        *lines, self.partial_line = (self.partial_line + data).split(b"\n")
+        if len(self.partial_line) > 1024:
+            self.partial_line = b""
+        roll = None
+        for line in lines:
+            try:
+                sample = json.loads(line)
+            except (ValueError, UnicodeError):
+                continue
+            if not isinstance(sample, dict):
+                continue
+            if isinstance(sample.get("status"), str):
+                self.helper_status = self.status = sample["status"][:200]
+                self.amount = 0.0
+                self.degrees = self.last_sample = self.last_roll = roll = None
+            else:
+                value = sample.get("roll")
+                if type(value) in (int, float) and -180 <= value <= 180:
+                    self.helper_status = None
+                    if self.center is None:
+                        self.center = value
+                    roll = value
+        if roll is not None:
+            self.apply_roll(roll, now)
+
+    def apply_roll(self, roll, now):
         if self.center is None:
             self.center = roll
         degrees = abs((roll - self.center + 180) % 360 - 180)
@@ -147,6 +238,7 @@ def configure(base):
 
 
 def update(base):
+    global _web_owner
     if getattr(base.par, "Headtilt", None) is None:
         configure(base)
     manual = bool(base.par.Headtilt.eval())
@@ -162,20 +254,25 @@ def update(base):
         if phone != receiver.phone:
             receiver.listen(phone)
     receiver.poll(time.monotonic())
+    if not receiver.enabled:
+        _web_owner = None
 
 
 def web_command(base, client, kind, phone=None):
     """Run one authenticated control and return one bounded status response."""
     global _web_owner
     update(base)
-    if kind == "tilt.start":
-        if not valid_phone(phone):
-            raise ValueError("Enter the iPhone’s local Wi-Fi IPv4 address.")
+    if kind in ("tilt.start", "tilt.startMac"):
         if base.par.View.eval() != "fuzz":
             raise ValueError("Select the Fuzz view in TouchDesigner.")
         if base.par.Headtilt.eval() or (_web_owner is not None and _web_owner != client):
             raise ValueError("An existing session controls head tilt.")
-        if receiver.socket is None or receiver.phone != phone:
+        if kind == "tilt.startMac":
+            if receiver.helper is None:
+                receiver.start_mac()
+        elif not valid_phone(phone):
+            raise ValueError("Enter the iPhone’s local Wi-Fi IPv4 address.")
+        elif receiver.socket is None or receiver.phone != phone:
             receiver.listen(phone)
             if receiver.socket is None:
                 message = receiver.status
@@ -188,11 +285,11 @@ def web_command(base, client, kind, phone=None):
             raise ValueError("An existing session controls head tilt.")
         if kind == "tilt.stop":
             release_web(client)
-        elif receiver.socket is None:
+        elif not receiver.enabled:
             raise ValueError("Start head tilt before setting center.")
         else:
             receiver.recenter(time.monotonic())
-    return {"enabled": receiver.socket is not None, "owned": _web_owner == client,
+    return {"enabled": receiver.enabled, "owned": _web_owner == client,
             "status": status()[:200], "degrees": receiver.degrees}
 
 

@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleIdentifier</key>
+    <string>com.bodysynth.FuzzHeadMotion</string>
+    <key>CFBundleName</key>
+    <string>Fuzz Head Motion</string>
+    <key>CFBundleDisplayName</key>
+    <string>Fuzz Head Motion</string>
+    <key>CFBundleExecutable</key>
+    <string>FuzzHeadMotionSensor</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>14.0</string>
+    <key>LSBackgroundOnly</key>
+    <true/>
+    <key>NSMotionUsageDescription</key>
+    <string>Use the tilt of AirPods connected to this Mac to control the camera trail when you start tracking in Body Synth Fuzz.</string>
+</dict>
+</plist>

@@ -33,7 +33,7 @@ CAPABILITIES = {
     "audioDevices": [],
     "outputDisplays": [],
 }
-TILT_COMMANDS = ("tilt.start", "tilt.center", "tilt.stop", "tilt.status")
+TILT_COMMANDS = ("tilt.start", "tilt.startMac", "tilt.center", "tilt.stop", "tilt.status")
 
 
 def _tilt_module(server):
@@ -314,8 +314,12 @@ def onWebSocketReceiveText(webServerDAT, client, data):
         if not _pending(webServerDAT):
             _cancel_expiry(webServerDAT)
         capabilities = CAPABILITIES
-        if _tilt_module(webServerDAT) is not None:
-            capabilities = {**CAPABILITIES, "parameters": [*DEFAULT_PARAMETERS, "tracking.headTilt"]}
+        tilt = _tilt_module(webServerDAT)
+        if tilt is not None:
+            controls = [*DEFAULT_PARAMETERS, "tracking.headTilt"]
+            if getattr(tilt, "supports_mac_motion", lambda: False)():
+                controls.append("tracking.headTiltMac")
+            capabilities = {**CAPABILITIES, "parameters": controls}
         _send(webServerDAT, client, {
             "type": "welcome", "protocolVersion": PROTOCOL_VERSION,
             "engineVersion": "fuzz-1", "capabilities": capabilities,

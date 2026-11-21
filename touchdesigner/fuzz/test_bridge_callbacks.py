@@ -228,6 +228,76 @@ class BridgeTests(unittest.TestCase):
             self.assertEqual(self.server.sent[-1][1]["code"], "tilt_control")
             self.assertIsNone(receiver.socket)
 
+    def test_mac_source_calibrates_and_releases_its_reader_with_web_owner(self):
+        receiver = self.install_tilt()
+        self.enterContext(patch.object(head_tilt, "supports_mac_motion", return_value=True))
+        # A real pipe and echo process stand in for the native sensor.
+        path = self.enterContext(patch.object(head_tilt, "mac_helper_path", return_value="/bin/cat"))
+        self.send({"type": "tilt.startMac"})
+        self.assertEqual(self.server.sent[-1][1]["code"], "authentication")
+        path.assert_not_called()
+        bridge.onWebSocketOpen(self.server, "client", "/body-synth")
+        self.pair()
+        self.assertIn("tracking.headTiltMac", self.server.sent[-2][1]["capabilities"]["parameters"])
+        self.send({"type": "tilt.startMac"})
+        helper = receiver.helper
+        self.assertTrue(self.server.sent[-1][1]["payload"]["owned"])
+        self.assertIsNone(receiver.socket)
+        self.send({"type": "tilt.startMac"})
+        self.assertIs(receiver.helper, helper)
+        bridge.onWebSocketOpen(self.server, "other", "/body-synth")
+        self.pair("other")
+        self.send({"type": "tilt.startMac"}, "other")
+        self.assertEqual(self.server.sent[-1][1]["code"], "tilt_control")
+
+        def feed(data):
+            helper.stdin.write(data)
+            helper.stdin.flush()
+            self.assertTrue(select.select([helper.stdout], [], [], 1)[0])
+            self.send({"type": "tilt.status"})
+            return self.server.sent[-1][1]["payload"]
+
+        self.assertIsNone(feed(b'{"roll":-')["degrees"])
+        self.assertEqual(feed(b'12}\n{"roll":13}\n')["degrees"], 25)
+        self.assertEqual(feed(b'{"roll":true}\n{"roll":181}\n')["degrees"], 25)
+        self.send({"type": "tilt.center"})
+        self.assertEqual(self.server.sent[-1][1]["payload"]["degrees"], 0)
+        detached = feed(b'{"status":"Reconnect your AirPods."}\n')
+        self.assertIsNone(detached["degrees"])
+        self.assertEqual(receiver.amount, 0)
+        self.assertEqual(feed(b'{"roll":23}\n')["degrees"], 10)
+        bridge.onWebSocketClose(self.server, "client")
+        self.assertIsNotNone(helper.poll())
+        self.assertFalse(receiver.enabled)
+        self.assertEqual(receiver.amount, 0)
+
+    def test_mac_setup_failure_and_reader_exit_allow_retry(self):
+        receiver = self.install_tilt()
+        support = self.enterContext(patch.object(head_tilt, "supports_mac_motion", return_value=False))
+        path = self.enterContext(patch.object(head_tilt, "mac_helper_path", return_value="/missing"))
+        self.pair()
+        self.assertNotIn("tracking.headTiltMac", self.server.sent[-2][1]["capabilities"]["parameters"])
+        self.send({"type": "tilt.startMac"})
+        self.assertIn("macOS 14", self.server.sent[-1][1]["message"])
+        support.return_value = True
+        self.send({"type": "tilt.startMac"})
+        self.assertIn("Build the Mac", self.server.sent[-1][1]["message"])
+        self.assertFalse(receiver.enabled)
+        path.return_value = "/bin/cat"
+        self.send({"type": "tilt.startMac"})
+        helper = receiver.helper
+        helper.stdin.write(b'{"status":"Allow motion in Settings."}\n')
+        helper.stdin.close()
+        helper.wait(timeout=1)
+        self.send({"type": "tilt.status"})
+        self.send({"type": "tilt.status"})
+        self.assertEqual(self.server.sent[-1][1]["payload"], {"enabled": False, "owned": False,
+                          "status": "Allow motion in Settings.", "degrees": None})
+        self.send({"type": "tilt.startMac"})
+        self.assertTrue(self.server.sent[-1][1]["payload"]["owned"])
+        self.send({"type": "tilt.stop"})
+        self.assertFalse(receiver.enabled)
+
     def test_unknown_path_closed_without_state(self):
         bridge.onWebSocketOpen(self.server, "other", "/")
         self.assertIn("other", self.server.closed)

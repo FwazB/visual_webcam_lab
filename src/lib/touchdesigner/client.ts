@@ -2,6 +2,7 @@ import {
   BODY_SYNTH_PROTOCOL_VERSION,
   FUZZ_PARAMETER_IDS,
   HEAD_TILT_CAPABILITY,
+  MAC_HEAD_TILT_CAPABILITY,
   isFuzzParameterValue,
   isHeadTiltPhoneAddress,
   isHeadTiltStatus,
@@ -53,6 +54,8 @@ const INITIAL_SNAPSHOT: TouchDesignerSnapshot = {
 };
 
 const TILT_ERRORS = new Map([
+  ["Build the Mac head motion helper first.", "Open Set up head tracking on Mac below and run the build command, then start tracking again."],
+  ["Mac head tracking requires macOS 14 or later.", "Direct Mac tracking needs macOS 14 or later. Connect the AirPods to your iPhone to use the iPhone sender."],
   ["Enter the iPhone’s local Wi-Fi IPv4 address.", "Enter the IPv4 address shown in the iPhone’s Wi-Fi settings and try again."],
   ["Select the Fuzz view in TouchDesigner.", "Select the Fuzz view in TouchDesigner, then start tracking again."],
   ["An existing session controls head tilt.", "Stop tracking in the other session or turn off manual head tilt in TouchDesigner, then try again."],
@@ -162,6 +165,10 @@ export class TouchDesignerClient {
   startHeadTilt = (phone: string): boolean =>
     isHeadTiltPhoneAddress(phone) && this.command({ type: "tilt.start", phone });
 
+  startMacHeadTilt = (): boolean =>
+    this.snapshot.capabilities?.parameters.includes(MAC_HEAD_TILT_CAPABILITY) === true
+    && this.command({ type: "tilt.startMac" });
+
   centerHeadTilt = (): boolean => this.snapshot.headTilt?.owned === true && this.command({ type: "tilt.center" });
   stopHeadTilt = (): boolean => this.snapshot.headTilt?.owned === true && this.command({ type: "tilt.stop" });
   requestHeadTiltStatus = (): boolean => this.command({ type: "tilt.status" });
@@ -208,7 +215,7 @@ export class TouchDesignerClient {
       if (message.code === "tilt_control" && message.recoverable && this.snapshot.status === "ready"
         && this.snapshot.capabilities?.parameters.includes(HEAD_TILT_CAPABILITY)) {
         const error = TILT_ERRORS.get(message.message) ??
-          "Check the iPhone’s Wi-Fi address and that UDP port 4242 is available on the Mac, then try again.";
+          "Check the head tilt setup on your Mac and try again. For the iPhone sender, also check its Wi-Fi address.";
         this.update({ ...this.snapshot, error });
         return;
       }
