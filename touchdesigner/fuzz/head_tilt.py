@@ -24,7 +24,10 @@ def supports_mac_motion():
 
 
 def mac_helper_path():
-    directory = Path(project.folder) if "project" in globals() else Path(__file__).resolve().parent
+    try:
+        directory = Path(project.folder)
+    except NameError:  # Standalone bridge imports this module outside TouchDesigner.
+        directory = Path(__file__).resolve().parent
     return (directory / "headphones/.build/Fuzz Head Motion.app"
             / "Contents/MacOS/FuzzHeadMotion")
 

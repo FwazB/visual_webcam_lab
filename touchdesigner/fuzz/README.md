@@ -359,7 +359,7 @@ Real-note pitch accuracy, moving-person alignment and physical projector
 alignment remain hardware tests.
 
 The Mac and iPhone head-tilt build has SHA-256
-`967d3e6ce10699baddfac0acadfdef3fe245707d151e5957a01383a3a55b197b`.
+`3d1a250cc81c9c060251db57a4a6918fb022eb2f66063acacd6d0def6b8d771c`.
 After re-expansion, its embedded bridge and receiver matched the source.
 Synthetic local motion sent through the Mac reader’s pipe drove the packaged
 trail from baseline to full tilt. Recenter and signal loss restored baseline,

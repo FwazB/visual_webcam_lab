@@ -14,6 +14,15 @@ import head_tilt as tilt
 
 
 class HeadTiltTests(unittest.TestCase):
+    def test_mac_helper_path_in_touchdesigner_and_standalone(self):
+        relative = Path("headphones/.build/Fuzz Head Motion.app/Contents/MacOS/FuzzHeadMotion")
+        directory = Path(__file__).resolve().parent
+        with patch.object(tilt, "__file__", str(directory / "head_tilt.py"), create=True):
+            self.assertEqual(tilt.mac_helper_path(), directory / relative)
+            project_directory = directory / "staged-scene"
+            with patch("builtins.project", SimpleNamespace(folder=str(project_directory)), create=True):
+                self.assertEqual(tilt.mac_helper_path(), project_directory / relative)
+
     def setUp(self):
         self.receiver = tilt.TiltReceiver()
         self.addCleanup(self.receiver.close)
