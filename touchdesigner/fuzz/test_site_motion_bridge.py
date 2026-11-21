@@ -3,13 +3,18 @@ from http.client import HTTPConnection
 import importlib.util
 import json
 from pathlib import Path
+import secrets
+import select
 import socket
 import struct
+import subprocess
+import sys
 import tempfile
 import threading
 import time
 import unittest
 from unittest.mock import patch
+from uuid import uuid4
 
 import head_tilt
 
@@ -24,12 +29,14 @@ class LocalReceiver(head_tilt.TiltReceiver):
         super().listen(phone, port=0)
 
 
-class SiteMotionTests(unittest.TestCase):
+class BridgeFixture(unittest.TestCase):
+    pairing_code = "test-pairing-code"
+
     def setUp(self):
         self.reader = LocalReceiver()
         self.motion = bridge.Motion(self.reader)
         self.addCleanup(self.motion.close)
-        self.server = bridge.MotionServer(0, self.motion, "test-pairing-code")
+        self.server = bridge.MotionServer(0, self.motion, self.pairing_code)
         self.addCleanup(self.server.server_close)
         thread = threading.Thread(target=self.server.serve_forever, args=(0.01,))
         thread.start()
@@ -63,6 +70,8 @@ class SiteMotionTests(unittest.TestCase):
             time.sleep(0.01)
         self.fail("Motion worker did not produce the expected state")
 
+
+class SiteMotionTests(BridgeFixture):
     def test_preflight_and_restricted_request_boundary(self):
         code, headers, data = self.request(None, method="OPTIONS", headers={
             "Origin": "http://localhost:3000", "Authorization": "", "Access-Control-Request-Method": "POST",
@@ -132,3 +141,151 @@ class SiteMotionTests(unittest.TestCase):
                 self.assertEqual(self.command("status")["degrees"], 25)
                 self.command("stop")
                 self.assertIsNotNone(process.poll())
+
+
+class WebsiteSessionTests(BridgeFixture):
+    pairing_code = None
+
+    def setUp(self):
+        super().setUp()
+        self.nonce = secrets.token_hex(32)
+        self.tab = str(uuid4())
+        self.headers.update({"Authorization": "Bearer " + self.nonce, "X-Motion-Session": self.tab})
+        self.start = {"action": "start", "source": "iphone", "phone": "127.0.0.1"}
+
+    def test_website_launch_requires_deployed_origin_explicit_start_and_tab_ownership(self):
+        self.assertEqual(self.request(self.start)[0], 401)
+        self.assertTrue(self.server.website.register(self.nonce))
+        self.assertFalse(self.reader.enabled)
+        preflight = {"Access-Control-Request-Method": "POST"}
+        self.assertEqual(self.request(None, method="OPTIONS", headers=preflight)[0], 204)
+        for origin in ("http://localhost:3000", "https://body-synth-beta.vercel.app.local",
+                       "http://body-synth-beta.vercel.app", "null"):
+            for data, method in ((None, "OPTIONS"), (self.start, "POST")):
+                code, headers, _ = self.request(data, method=method, headers={**preflight, "Origin": origin})
+                self.assertEqual(code, 403)
+                self.assertNotIn("Access-Control-Allow-Origin", headers)
+        self.assertEqual(self.request(self.start, headers={"Host": "localhost:9982"})[0], 403)
+        self.assertEqual(self.request(self.start, headers={"X-Motion-Session": "guessable-tab-name"})[0], 400)
+        for action in ("status", "center"):
+            self.assertEqual(self.request({"action": action})[0], 401)
+        self.assertFalse(self.reader.enabled)
+        # Invalid start cannot consume a launch or claim capture.
+        self.assertEqual(self.request({**self.start, "phone": "8.8.8.8"})[0], 400)
+        self.assertTrue(self.request(self.start)[2]["owned"])
+        original_socket = self.reader.socket
+        # A repeated HTTP start from the same tab keeps its first source.
+        self.assertTrue(self.request({"action": "start", "source": "mac"})[2]["owned"])
+        self.assertIs(self.reader.socket, original_socket)
+        for action in ("start", "status", "center", "stop"):
+            self.assertEqual(self.request({**self.start, "action": action},
+                                          headers={"X-Motion-Session": str(uuid4())})[0], 401)
+        self.assertTrue(self.reader.enabled)
+        other_nonce = secrets.token_hex(32)
+        self.assertTrue(self.server.website.register(other_nonce))
+        other = {"Authorization": "Bearer " + other_nonce, "X-Motion-Session": str(uuid4())}
+        self.assertEqual(self.request(self.start, headers=other)[0], 409)
+        cancelled = secrets.token_hex(32)
+        self.assertTrue(self.server.website.register(cancelled))
+        cancelled_tab = {**other, "Authorization": "Bearer " + cancelled}
+        self.assertFalse(self.request({"action": "stop"}, headers=cancelled_tab)[2]["enabled"])
+        self.assertEqual(self.request(self.start, headers=cancelled_tab)[0], 401)
+        self.assertTrue(self.command("center")["owned"])
+        self.assertFalse(self.command("stop")["enabled"])
+        self.assertEqual(original_socket.fileno(), -1)
+        self.assertFalse(self.server.website.register(self.nonce))
+        self.assertEqual(self.request(self.start)[0], 401)
+        self.assertTrue(self.request(self.start, headers=other)[2]["owned"])
+
+    def test_launch_expiry_lease_loss_and_bounded_registration(self):
+        with patch.object(bridge, "LAUNCH_SECONDS", 0), patch.object(bridge, "MAX_LAUNCHES", 2):
+            self.assertTrue(self.server.website.register(self.nonce))
+            self.assertEqual(self.request(self.start)[0], 401)
+            self.assertFalse(self.server.website.register(self.nonce))
+        with patch.object(bridge, "MAX_LAUNCHES", 2), patch.object(bridge, "LEASE_SECONDS", 0.07):
+            self.nonce = secrets.token_hex(32)
+            self.headers["Authorization"] = "Bearer " + self.nonce
+            self.assertTrue(self.server.website.register(self.nonce))
+            self.assertTrue(self.server.website.register(self.nonce))
+            self.assertFalse(self.server.website.register(secrets.token_hex(32)))
+            self.assertTrue(self.request(self.start)[2]["owned"])
+            self.wait_for(lambda: not self.reader.enabled)
+            for action in ("status", "start", "stop"):
+                self.assertEqual(self.request({**self.start, "action": action})[0], 401)
+            self.assertFalse(self.server.website.register(self.nonce))
+
+
+class WebsiteProcessTests(unittest.TestCase):
+    def spawn(self, port, idle_seconds=60):
+        # Exercise the shipped CLI with an isolated port and a fast idle clock.
+        boot = """
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("site_motion", sys.argv.pop(1))
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+module.PORT = int(sys.argv.pop(1))
+module.IDLE_SECONDS = float(sys.argv.pop(1))
+raise SystemExit(module.main())
+"""
+        proc = subprocess.Popen([sys.executable, "-B", "-c", boot, str(spec.origin),
+                                 str(port), str(idle_seconds), "--website-session"], bufsize=0,
+                                stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+        def close():
+            proc.stdin.close()
+            try:
+                proc.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait()
+            proc.stdout.close()
+            proc.stderr.close()
+        self.addCleanup(close)
+        return proc
+
+    def read_ack(self, proc):
+        self.assertTrue(select.select([proc.stdout], [], [], 3)[0], "Missing bridge acknowledgement")
+        self.assertEqual(proc.stdout.readline(), b"ACCEPTED\n")
+
+    def free_port(self):
+        with socket.socket() as sock:
+            sock.bind(("127.0.0.1", 0))
+            return sock.getsockname()[1]
+
+    def test_partial_and_multiple_lines_do_not_block_http_and_eof_closes(self):
+        port = self.free_port()
+        proc = self.spawn(port)
+        nonce = secrets.token_hex(32).encode()
+        second = secrets.token_hex(32).encode()
+        headers = {"Origin": bridge.SITE, "Access-Control-Request-Method": "POST"}
+        proc.stdin.write(b"bad\n" + nonce + b"\n" + second[:12])
+        self.read_ack(proc)
+        conn = HTTPConnection("127.0.0.1", port, timeout=2)
+        try:
+            conn.request("OPTIONS", "/motion", headers=headers)
+            reply = conn.getresponse()
+            self.assertEqual(reply.status, 204)
+            reply.read()
+        finally:
+            conn.close()
+        proc.stdin.write(second[12:] + b"\n" + b"a" * 100 + b"\n" + secrets.token_hex(32).encode() + b"\n")
+        self.read_ack(proc)
+        self.read_ack(proc)
+        proc.stdin.close()
+        self.assertEqual(proc.wait(timeout=3), 0)
+        self.assertEqual(proc.stdout.read(), b"")
+        self.assertEqual(proc.stderr.read(), b"")
+
+    def test_idle_exits_and_busy_port_fails_before_acknowledgement(self):
+        with socket.socket() as occupied:
+            occupied.bind(("127.0.0.1", 0))
+            occupied.listen()
+            proc = self.spawn(occupied.getsockname()[1])
+            proc.stdin.write(secrets.token_hex(32).encode() + b"\n")
+            self.assertNotEqual(proc.wait(timeout=3), 0)
+            self.assertEqual(proc.stdout.read(), b"")
+            self.assertIn(b"Could not open", proc.stderr.read())
+        idle = self.spawn(self.free_port(), idle_seconds=0.1)
+        idle.stdin.write(secrets.token_hex(32).encode() + b"\n")
+        self.read_ack(idle)
+        self.assertEqual(idle.wait(timeout=3), 0)

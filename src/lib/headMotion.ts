@@ -12,6 +12,7 @@ type Reply = { enabled: boolean; owned: boolean; status: string; degrees: number
 type Session = {
   id: string;
   code: string;
+  launchDeadline: number | null;
   request: AbortController | null;
   poll: ReturnType<typeof setTimeout> | null;
   expiry: ReturnType<typeof setTimeout> | null;
@@ -22,6 +23,8 @@ type Session = {
 const INITIAL: Snapshot = { phase: "idle", status: "", degrees: null };
 const POLL_MS = 200;
 const FRESH_MS = 750;
+const LAUNCH_WAIT_MS = 45_000;
+const COMPANION_UNAVAILABLE = "Couldn’t connect to Body Synth Motion. Check that the app is installed on this Mac, allow local network access in your browser, then select Start AirPods again.";
 
 /** The bridge prints this exact home-page fragment. Other anchors and OAuth URLs are untouched. */
 export function consumeMotionLink(location: Pick<Location, "origin" | "pathname" | "hash" | "search">,
@@ -41,14 +44,19 @@ function isReply(value: unknown): value is Reply {
     (record.degrees === null || (typeof record.degrees === "number" && Number.isFinite(record.degrees) && Math.abs(record.degrees) <= 180));
 }
 
-class BridgeError extends Error {}
+class BridgeError extends Error {
+  constructor(message: string, readonly status?: number) { super(message); }
+}
 
 export class HeadMotionClient {
   private state = INITIAL;
   private session: Session | null = null;
   private listeners = new Set<() => void>();
 
-  constructor(private fetcher: typeof fetch = (...args) => fetch(...args)) {}
+  constructor(
+    private fetcher: typeof fetch = (...args) => fetch(...args),
+    private openCompanion = (url: string) => window.location.assign(url),
+  ) {}
 
   subscribe = (listener: () => void) => {
     this.listeners.add(listener);
@@ -64,10 +72,19 @@ export class HeadMotionClient {
   }
 
   start(code: string, source: MotionSource, phone: string) {
+    this.begin(source, phone, code.trim());
+  }
+
+  startNative(source: MotionSource = "mac", phone = "") {
+    this.begin(source, phone, null);
+  }
+
+  private begin(source: MotionSource, phone: string, manualCode: string | null) {
     if (this.session) return;
-    code = code.trim();
     phone = phone.trim();
-    if (!/^[!-~]{1,128}$/.test(code)) { this.update("error", "Enter the pairing code printed in Terminal."); return; }
+    if (manualCode !== null && !/^[!-~]{1,128}$/.test(manualCode)) {
+      this.update("error", "Enter the pairing code printed in Terminal."); return;
+    }
     if (source === "iphone" && !isHeadTiltPhoneAddress(phone)) {
       this.update("error", "Enter the iPhone’s Wi-Fi IPv4 address."); return;
     }
@@ -76,9 +93,21 @@ export class HeadMotionClient {
     }
     // A new private ID per activation prevents a delayed Stop from an old
     // tab session from cancelling a later run. It survives client navigation.
-    const run: Session = { id: crypto.randomUUID(), code, request: null, poll: null, expiry: null, centerPending: false, failures: 0 };
+    const code = manualCode ?? Array.from(crypto.getRandomValues(new Uint8Array(32)),
+      byte => byte.toString(16).padStart(2, "0")).join("");
+    const run: Session = {
+      id: crypto.randomUUID(), code, launchDeadline: manualCode === null ? Date.now() + LAUNCH_WAIT_MS : null,
+      request: null, poll: null, expiry: null, centerPending: false, failures: 0,
+    };
     this.session = run;
-    this.update("starting", "Connecting to the motion bridge…");
+    if (manualCode === null) {
+      this.update("starting", "Opening Body Synth Motion… Choose Open if your browser asks, and allow local network access.");
+      // Keep the external protocol hand-off on the original click stack.
+      try { this.openCompanion(`bodysynth-motion://connect/${code}`); }
+      catch { this.end(run); this.update("error", COMPANION_UNAVAILABLE); return; }
+    } else {
+      this.update("starting", "Connecting to the motion bridge…");
+    }
     void this.exchange(run, source === "mac" ? { action: "start", source } : { action: "start", source, phone });
   }
 
@@ -107,6 +136,12 @@ export class HeadMotionClient {
 
   private async exchange(run: Session, command: Command) {
     if (this.session !== run) return;
+    // A browser permission sheet or sleeping Mac can delay a scheduled retry.
+    if (command.action === "start" && run.launchDeadline !== null && Date.now() >= run.launchDeadline) {
+      this.stop();
+      this.update("error", COMPANION_UNAVAILABLE);
+      return;
+    }
     try {
       const reply = await this.send(run, command);
       if (this.session !== run) return;
@@ -123,11 +158,22 @@ export class HeadMotionClient {
       }, FRESH_MS);
     } catch (error) {
       if (this.session !== run) return;
-      if (command.action === "status" && !(error instanceof BridgeError) && ++run.failures < 3) {
+      // The app can be cold, or the browser's first POST can beat the URL
+      // hand-off to an already-running app. Only replay this tab's own Start.
+      if (command.action === "start" && run.launchDeadline !== null && (!(error instanceof BridgeError) || error.status === 401)) {
+        const delay = Math.min(500 * ++run.failures, 1500);
+        if (Date.now() + delay < run.launchDeadline) {
+          run.poll = setTimeout(() => { void this.exchange(run, command); }, delay);
+          return;
+        }
+        this.stop();
+        this.update("error", COMPANION_UNAVAILABLE);
+        return;
+      } else if (command.action === "status" && !(error instanceof BridgeError) && ++run.failures < 3) {
         this.update("active", "Motion bridge interrupted. Reconnecting…");
       } else {
         this.stop();
-        this.update("error", error instanceof BridgeError ? error.message :
+        this.update("error", error instanceof BridgeError ? error.message : run.launchDeadline !== null ? COMPANION_UNAVAILABLE :
           "Could not reach the motion bridge. Run the Terminal command on this Mac and allow the browser to access local devices or loopback, then try again.");
         return;
       }
@@ -144,7 +190,10 @@ export class HeadMotionClient {
   private async send(run: Session, command: Command, keepalive = false): Promise<Reply> {
     const abort = new AbortController();
     if (!keepalive) run.request = abort;
-    const timeout = setTimeout(() => abort.abort(), command.action === "start" ? 30_000 : 1000);
+    const requestLimit = command.action === "start" ? 30_000 : 1000;
+    const timeoutMs = command.action === "start" && run.launchDeadline !== null
+      ? Math.max(1, Math.min(requestLimit, run.launchDeadline - Date.now())) : requestLimit;
+    const timeout = setTimeout(() => abort.abort(), timeoutMs);
     try {
       const options: RequestInit & { targetAddressSpace: "loopback" } = {
         method: "POST", mode: "cors", credentials: "omit", cache: "no-store",
@@ -153,14 +202,19 @@ export class HeadMotionClient {
         body: JSON.stringify(command),
       };
       const response = await this.fetcher(MOTION_URL, options);
-      if (response.status === 401) throw new BridgeError("Check the pairing code printed by the motion bridge in Terminal.");
-      const payload: unknown = await response.json();
+      if (response.status === 401) throw new BridgeError(run.launchDeadline === null
+        ? "Check the pairing code printed by the motion bridge in Terminal."
+        : "Body Synth Motion disconnected. Select Start AirPods to reconnect.", 401);
+      const payload: unknown = await response.json().catch(error => {
+        if (error instanceof SyntaxError) return null;
+        throw error;
+      });
       if (!response.ok) {
         const message = payload && typeof payload === "object" && "error" in payload ? payload.error : null;
         throw new BridgeError(typeof message === "string" && message.length <= 400 && !message.includes(run.code)
-          ? message : "The local bridge rejected this request. Check its Terminal window and try again.");
+          ? message : "The local bridge rejected this request. Try starting again.");
       }
-      if (!isReply(payload)) throw new BridgeError("The motion bridge sent an invalid reading. Restart the bridge from this checkout.");
+      if (!isReply(payload)) throw new BridgeError("The motion bridge sent an invalid reading. Restart the motion bridge and try again.");
       return payload;
     } finally {
       clearTimeout(timeout);

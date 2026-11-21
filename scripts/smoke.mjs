@@ -53,6 +53,8 @@ for (const path of ["/", "/guitar", "/bass", "/studio", "/pocket-operators", "/f
     assert.ok(body.includes(`<title>${pageTitles[path] ?? "body.synth"}</title>`), `${path} must have its page title`);
     assert.equal(body.includes('aria-label="AirPods head motion"'), path !== "/for-you/privacy",
       `${path} must have the appropriate site-wide motion controls`);
+    assert.equal(/<button\b[^>]*><span\b[^>]*><\/span>Start AirPods<\/button>/.test(body), path !== "/for-you/privacy",
+      `${path} must show the one-click AirPods launcher on creative pages`);
     if (path === "/") {
       // The homepage is server-rendered: every project link is in the HTML.
       for (const href of ["/guitar", "/bass", "/studio", "/for-you", "/ascii", "/pocket-operators", "/fuzz"]) assert.ok(body.includes(`href="${href}"`), `/ must link to ${href}`);

@@ -55,20 +55,15 @@ and allow the microphone.
 
 ## AirPods on the website
 
-From the repository root on the Mac where you open Body Synth, run:
+With **Body Synth Motion** installed on your Mac, put on your motion-capable
+AirPods, connect them to the Mac, and click **Start AirPods** on
+the [Body Synth website](https://body-synth-beta.vercel.app/). Hold your
+playing posture while the first reading sets the center. On first use, your
+browser may ask to open the companion and connect to a local device. macOS
+may ask for motion access. [Set up another Mac](macos/motion/README.md#install-on-another-mac)
 
-```sh
-python3 scripts/head-motion.py
-```
-
-Keep that Terminal window open. Follow its pairing link or enter its code in
-**AirPods** on the website. Connect motion-capable AirPods to your Mac, select
-**This Mac**, hold your playing posture, and click **Start**. Allow local
-network and motion access if prompted. The Mac reader needs macOS 14 or later
-and the Xcode Command Line Tools for its first build.
-
-If your AirPods are connected to your iPhone, choose **iPhone** instead. Enter
-the phone’s Wi-Fi IPv4 address, click **Start**, then enter the displayed Mac
+If your AirPods are connected to your iPhone, open the AirPods options and choose **iPhone**. Enter
+the phone’s Wi-Fi IPv4 address, click **Start AirPods**, then enter the displayed Mac
 address in the [iPhone sender](touchdesigner/fuzz/README.md#airpods-head-tilt).
 Both devices must be on the same Wi-Fi.
 
@@ -87,6 +82,10 @@ gesture. **Set center** recalibrates. Closing the panel leaves tracking on
 while you move between instruments in the same tab. **Stop**, switching to
 another tab, or closing the site releases tracking. Motion travels between
 the browser and the local bridge on `127.0.0.1:9982`.
+
+For local website development or an existing manual setup, run
+`python3 scripts/head-motion.py` from the repository root. Use the printed
+link or enter its code in AirPods options.
 
 ## Spark PEDAL / guitar input
 

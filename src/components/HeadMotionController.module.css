@@ -9,9 +9,12 @@
 .left { right: auto; left: max(.7rem, env(safe-area-inset-left)); }
 .launcher, .panel { background: #faf6ec; border: 1px solid #22306b; box-shadow: 2px 3px 0 #11182d75; }
 .launcher {
-  display: flex; align-items: center; gap: .4rem; min-height: 36px;
-  padding: .3rem .7rem; border-radius: 1.5rem; font-weight: 700; cursor: pointer;
+  display: inline-flex; align-items: stretch; border-radius: 1.5rem;
 }
+.start, .options { min-height: 38px; cursor: pointer; font-weight: 700; }
+.start { display: flex; align-items: center; gap: .4rem; padding: .3rem .75rem; border-radius: 1.5rem; }
+.options { display: grid; place-items: center; min-width: 36px; border-left: 1px solid #22306b55; border-radius: 0 1.5rem 1.5rem 0; }
+.options span { transform: translateY(.15rem); }
 .dot, .live { width: .5rem; height: .5rem; border: 1.5px solid currentColor; border-radius: 50%; }
 .live { background: #388745; }
 .dock :focus-visible { outline: 3px solid #bb3785; outline-offset: 2px; }
@@ -39,8 +42,7 @@
 .reading output { font: 600 2rem/1.2 var(--font-geist-mono), monospace; }
 .actions { margin-top: .5rem; }
 .status { margin-top: .6rem; overflow-wrap: anywhere; }
-.setup { margin-top: .6rem; font-size: .82rem; }
-.setup summary { cursor: pointer; padding-block: .4rem; }
+.setup, .help { margin-top: .6rem; font-size: .82rem; }
+.setup a { text-decoration: underline; text-underline-offset: .15em; }
 .setup p { margin-block: .4rem; }
 .setup code { display: block; overflow-wrap: anywhere; }
-.srOnly { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
