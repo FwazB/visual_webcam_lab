@@ -1,6 +1,31 @@
+import { isIP } from "node:net";
 import { parseSpotifyTrackLink } from "@/lib/spotify/trackLink";
 
 const redirectStatuses = new Set([301, 302, 303, 307, 308]);
+
+const windowMs = 60_000;
+const maxPerClient = 12;
+const maxPerInstance = 120;
+// Accepted requests only. Each warm function instance retains at most 120 entries.
+const recent: { time: number; client: string }[] = [];
+
+function retryAfterSeconds(request: Request): number {
+  const now = performance.now();
+  while (recent.length && recent[0].time <= now - windowMs) recent.shift();
+
+  // Vercel supplies this client address. Elsewhere, share a budget across all callers.
+  const ip = process.env.VERCEL === "1" ? request.headers.get("x-vercel-forwarded-for") : null;
+  const client = ip && ip.length <= 45 && !ip.includes("%") && isIP(ip) ? ip : "unknown";
+  const clientRequests = recent.filter(entry => entry.client === client);
+  if (clientRequests.length >= maxPerClient) {
+    return Math.ceil((clientRequests[0].time + windowMs - now) / 1000);
+  }
+  if (recent.length >= maxPerInstance) {
+    return Math.ceil((recent[0].time + windowMs - now) / 1000);
+  }
+  recent.push({ time: now, client });
+  return 0;
+}
 
 function reply(body: { id: string } | { error: string }, status: number) {
   return Response.json(body, { status, headers: { "Cache-Control": "private, no-store" } });
@@ -13,6 +38,13 @@ export async function GET(request: Request) {
   const values = new URL(request.url).searchParams.getAll("url");
   const initial = values.length === 1 ? parseSpotifyTrackLink(values[0]) : null;
   if (initial?.kind !== "short") return reply({ error: "A Spotify short link is required." }, 400);
+
+  const retryAfter = retryAfterSeconds(request);
+  if (retryAfter) {
+    const response = reply({ error: "Too many Spotify short-link lookups." }, 429);
+    response.headers.set("Retry-After", String(retryAfter));
+    return response;
+  }
 
   const deadline = AbortSignal.timeout(4000);
   const signal = AbortSignal.any([request.signal, deadline]);

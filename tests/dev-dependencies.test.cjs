@@ -1,15 +1,19 @@
 /* eslint-disable @typescript-eslint/no-require-imports -- Verify the CommonJS APIs actually consumed by lint plugins. */
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const { createRequire } = require('node:module');
 
-test('MCP constrained-collection validator uses the patched Zod release', () => {
-  const fromMcp = createRequire(require.resolve('../node_modules/touchdesigner-mcp-server/dist/cli.js'));
-  const { version } = fromMcp('zod/package.json');
-  const [major, minor, patch] = version.split('.').map(Number);
-  assert.ok(major > 4 || (major === 4 && (minor > 6 || (minor === 6 && patch >= 6))), version);
-  const { z } = fromMcp('zod');
-  assert.equal(z.array(z.string()).max(2).safeParse(['a', 'b', 'c']).success, false);
+test('the project does not install or register the withdrawn TouchDesigner MCP', () => {
+  const lock = require('../package-lock.json');
+  assert.ok(!Object.keys(lock.packages).some(name => name.endsWith('/touchdesigner-mcp-server')));
+  const configPath = path.join(__dirname, '..', '.mcp.json');
+  if (fs.existsSync(configPath)) {
+    const { mcpServers } = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    assert.ok(!mcpServers?.touchdesigner);
+    assert.doesNotMatch(JSON.stringify(mcpServers ?? {}), /touchdesigner-mcp-server/);
+  }
 });
 
 test('every lint consumer resolves the actual patched registry minimatch release', () => {

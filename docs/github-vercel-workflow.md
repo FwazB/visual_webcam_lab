@@ -19,7 +19,11 @@ Include this config in the first candidate push. Inspect the Vercel event to ver
 
 CI runs on pushes to `main`, `safety/**`, `review/**` and PRs targeting `main`. Checks use pinned action commits, read-only contents permission, no persisted checkout credentials, no project secrets, separate push/PR concurrency groups and bounded timeouts.
 
-A successful PR check followed by an enforced merge is the ordering mechanism. This config does **not** cause Vercel to wait for a check on a new main push: post-merge Actions and Vercel may run concurrently. Direct main pushes/bypasses would break the intended guarantee. Main branch protection must be verified, not assumed.
+GitHub branch protection controls who may change `main` and which checks must pass before merging. Verify the enforced rules in GitHub. Someone with unrestricted write access could change both the workflow and the build guard.
+
+Vercel's build command waits for the audited repository's `.github/workflows/ci.yml` on the exact `main` push before compiling the app. The guard checks the production Git metadata, the run's source repository, branch, event and commit, and the **Body synth checks** job on that run attempt. GitHub Actions still uses `npm run build` directly.
+
+Enable Vercel system environment variables for the linked Git project. The guard reads public GitHub Actions metadata without credentials and polls every 30 seconds for up to 18 minutes. A missing Git identity, failed job, API error or timeout stops the deployment. After fixing the cause, confirm the check passed on that commit and redeploy through the linked project. [Vercel system environment variables](https://vercel.com/docs/environment-variables/system-environment-variables)
 
 ## Checks and limits
 

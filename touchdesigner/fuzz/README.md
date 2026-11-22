@@ -298,8 +298,8 @@ failure also closes pending connections; a native socket-close failure stops
 the listener. These bounds protect the application
 callback state; they do not replace native HTTP/WebSocket connection limits.
 It never evaluates app-supplied Python, files, or
-operator paths. HTTP requests expose no state. This runtime bridge is separate
-from the development MCP on port 9981.
+operator paths. HTTP requests expose no state. If you previously installed the
+developer MCP, [disable its control service](../../docs/touchdesigner-mcp.md).
 The Lights-page controls are local TouchDesigner parameters.
 
 If a browser blocks the connection from the HTTPS site to the local Fuzz

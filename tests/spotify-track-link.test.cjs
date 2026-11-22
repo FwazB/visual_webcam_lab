@@ -53,6 +53,8 @@ test("the client sends only the normalized short link to the same origin", async
 
   network.mock.mockImplementation(async () => Response.json({ id: "malformed" }));
   await assert.rejects(resolveSpotifyTrackId(share), { name: "SpotifyLinkError", message: /full open\.spotify\.com\/track address/ });
+  network.mock.mockImplementation(async () => new Response(null, { status: 429 }));
+  await assert.rejects(resolveSpotifyTrackId(share), { name: "SpotifyLinkError", message: /Try again in a minute/ });
   const aborted = AbortSignal.abort();
   network.mock.mockImplementation(async () => { throw aborted.reason; });
   await assert.rejects(resolveSpotifyTrackId(share, aborted), error => error === aborted.reason);
@@ -102,4 +104,38 @@ test("unsupported destinations and loops stop without contacting their targets",
   assert.equal(network.mock.callCount(), 3);
   network.mock.mockImplementation(async () => { throw new TypeError("Network error"); });
   assert.equal((await GET(routeRequest(share))).status, 502);
+});
+
+test("valid short links share bounded rolling client and instance budgets before any upstream work", async t => {
+  const originalVercel = process.env.VERCEL;
+  t.after(() => {
+    if (originalVercel === undefined) delete process.env.VERCEL;
+    else process.env.VERCEL = originalVercel;
+  });
+  let now = performance.now() + 60_000;
+  t.mock.method(performance, "now", () => now);
+  const network = t.mock.method(globalThis, "fetch", async () => Response.redirect(canonical));
+  const lookup = ip => GET(routeRequest(share, { "x-vercel-forwarded-for": ip }));
+
+  delete process.env.VERCEL;
+  for (let i = 1; i <= 12; i++) assert.equal((await lookup("192.0.2." + i)).status, 200);
+  assert.equal((await lookup("192.0.2.13")).status, 429, "outside Vercel, callers share the unknown-client budget");
+
+  process.env.VERCEL = "1";
+  assert.equal((await lookup("invalid")).status, 429, "unusable proxy values also share that budget");
+  now += 60_000;
+  const requests = Array.from({ length: 13 }, () => lookup("2001:db8::1"));
+  const responses = await Promise.all(requests);
+  assert.deepEqual(responses.map(r => r.status), [...Array(12).fill(200), 429]);
+  assert.equal(responses[12].headers.get("retry-after"), "60");
+  assert.match(responses[12].headers.get("cache-control"), /no-store/);
+
+  now += 30_100;
+  for (let i = 1; i <= 108; i++) assert.equal((await lookup("192.0.2." + i)).status, 200);
+  const limited = await lookup("192.0.2.200");
+  assert.equal(limited.status, 429, "a new client also observes the aggregate limit");
+  assert.equal(limited.headers.get("retry-after"), "30");
+  assert.equal(network.mock.callCount(), 12 + 120, "denied attempts never contact Spotify");
+  now += 29_900;
+  assert.equal((await lookup("2001:db8::1")).status, 200, "the original admissions expire on time");
 });

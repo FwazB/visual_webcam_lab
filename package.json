@@ -34,16 +34,12 @@
     "eslint": "^9",
     "eslint-config-next": "^16.4.2",
     "tailwindcss": "^4",
-    "touchdesigner-mcp-server": "2.1.0",
     "typescript": "^5"
   },
   "engines": {
     "node": "^22.18.0 || ^24.0.0 || >=26.0.0"
   },
   "overrides": {
-    "touchdesigner-mcp-server": {
-      "zod": "4.6.6"
-    },
     "minimatch@>=9": "11.0.3",
     "eslint": {
       "minimatch": "11.0.3"

@@ -112,8 +112,9 @@ origins and integrity hashes. Pinned NumPy test requirements also pass pip-audit
 These results describe known advisories at the audit time, not package safety
 certification.
 
-The MCP tool is pinned to `touchdesigner-mcp-server@2.1.0` and launched from the
-installed local CLI, never an unpinned `npx` download. OpenCV is exactly
+At the time of this audit the project pinned the developer MCP tool to
+`touchdesigner-mcp-server@2.1.0`. The project has since withdrawn that setup.
+[Instructions for existing installations](touchdesigner-mcp.md). OpenCV is exactly
 `4.12.0-release.1`; its runtime and license are copied from the locked package.
 The lint patch checks exact consumer versions and original/patched hashes,
 rejecting unexpected installations. Maintain it using the

@@ -40,6 +40,9 @@ export async function resolveSpotifyTrackId(input: string, signal?: AbortSignal)
     const response = await fetch(`/api/spotify/resolve?${query}`, {
       signal, mode: "same-origin", credentials: "omit", cache: "no-store", redirect: "error", referrerPolicy: "no-referrer",
     });
+    if (response.status === 429) {
+      throw new SpotifyLinkError("Too many short-link lookups. Try again in a minute or paste the full open.spotify.com/track address.");
+    }
     if (response.ok) {
       const result: unknown = await response.json();
       if (result && typeof result === "object" && "id" in result && typeof result.id === "string" && trackId.test(result.id)) {
@@ -47,7 +50,7 @@ export async function resolveSpotifyTrackId(input: string, signal?: AbortSignal)
       }
     }
   } catch (error) {
-    if (signal?.aborted) throw error;
+    if (signal?.aborted || error instanceof SpotifyLinkError) throw error;
   }
   throw new SpotifyLinkError(fullLinkHelp);
 }

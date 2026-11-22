@@ -46,10 +46,7 @@ a local research tool rather than a production accuracy claim.
 
 ## Quick start
 
-Use Node `^22.18.0 || ^24.0.0 || >=26.0.0` for the complete development
-installation, including the optional TouchDesigner MCP tool. Ensure the same
-supported runtime is on the launching shell's PATH; no global runtime changes
-are required by the repository.
+Use Node `^22.18.0 || ^24.0.0 || >=26.0.0` for local development.
 
 ```bash
 npm ci
@@ -363,8 +360,7 @@ needed.
   speaker monitoring, rebuilding, and safe export.
 - [Projection Mapping guide](touchdesigner/projection_mapping/README.md):
   source selection, alignment, and display routing.
-- [TouchDesigner MCP](docs/touchdesigner-mcp.md): authoring the networks from
-  Claude Code (`.mcp.json`).
+- Previously installed the TouchDesigner developer MCP? [Disable the old setup](docs/touchdesigner-mcp.md).
 - Message types: `src/lib/touchdesigner/protocol.ts`.
 
 ## Layout

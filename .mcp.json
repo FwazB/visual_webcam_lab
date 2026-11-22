@@ -1,8 +1,0 @@
-{
-  "mcpServers": {
-    "touchdesigner": {
-      "command": "node",
-      "args": ["./node_modules/touchdesigner-mcp-server/dist/cli.js"]
-    }
-  }
-}

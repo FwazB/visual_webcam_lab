@@ -1,49 +1,15 @@
-# TouchDesigner MCP (development only)
+# TouchDesigner developer MCP is on hold
 
-An MCP server lets an agent author and inspect the TouchDesigner networks
-(Fuzz, Projection Mapping). This repo is configured for `8beeeaaat/touchdesigner-mcp`
-(<https://github.com/8beeeaaat/touchdesigner-mcp>), the route Derivative's
-community post "Claude Code + MCP_server + Touchdesigner (the easy way)"
-describes.
+Body Synth's website, Fuzz scene and Projection Mapping scene run independently of the developer MCP. Skip the MCP when setting up these projects.
 
-It is a local development tool and never ships with the web app. Keep its
-TouchDesigner Web Server DAT bound to 127.0.0.1; a blank Local Address exposes
-the server on every interface.
+The previously recommended component starts an unauthenticated control service as soon as it is imported. A client that can reach it could run Python with the TouchDesigner user's permissions. Keep the component disabled. A future setup needs to start inactive, bind to loopback and authenticate clients before accepting control requests.
 
-## One-time setup
+## Disable an existing setup
 
-1. Use TouchDesigner **2025.33070 or newer**. Non-commercial is fine. That
-   release added the Web Server DAT's Local Address setting used to restrict
-   control to localhost. See the [release notes](https://derivative.ca/release/202533070/75035).
-2. In the TouchDesigner project you want to drive (for example
-   `touchdesigner/fuzz/fuzz.toe`, or a fresh project), import the
-   `mcp_webserver_base.tox` that ships with the MCP server, placed directly
-   under the project: `/project1/mcp_webserver_base`. It starts a Web Server
-   DAT on port 9981. Set that DAT's **Local Address** to `127.0.0.1` and
-   restart it before using the MCP; verify it is not listening on `*`.
-3. Use Node `^22.18.0 || ^24.0.0 || >=26.0.0`, as declared in `package.json`;
-   Node 22.16 is not supported by this MCP package. Run `npm ci` from the repo
-   root to install the lockfile's exact packages and verify their integrity.
-   The MCP server is pinned to `2.1.0`; its Zod dependency is overridden to
-   patched `4.6.6`. Use the same supported Node on the launching process's PATH.
-   No machine-specific executable path is stored in `.mcp.json`.
-4. Start Claude Code from the repo root so it loads `.mcp.json`. The launcher
-   runs `node ./node_modules/touchdesigner-mcp-server/dist/cli.js`, using only
-   the installed local package. If it is missing, startup fails instead of
-   downloading a replacement; run `npm ci` before trying again. Approve the
-   project MCP server when Claude Code asks on first use. If TouchDesigner is
-   not on the default host/port, append `--host` / `--port` to the `args` in
-   `.mcp.json` after the CLI path.
+1. If the component is already loaded in TouchDesigner, turn off **Active** on the developer component `mcp_webserver_base`. Save your local project with the component inactive. For an older project that might start the component when opened, disconnect the machine from the network before opening it to disable the component.
+2. If you registered a `touchdesigner` MCP server in your own client settings, remove that entry and restart the client. Updating Body Synth alone cannot stop a component already running inside TouchDesigner.
+3. On macOS, check for a local listener with the following command. An empty result means no TCP service is listening on the old default port. If you configured a different port, check that port instead.
 
-## Working session
-
-- Keep TouchDesigner open with the project loaded while working.
-- After updating the MCP server or the `.tox`, restart both TouchDesigner
-  and Claude Code so the new code is loaded.
-- The `.tox` locates its Python modules with relative paths; do not move the
-  server's files around after installing.
-
-## What the agent can then do
-
-Create and wire operators, set parameters, read and write DATs, run Python
-in the project, and check for errors.
+   ```sh
+   lsof -nP -iTCP:9981 -sTCP:LISTEN
+   ```
