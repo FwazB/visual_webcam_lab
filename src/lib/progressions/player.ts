@@ -1,14 +1,16 @@
 import { midiToHz } from "@/lib/instrument/pitch";
 import type { Instrument } from "./music";
+import { requestPlaybackSession } from "./playbackSession";
 
 interface Playback {
+  starting: boolean;
   playing: boolean;
   activeIndex: number | null;
   error: string | null;
 }
 
-export const IDLE_PLAYBACK: Playback = { playing: false, activeIndex: null, error: null };
-const AUDIO_ERROR = "Audio is unavailable. Try playing the loop or previewing the selected chord again.";
+export const IDLE_PLAYBACK: Playback = { starting: false, playing: false, activeIndex: null, error: null };
+const AUDIO_ERROR = "Audio couldn’t start. Tap a chord or Play loop to try again.";
 
 /** Integer beat boundaries are relative to the chosen starting chord, including on repeat. */
 function loopClock(count: number, bpm: number, startIndex: number, beats?: number[]) {
@@ -38,6 +40,8 @@ export class ProgressionPlayer {
   private context: AudioContext | null = null;
   private generation = 0;
   private timer: ReturnType<typeof setInterval> | null = null;
+  private resumeTimer: ReturnType<typeof setTimeout> | null = null;
+  private releaseSession: (() => void) | null = null;
   private voices = new Map<OscillatorNode, GainNode>();
 
   constructor(
@@ -45,8 +49,14 @@ export class ProgressionPlayer {
     private readonly createContext = () => new AudioContext({ latencyHint: "interactive" }),
   ) {}
 
+  private clearResumeTimer() {
+    if (this.resumeTimer !== null) clearTimeout(this.resumeTimer);
+    this.resumeTimer = null;
+  }
+
   private silence() {
     this.generation++;
+    this.clearResumeTimer();
     if (this.timer !== null) clearInterval(this.timer);
     this.timer = null;
     if (this.context) this.context.onstatechange = null;
@@ -66,6 +76,8 @@ export class ProgressionPlayer {
       ctx.onstatechange = null;
       if (ctx.state !== "closed") void ctx.close().catch(() => {});
     }
+    this.releaseSession?.();
+    this.releaseSession = null;
   }
 
   stop = () => {
@@ -90,24 +102,38 @@ export class ProgressionPlayer {
     // Preserve doubled notes while strumming only the strings shown on the diagram.
     const chords = voices.map(notes => notes.filter(n => Number.isInteger(n) && n >= 0 && n <= 127).sort((a, b) => a - b));
     if (!chords.length || chords.some(notes => !notes.length)) { this.stop(); return; }
-    this.update({ playing: clock !== null, activeIndex: null, error: null });
-    const fail = () => {
+    const fail = (message = AUDIO_ERROR) => {
       if (run !== this.generation) return;
       this.silence();
       this.closeContext();
-      this.update({ ...IDLE_PLAYBACK, error: AUDIO_ERROR });
+      this.update({ ...IDLE_PLAYBACK, error: message });
     };
     try {
-      const ctx = this.context ??= this.createContext();
-      if (ctx.state !== "running") await ctx.resume();
-      if (run !== this.generation) return;
+      if (!this.context) {
+        this.releaseSession = requestPlaybackSession();
+        this.context = this.createContext();
+      }
+      const ctx = this.context;
+      if (ctx.state !== "running") {
+        this.update({ ...IDLE_PLAYBACK, starting: true });
+        // A blocked resume can stay pending until a future gesture. Allow a fresh attempt.
+        this.resumeTimer = setTimeout(fail, 4000);
+        await ctx.resume();
+        if (run !== this.generation) return;
+        this.clearResumeTimer();
+      }
       if (ctx.state !== "running") { fail(); return; }
-      ctx.onstatechange = () => { if (ctx.state !== "running") fail(); };
-      const harmonics = instrument === "guitar" ? [0, 1, 0.48, 0.24, 0.12, 0.07] : [0, 1, 0.3, 0.11];
+      ctx.onstatechange = () => {
+        if (ctx.state !== "running") fail("Playback was interrupted. Tap a chord or Play loop to resume.");
+      };
+      // Upper bass harmonics carry low roots on small speakers while keeping the same pitch.
+      const harmonics = instrument === "guitar" ? [0, 1, 0.48, 0.24, 0.12, 0.07]
+        : [0, 1, 0.44, 0.30, 0.22, 0.19, 0.16, 0.10, 0.07];
       const wave = ctx.createPeriodicWave(new Float32Array(harmonics.length), Float32Array.from(harmonics));
       const origin = ctx.currentTime + 0.015;
       if (clock === null) {
         this.strum(ctx, wave, instrument, chords[0], origin, 1.8, true);
+        this.update(IDLE_PLAYBACK);
         return;
       }
       let scheduled = -1;
@@ -131,7 +157,7 @@ export class ProgressionPlayer {
           scheduled = upcoming;
           if (displayed !== current) {
             displayed = current;
-            this.update({ playing: true, activeIndex: (startIndex + current) % chords.length, error: null });
+            this.update({ starting: false, playing: true, activeIndex: (startIndex + current) % chords.length, error: null });
           }
         } catch { fail(); }
       };

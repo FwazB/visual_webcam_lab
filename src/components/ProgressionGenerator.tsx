@@ -275,12 +275,15 @@ export default function ProgressionGenerator({ initialInstrument = "guitar", ini
           </div>
           <div className={styles.scoreHeading}><h2>Your progression</h2><span>4 beats per chord</span></div>
           </>}
-          <p className={styles.help}>{guided ? "Choose a chord to see its fingering." : "Choose a bar to see its fingering."}</p>
+          <p className={styles.help}>Tap a chord to hear it and see its fingering.</p>
           <ol className={styles.score} data-count={progression.length} aria-label={guided ? "Practice chords" : "Progression bars"}>
             {progression.map((item, index) => <li key={index}>
               <button type="button" ref={button => { tiles.current[index] = button; }} aria-pressed={current === index}
                 aria-label={beats ? `Chord ${index + 1}, ${item.name}, ${item.numeral}, ${beatLabel(beats[index])}` : `Bar ${index + 1}, ${item.name}, ${item.numeral}`}
-                onClick={() => selectChord(index)}
+                onClick={() => {
+                  selectChord(index);
+                  if (!player.playing) player.preview(voices[index], instrument);
+                }}
                 onKeyDown={event => arrowKey(event, index)} className={styles.tile}>
                 <span className={styles.tileBar}>{beats ? beatLabel(beats[index]) : `Bar ${index + 1}`}</span><strong>{item.name}</strong>
                 <span className={styles.degree}>{item.numeral}</span>
@@ -297,6 +300,7 @@ export default function ProgressionGenerator({ initialInstrument = "guitar", ini
                 onChange={event => { stopAtCurrent(); const value = Number(event.target.value); if (guided) setSongBpm(value); else setFreeBpm(value); }} />
             </label>
           </div>
+          {player.starting && <p role="status" className={styles.help}>Starting audio…</p>}
           {player.error && <p role="alert" className={styles.error}>{player.error}</p>}
           {guided && <p className={styles.advanceCue}>{songIndex === SONGS.length - 1
             ? "Finish with two steady loops, then revisit a song or try the free generator."

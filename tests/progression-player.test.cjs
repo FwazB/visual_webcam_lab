@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-require-imports -- Node's test runner loads the production player through the TypeScript hook. */
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
-const { ProgressionPlayer } = require("../src/lib/progressions/player.ts");
+const { IDLE_PLAYBACK, ProgressionPlayer } = require("../src/lib/progressions/player.ts");
 const { midiToHz } = require("../src/lib/instrument/pitch.ts");
 
 function audio(state = "running") {
@@ -72,7 +72,7 @@ test("replacing a loop with a bass preview disconnects queued notes and releases
   const loopVoices = ctx.oscillators.slice();
   player.preview([35, 42], "bass");
   assert.ok(loopVoices.every(o => o.disconnected));
-  assert.deepEqual(states.at(-1), { playing: false, activeIndex: null, error: null });
+  assert.deepEqual(states.at(-1), IDLE_PLAYBACK);
   const bass = ctx.oscillators.slice(loopVoices.length);
   assert.deepEqual(bass.map(o => o.frequency.value), [35, 42].map(midiToHz));
   assert.notDeepEqual(loopVoices[0].wave, bass[0].wave);
@@ -142,7 +142,7 @@ test("superseded and stopped audio-resume promises never start notes or replace 
   const states = [];
   const player = new ProgressionPlayer(s => states.push(s), () => ctx);
   player.play([[60]], "guitar", 84);
-  assert.equal(states.at(-1).playing, true);
+  assert.deepEqual(states.at(-1), { ...IDLE_PLAYBACK, starting: true });
   player.preview([40], "bass");
   pending[1].reject(new Error("audio unavailable"));
   await Promise.resolve();
@@ -163,6 +163,54 @@ test("superseded and stopped audio-resume promises never start notes or replace 
   assert.equal(next.oscillators.length, 0);
   assert.equal(next.state, "closed");
   assert.equal(states.at(-1).playing, false);
+});
+
+test("a stalled mobile start releases its session and a fresh tap can play", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
+  const session = { type: "auto" };
+  t.mock.getter(globalThis, "navigator", () => ({ audioSession: session }));
+  const blocked = audio("suspended");
+  let finishBlocked;
+  blocked.resume = () => new Promise(resolve => { finishBlocked = resolve; });
+  const ready = audio();
+  const contexts = [blocked, ready];
+  const states = [];
+  const player = new ProgressionPlayer(s => states.push(s), () => {
+    assert.equal(session.type, "playback");
+    return contexts.shift();
+  });
+  t.after(player.stop);
+  player.play([[33]], "bass", 60);
+  assert.deepEqual(states.at(-1), { ...IDLE_PLAYBACK, starting: true });
+  t.mock.timers.tick(4000);
+  assert.match(states.at(-1).error, /try again/);
+  assert.equal(states.at(-1).starting, false);
+  assert.equal(blocked.state, "closed");
+  assert.equal(session.type, "auto");
+
+  player.preview([33], "bass");
+  assert.equal(session.type, "playback");
+  assert.equal(ready.oscillators.length, 1);
+  finishBlocked();
+  await Promise.resolve();
+  assert.equal(blocked.oscillators.length, 0);
+  assert.deepEqual(states.at(-1), IDLE_PLAYBACK);
+  ready.oscillators[0].onended();
+  assert.equal(session.type, "auto");
+});
+
+test("a delayed successful resume keeps playing past the startup timeout", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
+  const ctx = audio("suspended");
+  const states = [];
+  const player = new ProgressionPlayer(s => states.push(s), () => ctx);
+  t.after(player.stop);
+  player.play([[40]], "bass", 80);
+  assert.equal(states.at(-1).starting, true);
+  await Promise.resolve();
+  t.mock.timers.tick(6000);
+  assert.deepEqual(states.at(-1), { ...IDLE_PLAYBACK, playing: true, activeIndex: 0 });
+  assert.equal(ctx.state, "running");
 });
 
 test("hidden tabs, pagehide and unmount each release the hook's audio", t => {
