@@ -1,12 +1,15 @@
 "use client";
 
 import Link from "next/link";
-import { useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useCallback, useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import CustomProgressionEditor from "./CustomProgressionEditor";
+import ProgressionsInstall from "./ProgressionsInstall";
 import { useProgressionPlayer } from "@/hooks/useProgressionPlayer";
 import { useTiltStep } from "@/hooks/useTiltStep";
 import { BASS_STANDARD, GUITAR_STANDARD } from "@/lib/instrument/profile";
 import { getProgression, getSongChord, KEYS, MOODS, nextVariation, type Chord, type Instrument } from "@/lib/progressions/music";
 import { LEVELS, SONGS, type LevelId } from "@/lib/progressions/songPath";
+import { createCustomProgression, customChordStep, type CustomProgression } from "@/lib/progressions/custom";
 import styles from "./ProgressionGenerator.module.css";
 
 const fingers = ["index", "middle", "ring", "pinky"];
@@ -15,7 +18,7 @@ const bassParts = {
   intermediate: { label: "Root and fifth together", preview: "Hear both notes" },
   advanced: { label: "Bass triad", preview: "Hear triad" },
 };
-type Mode = "song" | "free";
+type Mode = "song" | "free" | "custom";
 
 function saveView(setParams: (params: URLSearchParams) => void) {
   const url = new URL(window.location.href);
@@ -142,18 +145,34 @@ export default function ProgressionGenerator({ initialInstrument = "guitar", ini
   const [tonic, setTonic] = useState(0);
   const [mood, setMood] = useState<string>(MOODS[0].id);
   const [variation, setVariation] = useState(0);
+  const [custom, setCustom] = useState(createCustomProgression);
+  const customDraftOpened = useRef(false);
   const [selected, setSelected] = useState(0);
   const [songBpm, setSongBpm] = useState<number>(level.bpm);
   const [freeBpm, setFreeBpm] = useState(84);
-  const bpm = guided ? songBpm : freeBpm;
+  const bpm = mode === "custom" ? custom.bpm : guided ? songBpm : freeBpm;
   const player = useProgressionPlayer();
   const tiles = useRef<(HTMLButtonElement | null)[]>([]);
-  const progression = useMemo(() => guided ? song.chart.map(step => getSongChord(step, instrument, song.level))
-    : getProgression(tonic, mood, variation, instrument), [guided, song, tonic, mood, variation, instrument]);
-  const beats = useMemo(() => guided ? song.chart.map(step => step.beats) : undefined, [guided, song]);
+  const chart = useMemo(() => {
+    if (mode === "custom") return custom.steps.map(customChordStep);
+    if (mode === "song") return song.chart;
+  }, [mode, custom.steps, song.chart]);
+  const voicingLevel = guided ? song.level : "advanced";
+  const progression = useMemo(() => chart ? chart.map(step => getSongChord(step, instrument, voicingLevel))
+    : getProgression(tonic, mood, variation, instrument), [chart, voicingLevel, instrument, tonic, mood, variation]);
+  const beats = useMemo(() => chart?.map(step => step.beats), [chart]);
   const voices = useMemo(() => progression.map(chord => chord.strings.flatMap(string => string.midi === null ? [] : [string.midi])), [progression]);
   const current = player.playing ? player.activeIndex ?? selected : selected;
   const chord = progression[current];
+
+  const stop = player.stop;
+  const updateCustom = useCallback((next: CustomProgression, index?: number) => {
+    if (index !== undefined) {
+      stop();
+      setSelected(index);
+    }
+    setCustom(next);
+  }, [stop]);
 
   useTiltStep(direction => {
     if (!player.playing) setSelected(index => (index + direction + progression.length) % progression.length);
@@ -177,7 +196,7 @@ export default function ProgressionGenerator({ initialInstrument = "guitar", ini
     setMode(value);
     saveView(params => {
       if (value === "song") { params.delete("mode"); params.set("song", song.id); }
-      else { params.set("mode", "free"); params.delete("song"); }
+      else { params.set("mode", value); params.delete("song"); }
     });
   }
   function changeInstrument(value: Instrument) {
@@ -214,6 +233,12 @@ export default function ProgressionGenerator({ initialInstrument = "guitar", ini
     if (player.playing) stopAtCurrent();
     else player.play(voices, instrument, bpm, selected, beats);
   }
+  function changeTempo(value: number) {
+    stopAtCurrent();
+    if (mode === "custom") setCustom(draft => ({ ...draft, bpm: value }));
+    else if (guided) setSongBpm(value);
+    else setFreeBpm(value);
+  }
 
   return <main className={styles.page}>
     <div className={styles.inner}>
@@ -224,37 +249,34 @@ export default function ProgressionGenerator({ initialInstrument = "guitar", ini
             onClick={() => changeInstrument(value)}>{value === "guitar" ? "Guitar" : "Bass"}</button>)}
         </div>
       </header>
-      <h1 className={styles.title}>Chord progression generator</h1>
-      <div className={styles.modes} role="group" aria-label="Practice mode">
-        <button type="button" aria-pressed={guided} onClick={() => chooseMode("song")}>Song path</button>
-        <button type="button" aria-pressed={!guided} onClick={() => chooseMode("free")}>Free generator</button>
+      <h1 className={styles.title}>Chord progressions</h1>
+      <div className={styles.libraryTools}>
+        <div className={styles.modes} role="group" aria-label="Practice mode">
+          <button type="button" aria-pressed={guided} onClick={() => chooseMode("song")}>Song library</button>
+          <button type="button" aria-pressed={mode === "free"} onClick={() => chooseMode("free")}>Free generator</button>
+          <button type="button" aria-pressed={mode === "custom"} onClick={() => chooseMode("custom")}>Custom loop</button>
+        </div>
+        <ProgressionsInstall />
       </div>
       <div className={styles.workbench}>
         <section className={styles.composer} aria-label="Progression controls and playback">
           {guided ? <>
-            <fieldset className={styles.levels}>
-              <legend>Practice level</legend>
-              {LEVELS.map(item => <button key={item.id} type="button" aria-pressed={item.id === level.id}
-                onClick={() => { if (item.id !== level.id) chooseSong(SONGS.findIndex(candidate => candidate.level === item.id)); }}>
-                {item.label}
-              </button>)}
-            </fieldset>
             <div className={`${styles.settings} ${styles.songPicker}`}>
-              <label>Song<select value={song.id} onChange={event => chooseSong(SONGS.findIndex(item => item.id === event.target.value))}>
-                {SONGS.filter(item => item.level === level.id).map(item => <option key={item.id} value={item.id}>{item.title}</option>)}
+              <label>Choose a song<select value={song.id} onChange={event => chooseSong(SONGS.findIndex(item => item.id === event.target.value))}>
+                {SONGS.map(item => <option key={item.id} value={item.id}>{item.title} · {item.artist} · {LEVELS.find(tier => tier.id === item.level)?.label}</option>)}
               </select></label>
               <button type="button" className={styles.nextSong} onClick={() => chooseSong((songIndex + 1) % SONGS.length)}>
-                {songIndex === SONGS.length - 1 ? "Restart song path" : "Next song"}
+                {songIndex === SONGS.length - 1 ? "Back to first song" : "Next song"}
               </button>
             </div>
             <header className={styles.songHeading}>
               <div className={styles.pathPosition}>
-                <span>Song {songIndex + 1} of {SONGS.length}</span>
+                <span>{level.label} · Song {songIndex + 1} of {SONGS.length}</span>
                 {songIndex > 0 && <button type="button" onClick={() => chooseSong(songIndex - 1)}>Previous song</button>}
               </div>
               <h2>{song.title}</h2>
               <p className={styles.artist}>{song.artist}</p>
-              <p className={styles.sectionName}>{song.section} <span>in {KEYS.find(key => key.value === song.practiceKey)?.label}</span></p>
+              <p className={styles.sectionName}>{song.section} <span>in {song.keyLabel ?? KEYS.find(key => key.value === song.practiceKey)?.label}</span></p>
               {song.arrangement && <p className={styles.arrangement}>{song.arrangement}</p>}
               <div className={styles.songLinks}>
                 <a href={song.sourceUrl} target="_blank" rel="noreferrer" className={styles.lessonLink}>{song.sourceLabel}</a>
@@ -262,7 +284,8 @@ export default function ProgressionGenerator({ initialInstrument = "guitar", ini
               </div>
             </header>
             <p className={styles.practiceCue}>{instrument === "guitar" ? level.guitarFocus : level.bassFocus}</p>
-          </> : <><div className={styles.settings}>
+          </> : mode === "custom" ? <CustomProgressionEditor value={custom} onChange={updateCustom}
+            selectedIndex={current} onSelect={selectChord} draftOpened={customDraftOpened} /> : <><div className={styles.settings}>
             <label>Key<select value={tonic} onChange={event => { reset(); setTonic(Number(event.target.value)); }}>
               {KEYS.map(key => <option key={key.value} value={key.value}>{key.label}</option>)}
             </select></label>
@@ -276,17 +299,17 @@ export default function ProgressionGenerator({ initialInstrument = "guitar", ini
           <div className={styles.scoreHeading}><h2>Your progression</h2><span>4 beats per chord</span></div>
           </>}
           <p className={styles.help}>Tap a chord to hear it and see its fingering.</p>
-          <ol className={styles.score} data-count={progression.length} aria-label={guided ? "Practice chords" : "Progression bars"}>
+          <ol className={styles.score} data-count={progression.length} aria-label={mode === "custom" ? "Custom chords" : guided ? "Practice chords" : "Progression bars"}>
             {progression.map((item, index) => <li key={index}>
               <button type="button" ref={button => { tiles.current[index] = button; }} aria-pressed={current === index}
-                aria-label={beats ? `Chord ${index + 1}, ${item.name}, ${item.numeral}, ${beatLabel(beats[index])}` : `Bar ${index + 1}, ${item.name}, ${item.numeral}`}
+                aria-label={[beats ? `Chord ${index + 1}` : `Bar ${index + 1}`, item.name, item.numeral, beats && beatLabel(beats[index])].filter(Boolean).join(", ")}
                 onClick={() => {
                   selectChord(index);
                   if (!player.playing) player.preview(voices[index], instrument);
                 }}
                 onKeyDown={event => arrowKey(event, index)} className={styles.tile}>
                 <span className={styles.tileBar}>{beats ? beatLabel(beats[index]) : `Bar ${index + 1}`}</span><strong>{item.name}</strong>
-                <span className={styles.degree}>{item.numeral}</span>
+                {item.numeral && <span className={styles.degree}>{item.numeral}</span>}
               </button>
             </li>)}
           </ol>
@@ -297,7 +320,7 @@ export default function ProgressionGenerator({ initialInstrument = "guitar", ini
             </button>
             <label className={styles.tempo}>Tempo <span>{bpm} BPM</span>
               <input type="range" min="50" max="160" value={bpm} aria-label="Tempo" aria-valuetext={`${bpm} beats per minute`}
-                onChange={event => { stopAtCurrent(); const value = Number(event.target.value); if (guided) setSongBpm(value); else setFreeBpm(value); }} />
+                onChange={event => changeTempo(Number(event.target.value))} />
             </label>
           </div>
           {player.starting && <p role="status" className={styles.help}>Starting audio…</p>}

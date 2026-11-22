@@ -1,0 +1,33 @@
+.install {
+  max-width: 29rem;
+  color: var(--ink, #22306b);
+}
+
+.button {
+  display: inline-flex;
+  align-items: center;
+  gap: .38rem;
+  min-height: 44px;
+  padding: .25rem .15rem;
+  font-size: .82rem;
+  font-weight: 650;
+  line-height: 1.2;
+  text-align: left;
+}
+
+.button svg { flex: none; }
+.button:hover, .button[aria-expanded="true"] { text-decoration: underline; text-underline-offset: .2em; }
+.button:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+.button:disabled { cursor: wait; }
+
+.help {
+  margin: 0 0 .7rem;
+  padding: .4rem .65rem;
+  border-left: 2px solid currentColor;
+  font-size: .84rem;
+  line-height: 1.5;
+}
+
+@media (display-mode: standalone) {
+  .install { display: none; }
+}

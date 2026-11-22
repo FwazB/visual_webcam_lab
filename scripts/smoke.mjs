@@ -6,7 +6,7 @@ const base = new URL(process.argv[2] ?? "http://127.0.0.1:3000");
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
 const pageTitles = {
   "/fuzz": "Fuzz | body.synth",
-  "/progressions": "Chord progression generator | body.synth",
+  "/progressions": "Chord progressions | body.synth",
   "/pocket-operators": "Pocket Operator guide | body.synth",
 };
 const publicScripts = [
@@ -18,7 +18,10 @@ const localScripts = new Map(await Promise.all(publicScripts.map(async (path) =>
   path, await readFile(new URL(`../public${path}`, import.meta.url)),
 ])));
 
-const progressionPages = ["/progressions", "/progressions?instrument=bass", "/progressions?instrument=bass&song=creep", "/progressions?mode=free"];
+const progressionPages = [
+  "/progressions", "/progressions?instrument=bass", "/progressions?instrument=bass&song=creep",
+  "/progressions?mode=free", "/progressions?mode=custom",
+];
 for (const path of ["/", "/guitar", "/bass", ...progressionPages, "/studio", "/pocket-operators", "/for-you", "/for-you/privacy", "/ascii", "/fuzz", ...publicScripts]) {
   const url = new URL(path, base);
   const response = await fetch(url, { signal: AbortSignal.timeout(15000) });
@@ -61,15 +64,25 @@ for (const path of ["/", "/guitar", "/bass", ...progressionPages, "/studio", "/p
     if (path === "/") {
       // The homepage is server-rendered: every project link is in the HTML.
       for (const href of ["/guitar", "/bass", "/progressions", "/studio", "/for-you", "/ascii", "/pocket-operators", "/fuzz"]) assert.ok(body.includes(`href="${href}"`), `/ must link to ${href}`);
+      assert.ok(!body.includes('href="/progressions/manifest.webmanifest"'), "Progressions install metadata must be page-specific");
     }
     if (url.pathname === "/progressions") {
       const instrument = url.searchParams.get("instrument") === "bass" ? "Bass" : "Guitar";
-      assert.match(body, /<h1\b[^>]*>Chord progression generator<\/h1>/i);
+      assert.match(body, /<h1\b[^>]*>Chord progressions<\/h1>/i);
+      assert.ok(body.includes('href="/progressions/manifest.webmanifest"'));
+      assert.ok(body.includes('href="/progressions/apple-touch-icon.png"'));
       assert.match(body, new RegExp(`<button\\b[^>]*aria-pressed="true"[^>]*>${instrument}</button>`));
       if (url.searchParams.get("mode") === "free") {
         assert.ok(body.includes('aria-label="Progression bars"'));
         assert.match(body, /<h2\b[^>]*>Your progression<\/h2>/);
+      } else if (url.searchParams.get("mode") === "custom") {
+        assert.ok(body.includes('aria-label="Custom progression editor"'));
+        assert.ok(body.includes('aria-label="Custom chords"'));
       } else {
+        const picker = body.match(/<select\b[^>]*>([\s\S]*?)<\/select>/)?.[1] ?? "";
+        for (const slug of ["three-little-birds", "stand-by-me", "creep"]) {
+          assert.ok(picker.includes(`value="${slug}"`), `the library picker should include ${slug}`);
+        }
         assert.ok(body.includes('aria-label="Practice chords"'));
         const advanced = url.searchParams.get("song") === "creep";
         assert.match(body, advanced ? /<h2\b[^>]*>Creep<\/h2>/ : /<h2\b[^>]*>Three Little Birds<\/h2>/);
@@ -96,6 +109,25 @@ for (const path of ["/", "/guitar", "/bass", ...progressionPages, "/studio", "/p
   }
   console.log(`PASS ${base.origin}${path}: content and security headers`);
 }
+
+const manifestUrl = new URL("/progressions/manifest.webmanifest", base);
+const manifestResponse = await fetch(manifestUrl, { signal: AbortSignal.timeout(15000) });
+assert.equal(manifestResponse.status, 200);
+const manifest = await manifestResponse.json();
+assert.equal(manifest.id, "/progressions");
+assert.equal(manifest.scope, "/progressions");
+assert.equal(manifest.start_url, "/progressions");
+assert.equal(manifest.display, "standalone");
+for (const [path, size] of [["/progressions/apple-touch-icon.png", 180], ["/progressions/icon-192.png", 192], ["/progressions/icon-512.png", 512]]) {
+  if (size !== 180) assert.ok(manifest.icons.some(icon => icon.src === path && icon.sizes === `${size}x${size}`));
+  const response = await fetch(new URL(path, base), { signal: AbortSignal.timeout(15000) });
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get("content-type") ?? "", /image\/png/);
+  const png = Buffer.from(await response.arrayBuffer());
+  assert.equal(png.readUInt32BE(16), size);
+  assert.equal(png.readUInt32BE(20), size);
+}
+console.log(`PASS ${manifestUrl.href}: standalone launch and Home Screen icons`);
 
 for (const path of ["/.env", "/.env.local", "/.git/config", "/.mcp.json", "/package-lock.json", "/src/hooks/useNeckTracking.ts"]) {
   const response = await fetch(new URL(path, base), { signal: AbortSignal.timeout(15000) });

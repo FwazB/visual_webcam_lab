@@ -24,6 +24,8 @@ test("activating a stopped chord previews it, navigation stays quiet, and an act
     "react/jsx-runtime": { ...jsx, jsx: capture(jsx.jsx), jsxs: capture(jsx.jsxs) },
     "@/hooks/useProgressionPlayer": { useProgressionPlayer: () => player },
     "@/hooks/useTiltStep": { useTiltStep: fn => { tilt = fn; } },
+    "./ProgressionsInstall": { default: () => null },
+    "./CustomProgressionEditor": { default: () => null },
     "./ProgressionGenerator.module.css": { default: {} },
   };
   const loaded = { exports: {} };

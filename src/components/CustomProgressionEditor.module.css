@@ -1,0 +1,18 @@
+.editor { margin-bottom: .9rem; }
+.editor h2 { margin: 0 0 .7rem; font-size: clamp(1.55rem, 3.1vw, 2.1rem); font-weight: 730; line-height: 1.1; letter-spacing: -.055em; }
+.editor label { display: grid; min-width: 0; gap: .25rem; font-size: .88rem; font-weight: 650; }
+.editor select, .editor input, .editor button {
+  min-height: 44px; min-width: 0; border: 1.5px solid var(--ink); border-radius: .3rem;
+  background: var(--sheet); color: var(--ink); font: inherit;
+}
+.editor select, .editor input { width: 100%; padding: .35rem .45rem; font-size: 1rem; }
+.editor button { padding: .3rem .65rem; font-size: .85rem; font-weight: 650; }
+.editor button:disabled { opacity: .45; cursor: default; }
+.fields { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .55rem; margin-block: .65rem; }
+.actions, .libraryRow { display: flex; flex-wrap: wrap; align-items: end; gap: .4rem; }
+.actions button:first-child { background: var(--pink); }
+.library { margin-block: .75rem; border-block: 1px solid var(--rule); }
+.library summary { padding-block: .65rem; font-weight: 650; }
+.libraryRow { margin-bottom: .65rem; }
+.libraryRow label { flex: 1 1 10rem; }
+.status { color: var(--quiet); font-size: .85rem; }

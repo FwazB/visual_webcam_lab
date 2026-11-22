@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <title>Body Synth Progressions</title>
+  <defs>
+    <pattern id="halftone" width="17" height="17" patternUnits="userSpaceOnUse">
+      <circle cx="8.5" cy="8.5" r="3.85" fill="#10a2f9"/>
+    </pattern>
+  </defs>
+  <rect width="512" height="512" fill="#f2ecdf"/>
+  <path d="M103 141 393 131 405 365 113 378Z" fill="url(#halftone)"/>
+  <!-- The six-string C shape from the homepage's chord progressions card. -->
+  <g transform="translate(-46.5 21) scale(5)" fill="none" stroke="#22306b" stroke-linecap="round">
+    <path d="M33 26H88" stroke-width="4"/>
+    <path d="M33 40H88M33 54H88M33 68H88M33 26V68M44 26V68M55 26V68M66 26V68M77 26V68M88 26V68" stroke-width="1.75"/>
+    <g fill="#22306b" stroke="#f2ecdf" stroke-width="1.15">
+      <circle cx="44" cy="61" r="4.7"/><circle cx="55" cy="47" r="4.7"/><circle cx="77" cy="33" r="4.7"/>
+    </g>
+  </g>
+</svg>

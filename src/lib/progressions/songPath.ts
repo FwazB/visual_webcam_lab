@@ -15,6 +15,7 @@ export interface SongLesson {
   artist: string;
   section: string;
   practiceKey: number;
+  keyLabel?: string;
   chart: SongStep[];
   arrangement: string;
   sourceLabel: string;
@@ -36,12 +37,12 @@ export const LEVELS: {
   },
   {
     id: "intermediate", label: "Intermediate", bpm: 72,
-    guitarFocus: "Connect four chord shapes, including a barre.",
+    guitarFocus: "Keep time as you move into and out of barre shapes.",
     bassFocus: "Keep the root and fifth clear through each change.",
   },
   {
     id: "advanced", label: "Advanced", bpm: 80,
-    guitarFocus: "Shift cleanly between major and minor barre shapes.",
+    guitarFocus: "Keep each barre clear as you shift along the neck.",
     bassFocus: "Play the root, fifth and tenth while muting the skipped string.",
   },
 ];
@@ -50,15 +51,23 @@ const TRIADS = {
   A: { root: 9, quality: "major" },
   Am: { root: 9, quality: "minor" },
   B: { root: 11, quality: "major" },
+  "B♭": { root: 10, quality: "major" },
+  Bm: { root: 11, quality: "minor" },
   C: { root: 0, quality: "major" },
   Cm: { root: 0, quality: "minor" },
   "C♯m": { root: 1, quality: "minor" },
   D: { root: 2, quality: "major" },
+  Dm: { root: 2, quality: "minor" },
   E: { root: 4, quality: "major" },
+  "E♭": { root: 3, quality: "major" },
+  Em: { root: 4, quality: "minor" },
   F: { root: 5, quality: "major" },
+  Fm: { root: 5, quality: "minor" },
   "F♯m": { root: 6, quality: "minor" },
   G: { root: 7, quality: "major" },
+  Gm: { root: 7, quality: "minor" },
   "G♯": { root: 8, quality: "major" },
+  "A♭": { root: 8, quality: "major" },
 } as const;
 
 function step(name: keyof typeof TRIADS, numeral: string, beats: number): SongStep {
@@ -88,6 +97,37 @@ export const SONGS: SongLesson[] = [
     listenUrl: "https://music.apple.com/us/song/bad-moon-rising/1440952840",
   },
   {
+    id: "sweet-home-alabama", level: "easy",
+    title: "Sweet Home Alabama", artist: "Lynyrd Skynyrd",
+    section: "Verse groove", practiceKey: 7,
+    chart: [step("D", "V", 2), step("C", "IV", 2), step("G", "I", 4)],
+    arrangement: "Play D and C for two beats each, then settle on G for a full bar. The open-chord accompaniment follows the picking riff’s changes.",
+    sourceLabel: "Lauren Bateman lesson",
+    sourceUrl: "https://www.laurenbateman.com/sweet-home-alabama-chord-chart/",
+    listenUrl: "https://music.apple.com/us/song/sweet-home-alabama/1440846819",
+  },
+  {
+    id: "zombie", level: "easy",
+    title: "Zombie", artist: "The Cranberries",
+    section: "Verse loop", practiceKey: 4, keyLabel: "E minor",
+    chart: [step("Em", "i", 4), step("C", "♭VI", 4), step("G", "♭III", 4), step("D", "♭VII", 4)],
+    arrangement: "Give each chord a full bar. This root-position exercise plays D in the bass on the last bar. The lesson uses D over F♯ there.",
+    sourceLabel: "Lauren Bateman lesson",
+    sourceUrl: "https://www.laurenbateman.com/zombie-chord-chart/",
+    listenUrl: "https://music.apple.com/us/song/zombie-2025-remastered/1828830887",
+  },
+  {
+    id: "knockin-on-heavens-door", level: "easy",
+    title: "Knockin’ on Heaven’s Door", artist: "Bob Dylan",
+    section: "Verse changes", practiceKey: 7,
+    chart: [step("G", "I", 2), step("D", "V", 2), step("Am", "ii", 4),
+            step("G", "I", 2), step("D", "V", 2), step("C", "IV", 4)],
+    arrangement: "Start both phrases with G and D. The first lands on A minor and the second on C. Let each landing ring for four beats.",
+    sourceLabel: "Lauren Bateman lesson",
+    sourceUrl: "https://www.laurenbateman.com/knockin-on-heavens-door-guitar-chord-char",
+    listenUrl: "https://music.apple.com/us/song/knockin-on-heavens-door/717157149",
+  },
+  {
     id: "stand-by-me", level: "intermediate",
     title: "Stand By Me", artist: "Ben E. King",
     section: "Verse loop", practiceKey: 9,
@@ -109,6 +149,27 @@ export const SONGS: SongLesson[] = [
     listenUrl: "https://music.apple.com/us/song/let-it-be/1441164738",
   },
   {
+    id: "go-your-own-way", level: "intermediate",
+    title: "Go Your Own Way", artist: "Fleetwood Mac",
+    section: "Chorus loop", practiceKey: 5,
+    chart: [step("Dm", "vi", 4), step("B♭", "IV", 4), step("C", "V", 8)],
+    arrangement: "Start the chorus on D minor, change to B♭ for one bar and hold C for two. Count through the second bar of C before returning to D minor.",
+    sourceLabel: "Spy Tunes lesson",
+    sourceUrl: "https://spytunes.com/go-your-own-way-chords/",
+    listenUrl: "https://music.apple.com/us/song/go-your-own-way/594061859",
+  },
+  {
+    id: "valerie", level: "intermediate",
+    title: "Valerie", artist: "Mark Ronson feat. Amy Winehouse",
+    section: "Bridge", practiceKey: 3,
+    chart: [step("A♭", "IV", 4), step("Gm", "iii", 4), step("A♭", "IV", 4), step("Gm", "iii", 4),
+            step("A♭", "IV", 4), step("Gm", "iii", 4), step("B♭", "V", 8)],
+    arrangement: "Alternate A♭ and G minor three times, moving the root down a fret each time. Hold the final B♭ for two bars to lead into the chorus.",
+    sourceLabel: "Spy Tunes lesson",
+    sourceUrl: "https://spytunes.com/valerie-chords/",
+    listenUrl: "https://music.apple.com/us/song/valerie-feat-amy-winehouse/259214627",
+  },
+  {
     id: "creep", level: "advanced",
     title: "Creep", artist: "Radiohead",
     section: "Chorus loop", practiceKey: 7,
@@ -127,5 +188,35 @@ export const SONGS: SongLesson[] = [
     sourceLabel: "JustinGuitar lesson",
     sourceUrl: "https://www.justinguitar.com/songs/pixies-where-is-my-mind-chords-tabs-guitar-lesson-sg-198",
     listenUrl: "https://music.apple.com/us/song/where-is-my-mind-2007-remaster/1027465608",
+  },
+  {
+    id: "get-lucky", level: "advanced",
+    title: "Get Lucky", artist: "Daft Punk feat. Pharrell Williams & Nile Rodgers",
+    section: "Verse loop", practiceKey: 11, keyLabel: "B Dorian",
+    chart: [step("Bm", "i", 4), step("D", "♭III", 4), step("F♯m", "v", 4), step("E", "IV", 4)],
+    arrangement: "Place a chord on beat one of each bar. Once the shifts feel steady, shorten your strums and listen for the clipped guitar rhythm on the recording.",
+    sourceLabel: "Spy Tunes lesson",
+    sourceUrl: "https://spytunes.com/get-lucky-chords/",
+    listenUrl: "https://music.apple.com/us/song/get-lucky/617154366",
+  },
+  {
+    id: "blinding-lights", level: "advanced",
+    title: "Blinding Lights", artist: "The Weeknd",
+    section: "Synth hook accompaniment", practiceKey: 3,
+    chart: [step("Fm", "ii", 8), step("Cm", "vi", 8), step("E♭", "I", 8), step("B♭", "V", 8)],
+    arrangement: "Let the synth carry the melody while you count two bars per chord. The numerals follow the lesson’s E♭ major reading of the loop.",
+    sourceLabel: "Paul Burke guitar lesson",
+    sourceUrl: "https://colchesterguitarteacher.com/2020/05/20/guitar-lesson-how-to-play-blinding-lights-by-the-weeknd-chords-tab/",
+    listenUrl: "https://music.apple.com/us/song/blinding-lights/1615128020",
+  },
+  {
+    id: "levitating", level: "advanced",
+    title: "Levitating", artist: "Dua Lipa",
+    section: "Verse loop", practiceKey: 11, keyLabel: "B minor",
+    chart: [step("Bm", "i", 2), step("F♯m", "v", 2), step("Em", "iv", 2), step("Bm", "i", 2)],
+    arrangement: "Change on beats one and three. This triad arrangement keeps the roots and minor quality of the verse’s seventh chords. Let the last B minor carry you into the repeat.",
+    sourceLabel: "Spy Tunes lesson",
+    sourceUrl: "https://spytunes.com/levitating-chords/",
+    listenUrl: "https://music.apple.com/us/song/levitating/1538003843",
   },
 ];
