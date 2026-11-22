@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
+import { gunzipSync } from "node:zlib";
 
 const base = new URL(process.argv[2] ?? "http://127.0.0.1:3000");
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
@@ -79,6 +80,7 @@ for (const path of ["/", "/guitar", "/bass", ...progressionPages, "/studio", "/p
         assert.ok(body.includes('aria-label="Custom progression editor"'));
         assert.ok(body.includes('aria-label="Custom chords"'));
       } else {
+        assert.ok(body.includes('aria-label="Spotify chord lookup"'));
         const picker = body.match(/<select\b[^>]*>([\s\S]*?)<\/select>/)?.[1] ?? "";
         for (const slug of ["three-little-birds", "stand-by-me", "creep"]) {
           assert.ok(picker.includes(`value="${slug}"`), `the library picker should include ${slug}`);
@@ -128,6 +130,15 @@ for (const [path, size] of [["/progressions/apple-touch-icon.png", 180], ["/prog
   assert.equal(png.readUInt32BE(20), size);
 }
 console.log(`PASS ${manifestUrl.href}: standalone launch and Home Screen icons`);
+
+// Check a published chart outside the lesson library against the deployed bytes.
+const chartShard = new URL("/chord-charts/chordonomicon/67.json.gz", base);
+const chartResponse = await fetch(chartShard, { signal: AbortSignal.timeout(15000) });
+assert.equal(chartResponse.status, 200);
+const chartBytes = Buffer.from(await chartResponse.arrayBuffer());
+const charts = JSON.parse((chartBytes[0] === 0x1f ? gunzipSync(chartBytes) : chartBytes).toString("utf8"));
+assert.ok(charts["2ffJZ2r8HxI5DHcmf3BO6c"].startsWith("<intro_1> E D A/Cs E D A/Cs"));
+console.log(`PASS ${chartShard.href}: published Spotify track chart`);
 
 for (const path of ["/.env", "/.env.local", "/.git/config", "/.mcp.json", "/package-lock.json", "/src/hooks/useNeckTracking.ts"]) {
   const response = await fetch(new URL(path, base), { signal: AbortSignal.timeout(15000) });

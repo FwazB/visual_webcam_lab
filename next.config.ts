@@ -1,7 +1,6 @@
 import type { NextConfig } from "next";
 
-// Security headers. The app is fully client-side: no API routes, no server
-// actions, no secrets. It loads MediaPipe WASM from cdn.jsdelivr.net and
+// Security headers. The app loads MediaPipe WASM from cdn.jsdelivr.net and
 // models from storage.googleapis.com, runs an AudioWorklet from /worklets,
 // and uses camera + microphone on the same origin.
 //
@@ -15,7 +14,7 @@ const csp = [
   "default-src 'self'",
   `script-src 'self' blob: 'unsafe-inline' 'wasm-unsafe-eval' ${mediaPipeRuntime}${isDev ? " 'unsafe-eval'" : ""}`,
   "script-src-attr 'none'",
-  `connect-src 'self' ${mediaPipeRuntime} https://storage.googleapis.com/mediapipe-models/ https://accounts.spotify.com https://api.spotify.com ws://127.0.0.1:9980 http://127.0.0.1:9982/motion${isDev ? " ws: wss:" : ""}`,
+  `connect-src 'self' ${mediaPipeRuntime} https://storage.googleapis.com/mediapipe-models/ https://accounts.spotify.com https://api.spotify.com https://open.spotify.com/oembed ws://127.0.0.1:9980 http://127.0.0.1:9982/motion${isDev ? " ws: wss:" : ""}`,
   "worker-src 'self' blob:",
   "frame-src 'none'",
   "media-src 'self' blob: mediastream:",

@@ -1,0 +1,23 @@
+{
+  "name": "Chordonomicon",
+  "source": "https://huggingface.co/datasets/ailsntua/Chordonomicon",
+  "revision": "f3a8b678bd65639c01caa342921733f1db01be23",
+  "sourceSha256": "9d2f4ccdc876a4e816712f128e4772b2af558c2a2923cce5be3a0364fbad9a8d",
+  "paper": "https://doi.org/10.48550/arXiv.2410.22046",
+  "authors": [
+    "Spyridon Kantarelis",
+    "Ioannis Liolitsas",
+    "Konstantinos Thomas",
+    "Vassilis Lyberatos",
+    "Edmund Dervakos",
+    "Giorgos Stamou"
+  ],
+  "license": "CC BY-NC 4.0",
+  "licenseUrl": "https://creativecommons.org/licenses/by-nc/4.0/",
+  "adaptation": "Indexed by Spotify track ID. Includes the first nonempty chart for each exact ID in the release. Section tags and chord symbols retain the source order. The source supplies no beat durations.",
+  "sourceRows": 679807,
+  "rowsWithTrackAndChart": 440284,
+  "uniqueTracks": 430323,
+  "shards": 256,
+  "compressedBytes": 25543187
+}

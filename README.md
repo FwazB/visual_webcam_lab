@@ -228,6 +228,22 @@ that reports octave errors, and the note log.
 
 ## Songs for you / Spotify
 
+On `/progressions`, paste a Spotify track link to open its Body Synth lesson or
+look up a published chord chart by exact track ID. This works without a Spotify
+account or an audio upload. Mobile Spotify share links use a same-origin resolver.
+For published charts the browser requests one compressed index shard and optionally
+reads Spotify’s oEmbed title. The chord changes come from the indexed version of
+[Chordonomicon](https://huggingface.co/datasets/ailsntua/Chordonomicon).
+Different releases of a song can have different IDs and coverage. Section order
+and chord symbols are provided without beat durations.
+
+The chart data is licensed for **noncommercial use under CC BY-NC 4.0** by
+Spyridon Kantarelis, Ioannis Liolitsas, Konstantinos Thomas, Vassilis Lyberatos,
+Edmund Dervakos and Giorgos Stamou. Body Synth indexes and reformats their
+annotations. The pinned release, attribution and coverage totals are recorded in
+[`manifest.json`](public/chord-charts/chordonomicon/manifest.json).
+[Research paper](https://doi.org/10.48550/arXiv.2410.22046) · [License](https://creativecommons.org/licenses/by-nc/4.0/).
+
 Open `/for-you` for starter sections from 11 songs, including YUKON, Best Part,
 Pink + White, Ain't No Sunshine, Stand By Me, and Feel Good Inc. Difficulty is
 our estimate for the named practice section; it is not a full-song grade or

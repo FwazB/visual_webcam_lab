@@ -1,0 +1,26 @@
+.lookup { margin: 0 0 1.25rem; }
+.form { max-width: 38rem; }
+.form label, .sectionPicker { font-size: .88rem; font-weight: 650; }
+.fields { display: flex; gap: .55rem; margin-top: .25rem; }
+.fields input, .sectionPicker select {
+  min-width: 0; min-height: 44px; padding: .4rem .6rem; border: 1.5px solid var(--ink);
+  border-radius: .3rem; background: var(--sheet); color: var(--ink); font-size: 1rem;
+}
+.fields input { flex: 1; }
+.fields button, .chords button {
+  min-height: 44px; padding: .4rem .8rem; border: 1.5px solid var(--ink); border-radius: .3rem;
+  background: var(--sheet); color: var(--ink); font-weight: 650;
+}
+.fields button:disabled { opacity: .55; cursor: default; }
+.feedback { display: flex; align-items: baseline; flex-wrap: wrap; gap: .5rem 1rem; font-size: .87rem; }
+.feedback p:not(:empty), .feedback button { margin-top: .5rem; }
+.feedback button, .link, .credit a { text-decoration: underline; text-underline-offset: .18em; }
+.title { font-size: clamp(1.8rem, 4vw, 2.6rem); line-height: 1.12; font-weight: 750; letter-spacing: -.05em; overflow-wrap: anywhere; }
+.lookup > div:last-child:not(.feedback) { margin-top: 1rem; }
+.link { display: inline-flex; align-items: center; min-height: 38px; font-size: .9rem; }
+.sectionPicker { display: grid; gap: .22rem; max-width: 24rem; margin-block: .65rem; }
+.hint, .credit { font-size: .85rem; color: var(--quiet); }
+.chords { display: flex; flex-wrap: wrap; gap: .48rem; margin: .7rem 0 1rem; list-style: none; }
+.chords button { font-size: 1.1rem; }
+.chords button[aria-pressed="true"] { background: var(--pink); }
+.credit { max-width: 42rem; }

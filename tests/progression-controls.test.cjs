@@ -26,6 +26,8 @@ test("activating a stopped chord previews it, navigation stays quiet, and an act
     "@/hooks/useTiltStep": { useTiltStep: fn => { tilt = fn; } },
     "./ProgressionsInstall": { default: () => null },
     "./CustomProgressionEditor": { default: () => null },
+    "./ProgressionFingering": { default: () => null },
+    "./SpotifyChordLookup": { default: () => null },
     "./ProgressionGenerator.module.css": { default: {} },
   };
   const loaded = { exports: {} };
