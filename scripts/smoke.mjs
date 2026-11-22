@@ -63,8 +63,13 @@ for (const path of ["/", "/guitar", "/bass", ...progressionPages, "/studio", "/p
     assert.equal(/<button\b[^>]*><span\b[^>]*><\/span>Start AirPods<\/button>/.test(body), path !== "/for-you/privacy",
       `${path} must show the one-click AirPods launcher on creative pages`);
     if (path === "/") {
-      // The homepage is server-rendered: every project link is in the HTML.
-      for (const href of ["/guitar", "/bass", "/progressions", "/studio", "/for-you", "/ascii", "/pocket-operators", "/fuzz"]) assert.ok(body.includes(`href="${href}"`), `/ must link to ${href}`);
+      const cardSection = body.match(/<section\b[^>]*aria-labelledby="things-title"[^>]*>([\s\S]*?)<\/section>/)?.[1] ?? "";
+      for (const href of ["/guitar", "/bass", "/studio", "/for-you", "/ascii", "/pocket-operators", "/fuzz"]) {
+        assert.ok(body.includes(`href="${href}"`), `/ must link to ${href}`);
+        assert.ok(!cardSection.includes(`href="${href}"`), `a card must not repeat the string for ${href}`);
+      }
+      assert.ok(cardSection.includes('href="/progressions"'));
+      assert.ok(cardSection.includes('href="https://github.com/FwazB/visual_webcam_lab/tree/main/touchdesigner/projection_mapping"'));
       assert.ok(!body.includes('href="/progressions/manifest.webmanifest"'), "Progressions install metadata must be page-specific");
     }
     if (url.pathname === "/progressions") {

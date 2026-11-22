@@ -106,8 +106,7 @@ export const STRUNG_PROJECTS: StringProject[] = [
   },
 ];
 
-export const PROJECTS: Project[] = [
-  ...STRUNG_PROJECTS,
+export const CARD_PROJECTS: Project[] = [
   {
     id: "progressions",
     title: "Chord progressions",

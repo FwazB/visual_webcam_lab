@@ -4,7 +4,7 @@ const assert = require("node:assert/strict");
 const { midiToHz, pitchClassHue } = require("../src/lib/instrument/pitch");
 const { amplitudeFor, crossedStrings, displacement, energy, SETTLED } = require("../src/lib/home/strings");
 const { cloudString, karplusStrong } = require("../src/lib/home/pluck");
-const { PROJECTS, STRUNG_PROJECTS } = require("../src/lib/home/projects");
+const { CARD_PROJECTS, STRUNG_PROJECTS } = require("../src/lib/home/projects");
 
 test("the seventh project has its own playable A string and preserves the original six", () => {
   assert.equal(STRUNG_PROJECTS.length, 7);
@@ -30,8 +30,12 @@ test("the seventh project has its own playable A string and preserves the origin
     assert.ok(Number.isInteger(project.midi), `${project.id} needs a playable note`);
     assert.equal(project.pitchClass, project.midi % 12, `${project.id} color must match its note`);
   }
-  assert.equal(new Set(PROJECTS.map(project => project.id)).size, PROJECTS.length);
-  assert.equal(PROJECTS.filter(project => project.href === "/pocket-operators").length, 1);
+});
+
+test("each homepage project has one destination across the strings and cards", () => {
+  const projects = [...STRUNG_PROJECTS, ...CARD_PROJECTS];
+  assert.equal(new Set(projects.map(project => project.id)).size, projects.length);
+  assert.equal(new Set(projects.map(project => project.href)).size, projects.length);
 });
 
 test("homepage string colors match the Fuzz circle-of-fifths palette", () => {

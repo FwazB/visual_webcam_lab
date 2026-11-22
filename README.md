@@ -39,10 +39,10 @@ a local research tool rather than a production accuracy claim.
   by instrument, chosen comfort level, and practice goal.
 - `/ascii`: body-mask ASCII webcam experiment.
 - `/fuzz` shows live camera trails directly in the browser. Open **TouchDesigner output** to control the separate desktop project.
-- `/`: homepage. Six guitar strings, one per project: move the mouse across
-  them to strum (tap on touch screens), tap **sound off** to hear them. The
-  strings flash in the same circle-of-fifths colors as Fuzz. Below them, a
-  card for every project, including the TouchDesigner ones.
+- `/` has six guitar strings and a virtual low A for Pocket Operators. Select a
+  string label to open its project. Move across the strings to strum (tap on
+  touch screens), and tap **sound off** to hear them. The strings flash in the
+  same circle-of-fifths colors as Fuzz. Cards below them open the other projects.
 
 ## Quick start
 

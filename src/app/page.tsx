@@ -7,7 +7,7 @@ import Reveal from "@/components/home/Reveal";
 import StringsHero from "@/components/home/StringsHero";
 import styles from "@/components/home/home.module.css";
 import { pitchClassHue } from "@/lib/instrument/pitch";
-import { PROJECTS, STRUNG_PROJECTS } from "@/lib/home/projects";
+import { CARD_PROJECTS } from "@/lib/home/projects";
 
 const anton = Anton({ weight: "400", subsets: ["latin"], variable: "--font-anton" });
 const serif = Instrument_Serif({ weight: "400", style: "italic", subsets: ["latin"], variable: "--font-serif" });
@@ -48,18 +48,14 @@ export default function Home() {
             <p className={styles.hand}>all of it runs on one laptop</p>
           </div>
           <Reveal className={styles.grid}>
-            {PROJECTS.map((p, i) => {
+            {CARD_PROJECTS.map((p, i) => {
               const hue = pitchClassHue(p.pitchClass);
-              const stringIndex = STRUNG_PROJECTS.findIndex((s) => s.id === p.id);
-              const where = p.external ? "TouchDesigner" : "web";
-              const string = STRUNG_PROJECTS[stringIndex];
-              const meta = string ? `${string.voice === "cloud" ? "virtual " : ""}${string.stringLabel} string · ${where}` : where;
               const body = (
                 <>
                   <Doodle id={p.doodle} hue={hue} className={styles.doodle} />
                   <span className={styles.cardMeta}>
                     <span className={styles.swatch} style={{ background: `hsl(${hue} 95% 52%)` }} />
-                    {meta}
+                    {p.external ? "TouchDesigner" : "web"}
                   </span>
                   <h3 className={styles.cardTitle}>{p.title}</h3>
                   <p className={styles.cardBlurb}>{p.blurb}</p>
