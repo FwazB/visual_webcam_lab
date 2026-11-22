@@ -11,6 +11,7 @@ const hints: Record<string, string> = {
   "/": "Tilt 15° toward either shoulder to strum the seven strings. Return to center before the next strum. Turn on Sound to hear it.",
   "/guitar": "Tilt toward either shoulder to enlarge the current guitar target cue.",
   "/bass": "Tilt toward either shoulder to enlarge the current bass target cue.",
+  "/progressions": "With the loop stopped, tilt left or right to step through chord fingerings. Return to center before the next chord.",
   "/studio": "Tilt left or right to pan clip playback.",
   "/ascii": "Tilt toward one shoulder for coarser text or the other for finer text.",
   "/for-you": "Tilt 15° left or right to step between practice cards. Return to center before the next step.",

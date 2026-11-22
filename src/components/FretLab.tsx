@@ -38,6 +38,7 @@ const FINGER_INITIAL: Record<FingerName, string> = { index: "1", middle: "2", ri
 const NAV_ROUTES = [
   { id: "guitar-standard", href: "/guitar", label: "Guitar" },
   { id: "bass-standard", href: "/bass", label: "Bass" },
+  { id: "progressions", href: "/progressions", label: "Chord progressions" },
   { id: "studio", href: "/studio", label: "Studio" },
   { id: "for-you", href: "/for-you", label: "For you" },
   { id: "pocket-operators", href: "/pocket-operators", label: "Pocket Operators" },
@@ -452,7 +453,7 @@ export default function FretLab({ profile }: FretLabProps) {
           {NAV_ROUTES.map((r) => (
             <Link
               key={r.id}
-              href={r.href}
+              href={r.id === "progressions" && profile.id === "bass-standard" ? "/progressions?instrument=bass" : r.href}
               aria-current={profile.id === r.id ? "page" : undefined}
               className={`text-xs px-3 py-1.5 rounded-full border border-white/10 transition active:scale-95 ${
                 profile.id === r.id ? "bg-white text-black" : "bg-white/10 text-zinc-400 hover:text-white"

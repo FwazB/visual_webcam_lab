@@ -12,6 +12,20 @@ interface Art {
 }
 
 const ART: Record<DoodleId, Art> = {
+  chords: {
+    fill: <path d="M25 19L96 16L100 77L28 79Z" />,
+    ink: (
+      <>
+        <path d="M33 26H88" strokeWidth="4" />
+        <path d="M33 40H88M33 54H88M33 68H88M33 26V68M44 26V68M55 26V68M66 26V68M77 26V68M88 26V68" strokeWidth="1.4" />
+        <g fill="currentColor">
+          <circle cx="44" cy="61" r="4.4" /><circle cx="55" cy="47" r="4.4" /><circle cx="77" cy="33" r="4.4" />
+        </g>
+        <path d="M30 15L36 21M36 15L30 21" strokeWidth="1.6" />
+        <circle cx="66" cy="18" r="2.6" /><circle cx="88" cy="18" r="2.6" />
+      </>
+    ),
+  },
   guitar: {
     fill: <path d="M20 52C20 36 36 32 46 38C52 34 64 36 66 44L66 58C64 66 52 68 46 64C36 72 20 68 20 52Z" />,
     ink: (

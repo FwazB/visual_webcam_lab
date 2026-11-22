@@ -26,6 +26,8 @@ a local research tool rather than a production accuracy claim.
 - `/guitar` and `/bass`: live note highway with pitch/timing scoring, automatic
   neck tracking and MediaPipe fingertip dots. Shapes and Song practice retain
   the existing lesson and chord-loop tools.
+- `/progressions` generates four-chord loops by key and mood. Select a chord
+  to see a guitar or bass fingering, or play the whole loop to practice the changes.
 - `/studio`: multitrack recorder for the guitar: record takes over a click,
   arrange and trim them, export a WAV.
 - `/for-you`: practice picks, with an optional read-only Spotify connection.
@@ -71,6 +73,7 @@ Both devices must be on the same Wi-Fi.
 | --- | --- |
 | Homepage | Strums the seven strings. Enable sound to hear them. |
 | Guitar and bass | Enlarges the current target note, string and fret. |
+| Chord progressions | Steps through fingerings while the loop is stopped. |
 | Studio | Pans clip playback left or right while you listen. |
 | ASCII camera | Makes the character grid coarser or finer around the Density setting. |
 | Fuzz | Lengthens the browser camera trail toward either shoulder. Click **Start camera** to see it. |

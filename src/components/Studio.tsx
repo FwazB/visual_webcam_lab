@@ -626,6 +626,7 @@ export default function Studio() {
           <nav aria-label="Main navigation" className="flex flex-wrap gap-1">
             <Link href="/guitar" className="text-xs px-2.5 py-1 rounded-full bg-white/10 text-zinc-400 hover:text-white">Guitar</Link>
             <Link href="/bass" className="text-xs px-2.5 py-1 rounded-full bg-white/10 text-zinc-400 hover:text-white">Bass</Link>
+            <Link href="/progressions" className="text-xs px-2.5 py-1 rounded-full bg-white/10 text-zinc-400 hover:text-white">Chord progressions</Link>
             <Link href="/for-you" className="text-xs px-2.5 py-1 rounded-full bg-white/10 text-zinc-400 hover:text-white">For you</Link>
             <Link href="/pocket-operators" className="text-xs px-2.5 py-1 rounded-full bg-white/10 text-zinc-400 hover:text-white">Pocket Operators</Link>
           </nav>

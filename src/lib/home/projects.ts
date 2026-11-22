@@ -1,7 +1,7 @@
 // Six familiar guitar strings plus a virtual low A for Pocket Operators.
 import { GUITAR_STANDARD } from "@/lib/instrument/profile";
 
-export type DoodleId = "guitar" | "bass" | "cassette" | "headphones" | "ascii" | "eye" | "projector";
+export type DoodleId = "guitar" | "bass" | "cassette" | "headphones" | "ascii" | "eye" | "projector" | "chords";
 
 export interface Project {
   id: string;
@@ -108,6 +108,15 @@ export const STRUNG_PROJECTS: StringProject[] = [
 
 export const PROJECTS: Project[] = [
   ...STRUNG_PROJECTS,
+  {
+    id: "progressions",
+    title: "Chord progressions",
+    blurb: "Find a four-chord loop, hear how it lands, and see where your fingers go on guitar or bass.",
+    href: "/progressions",
+    external: false,
+    doodle: "chords",
+    pitchClass: 0,
+  },
   {
     id: "projection-mapping",
     title: "Projection mapping",

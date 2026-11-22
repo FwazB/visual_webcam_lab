@@ -6,6 +6,8 @@ const base = new URL(process.argv[2] ?? "http://127.0.0.1:3000");
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
 const pageTitles = {
   "/fuzz": "Fuzz | body.synth",
+  "/progressions": "Chord progression generator | body.synth",
+  "/progressions?instrument=bass": "Chord progression generator | body.synth",
   "/pocket-operators": "Pocket Operator guide | body.synth",
 };
 const publicScripts = [
@@ -17,7 +19,7 @@ const localScripts = new Map(await Promise.all(publicScripts.map(async (path) =>
   path, await readFile(new URL(`../public${path}`, import.meta.url)),
 ])));
 
-for (const path of ["/", "/guitar", "/bass", "/studio", "/pocket-operators", "/for-you", "/for-you/privacy", "/ascii", "/fuzz", ...publicScripts]) {
+for (const path of ["/", "/guitar", "/bass", "/progressions", "/progressions?instrument=bass", "/studio", "/pocket-operators", "/for-you", "/for-you/privacy", "/ascii", "/fuzz", ...publicScripts]) {
   const response = await fetch(new URL(path, base), { signal: AbortSignal.timeout(15000) });
   assert.equal(response.status, 200, `${path} must load`);
   assert.equal(response.headers.get("x-content-type-options"), "nosniff");
@@ -57,7 +59,13 @@ for (const path of ["/", "/guitar", "/bass", "/studio", "/pocket-operators", "/f
       `${path} must show the one-click AirPods launcher on creative pages`);
     if (path === "/") {
       // The homepage is server-rendered: every project link is in the HTML.
-      for (const href of ["/guitar", "/bass", "/studio", "/for-you", "/ascii", "/pocket-operators", "/fuzz"]) assert.ok(body.includes(`href="${href}"`), `/ must link to ${href}`);
+      for (const href of ["/guitar", "/bass", "/progressions", "/studio", "/for-you", "/ascii", "/pocket-operators", "/fuzz"]) assert.ok(body.includes(`href="${href}"`), `/ must link to ${href}`);
+    }
+    if (path.startsWith("/progressions")) {
+      const instrument = path.includes("instrument=bass") ? "Bass" : "Guitar";
+      assert.match(body, /<h1\b[^>]*>Chord progression generator<\/h1>/i);
+      assert.match(body, new RegExp(`<button\\b[^>]*aria-pressed="true"[^>]*>${instrument}</button>`));
+      assert.ok(body.includes('aria-label="Progression bars"'));
     }
     if (path === "/fuzz") {
       assert.match(body, /<button\b[^>]*>Start camera<\/button>/);
