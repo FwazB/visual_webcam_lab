@@ -112,7 +112,8 @@ test("valid short links share bounded rolling client and instance budgets before
     if (originalVercel === undefined) delete process.env.VERCEL;
     else process.env.VERCEL = originalVercel;
   });
-  let now = performance.now() + 60_000;
+  // Exercise fractional monotonic timestamps across floating-point precision boundaries.
+  let now = Math.ceil(performance.now()) + 60_000 + 0.123456789;
   t.mock.method(performance, "now", () => now);
   const network = t.mock.method(globalThis, "fetch", async () => Response.redirect(canonical));
   const lookup = ip => GET(routeRequest(share, { "x-vercel-forwarded-for": ip }));

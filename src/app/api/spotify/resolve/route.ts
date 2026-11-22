@@ -10,7 +10,7 @@ const maxPerInstance = 120;
 const recent: { time: number; client: string }[] = [];
 
 function retryAfterSeconds(request: Request): number {
-  const now = performance.now();
+  const now = Math.floor(performance.now());
   while (recent.length && recent[0].time <= now - windowMs) recent.shift();
 
   // Vercel supplies this client address. Elsewhere, share a budget across all callers.
