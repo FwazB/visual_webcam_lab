@@ -2,7 +2,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
-const { KEYS, MOODS, getProgression, nextVariation } = require("../src/lib/progressions/music");
+const { KEYS, MOODS, getProgression, getSongChord, nextVariation } = require("../src/lib/progressions/music");
 const { GUITAR_STANDARD, BASS_STANDARD } = require("../src/lib/instrument/profile");
 
 const natural = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
@@ -137,4 +137,41 @@ test("a new variation reaches every alternative without immediately repeating", 
       assert.deepEqual(alternatives, new Set(variants.filter(i => i !== current)));
     }
   }
+});
+
+test("song difficulty changes the bass part while every diagram retains the spelled chord harmony", () => {
+  for (const { value: root, label } of KEYS) {
+    for (const quality of ["major", "minor"]) {
+      const step = { name: label + (quality === "minor" ? "m" : ""), root, quality, numeral: quality === "major" ? "I" : "i" };
+      const lowRoot = BASS_STANDARD.tuning[0] + pitchClass(root - BASS_STANDARD.tuning[0]);
+      const third = quality === "major" ? 4 : 3;
+      const guitar = getSongChord(step, "guitar", "easy");
+      for (const level of ["easy", "intermediate", "advanced"]) {
+        assert.deepEqual(getSongChord(step, "guitar", level), guitar);
+        const chord = getSongChord(step, "bass", level);
+        assert.equal(chord.name, step.name);
+        assert.equal(chord.numeral, step.numeral);
+        assert.deepEqual(chord.notes, guitar.notes);
+        const pitchClasses = [root, pitchClass(root + third), pitchClass(root + 7)];
+        assert.deepEqual(chord.notes.map(notePitch), pitchClasses);
+        assert.deepEqual(new Set(checkHand(guitar, GUITAR_STANDARD).map(pitchClass)), new Set(pitchClasses));
+        const played = checkHand(chord, BASS_STANDARD);
+        if (level === "advanced") {
+          assert.deepEqual(played, [played[0], played[0] + 7, played[0] + 12 + third]);
+          assert.equal(pitchClass(played[0]), root);
+        } else {
+          assert.deepEqual(played, level === "easy" ? [lowRoot] : [lowRoot, lowRoot + 7]);
+          const strings = chord.strings.flatMap((s, i) => s.fret === null ? [] : [i]);
+          assert.ok(chord.strings[strings[0]].fret <= 4);
+          if (level === "intermediate") {
+            assert.equal(strings[1], strings[0] + 1);
+            assert.equal(chord.strings[strings[1]].fret, chord.strings[strings[0]].fret + 2);
+          }
+        }
+      }
+    }
+  }
+  const sharp = { name: "C♯", root: 1, quality: "major", numeral: "V" };
+  assert.deepEqual(getSongChord(sharp, "bass", "easy").notes, ["C♯", "E♯", "G♯"]);
+  assert.deepEqual(getSongChord({ ...sharp, name: "D♭" }, "guitar", "easy").notes, ["D♭", "F", "A♭"]);
 });

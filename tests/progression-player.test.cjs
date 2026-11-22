@@ -86,6 +86,55 @@ test("replacing a loop with a bass preview disconnects queued notes and releases
   assert.equal(ctx.oscillators.length, loopVoices.length + 2);
 });
 
+test("mixed chord durations start on the selected chord and repeat on absolute beat boundaries", t => {
+  t.mock.timers.enable({ apis: ["setInterval"] });
+  const ctx = audio();
+  const states = [];
+  const player = new ProgressionPlayer(s => states.push(s), () => ctx);
+  t.after(player.stop);
+  const bpm = 87;
+  const secondsPerBeat = 60 / bpm;
+  const beats = [8, 2, 4];
+  player.play([[48], [50], [52]], "bass", bpm, 1, beats);
+  beats[1] = 16; // Editor changes after Play cannot shift an already-started loop.
+  const origin = ctx.oscillators[0].startTime;
+  const boundary = (beat, from, to) => {
+    const start = origin + beat * secondsPerBeat;
+    ctx.currentTime = start - 0.05;
+    t.mock.timers.tick(40);
+    assert.equal(states.at(-1).activeIndex, from);
+    assert.ok(Math.abs(ctx.oscillators.at(-1).startTime - start) < 1e-8);
+    assert.equal(ctx.oscillators.at(-1).frequency.value, midiToHz([48, 50, 52][to]));
+    ctx.currentTime = start;
+    t.mock.timers.tick(40);
+    assert.equal(states.at(-1).activeIndex, to);
+  };
+  assert.equal(states.at(-1).activeIndex, 1);
+  boundary(2, 1, 2);
+  boundary(6, 2, 0);
+  boundary(14, 0, 1);
+  boundary(16, 1, 2);
+  const voicesBeforeStall = ctx.oscillators.length;
+  boundary(14 * 300 + 6, 2, 0);
+  // A stalled event loop can schedule the upcoming boundary but never a burst of missed chords.
+  assert.equal(ctx.oscillators.length, voicesBeforeStall + 1);
+});
+
+test("song slots accept one to sixteen beats and use four beats for missing or invalid entries", t => {
+  t.mock.timers.enable({ apis: ["setInterval"] });
+  const ctx = audio();
+  const states = [];
+  const player = new ProgressionPlayer(s => states.push(s), () => ctx);
+  t.after(player.stop);
+  player.play([[36], [38], [40], [41], [43]], "bass", 120, 0, [1, 16, 0, 17]);
+  const origin = ctx.oscillators[0].startTime;
+  [1, 17, 21, 25, 29].forEach((beat, i) => {
+    ctx.currentTime = origin + beat * 0.5;
+    t.mock.timers.tick(40);
+    assert.equal(states.at(-1).activeIndex, (i + 1) % 5);
+  });
+});
+
 test("superseded and stopped audio-resume promises never start notes or replace a later error", async () => {
   const ctx = audio("suspended");
   const pending = [];

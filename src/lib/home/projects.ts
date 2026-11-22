@@ -111,7 +111,7 @@ export const PROJECTS: Project[] = [
   {
     id: "progressions",
     title: "Chord progressions",
-    blurb: "Find a four-chord loop, hear how it lands, and see where your fingers go on guitar or bass.",
+    blurb: "Learn chord changes with songs, then make a loop of your own on guitar or bass.",
     href: "/progressions",
     external: false,
     doodle: "chords",

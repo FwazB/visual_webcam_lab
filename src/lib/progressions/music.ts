@@ -1,4 +1,5 @@
 import { BASS_STANDARD, GUITAR_STANDARD, midiAt } from "@/lib/instrument/profile";
+import type { LevelId, SongStep } from "./songPath";
 
 export type Instrument = "guitar" | "bass";
 export type Chord = {
@@ -26,7 +27,7 @@ const DEGREES = {
   "♭VII": [6, 10, "major"],
 } as const;
 type Numeral = keyof typeof DEGREES;
-type Quality = "major" | "minor";
+type Quality = SongStep["quality"];
 type Recipe = readonly [Numeral, Numeral, Numeral, Numeral];
 
 const FAMILIES: { id: string; label: string; recipes: Recipe[] }[] = [
@@ -119,7 +120,24 @@ function guitarShape(root: number, quality: Quality): Shape {
   };
 }
 
-function bassShape(root: number, quality: Quality): Shape {
+function bassShape(root: number, quality: Quality, level: LevelId): Shape {
+  if (level !== "advanced") {
+    // Use the lowest octave, on the highest available open string. The root
+    // stays within the first four frets and the fifth lies on the next string.
+    const tuning = BASS_STANDARD.tuning;
+    const midi = tuning[0] + wrap(root - tuning[0], 12);
+    const string = tuning.findLastIndex(open => open <= midi);
+    const fret = midi - tuning[string];
+    const frets: Position[] = tuning.map(() => null);
+    const fingers: Position[] = tuning.map(() => null);
+    frets[string] = fret;
+    fingers[string] = fret === 0 ? null : 1;
+    if (level === "intermediate") {
+      frets[string + 1] = midi + 7 - tuning[string + 1];
+      fingers[string + 1] = fret === 0 ? 2 : 4;
+    }
+    return { frets, fingers };
+  }
   // Root–fifth–tenth on E, A, G. Skipping the D string opens the upper
   // interval; fifth position and up keeps the full grip within two frets.
   const r = 5 + wrap(root - BASS_STANDARD.tuning[0] - 5, 12);
@@ -127,26 +145,30 @@ function bassShape(root: number, quality: Quality): Shape {
            fingers: [1, 4, null, 2] };
 }
 
+export function getSongChord(step: Omit<SongStep, "beats">, instrument: Instrument, level: LevelId): Chord {
+  const root = wrap(step.root, 12);
+  const letter = LETTERS.indexOf(step.name[0]);
+  const notes = [spell(letter, root), spell(letter + 2, root + (step.quality === "major" ? 4 : 3)),
+                 spell(letter + 4, root + 7)];
+  const profile = instrument === "bass" ? BASS_STANDARD : GUITAR_STANDARD;
+  const shape = instrument === "bass" ? bassShape(root, step.quality, level) : guitarShape(root, step.quality);
+  return {
+    name: step.name, numeral: step.numeral, notes,
+    strings: shape.frets.map((fret, index) => ({
+      fret, finger: shape.fingers[index], midi: fret === null ? null : midiAt(profile, index, fret),
+    })),
+    ...(shape.barre && { barre: { ...shape.barre } }),
+  };
+}
+
 export function getProgression(key: number, mood: string, variation: number, instrument: Instrument): Chord[] {
   const tonic = wrap(key, 12);
   const tonicLetter = LETTERS.indexOf(KEYS[tonic].label[0]);
-  const profile = instrument === "bass" ? BASS_STANDARD : GUITAR_STANDARD;
   const recipes = recipesFor(mood);
   return recipes[wrap(variation, recipes.length)].map(numeral => {
     const [degree, semitones, quality] = DEGREES[numeral];
     const root = wrap(tonic + semitones, 12);
-    const letter = tonicLetter + degree;
-    const notes = [spell(letter, root), spell(letter + 2, root + (quality === "major" ? 4 : 3)),
-                   spell(letter + 4, root + 7)];
-    const shape = instrument === "bass" ? bassShape(root, quality) : guitarShape(root, quality);
-    return {
-      name: notes[0] + (quality === "minor" ? "m" : ""),
-      numeral,
-      notes,
-      strings: shape.frets.map((fret, index) => ({
-        fret, finger: shape.fingers[index], midi: fret === null ? null : midiAt(profile, index, fret),
-      })),
-      ...(shape.barre && { barre: { ...shape.barre } }),
-    };
+    const name = spell(tonicLetter + degree, root) + (quality === "minor" ? "m" : "");
+    return getSongChord({ name, root, quality, numeral }, instrument, "advanced");
   });
 }

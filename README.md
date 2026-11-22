@@ -26,8 +26,9 @@ a local research tool rather than a production accuracy claim.
 - `/guitar` and `/bass`: live note highway with pitch/timing scoring, automatic
   neck tracking and MediaPipe fingertip dots. Shapes and Song practice retain
   the existing lesson and chord-loop tools.
-- `/progressions` generates four-chord loops by key and mood. Select a chord
-  to see a guitar or bass fingering, or play the whole loop to practice the changes.
+- `/progressions` opens a six-song practice path from easy to advanced. Choose
+  guitar or bass, select a chord for its fingering, and loop the song section at
+  your own tempo. **Free generator** (`/progressions?mode=free`) makes four-chord loops by key and mood.
 - `/studio`: multitrack recorder for the guitar: record takes over a click,
   arrange and trim them, export a WAV.
 - `/for-you`: practice picks, with an optional read-only Spotify connection.

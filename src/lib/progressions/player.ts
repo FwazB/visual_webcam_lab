@@ -1,6 +1,6 @@
 import { midiToHz } from "@/lib/instrument/pitch";
+import type { Instrument } from "./music";
 
-type Instrument = "guitar" | "bass";
 interface Playback {
   playing: boolean;
   activeIndex: number | null;
@@ -8,7 +8,30 @@ interface Playback {
 }
 
 export const IDLE_PLAYBACK: Playback = { playing: false, activeIndex: null, error: null };
-const AUDIO_ERROR = "Audio is unavailable. Tap Play or Hear chord to try again.";
+const AUDIO_ERROR = "Audio is unavailable. Try playing the loop or previewing the selected chord again.";
+
+/** Integer beat boundaries are relative to the chosen starting chord, including on repeat. */
+function loopClock(count: number, bpm: number, startIndex: number, beats?: number[]) {
+  let total = 0;
+  const ends = Array.from({ length: count }, (_, slot) => {
+    const duration = beats?.[(startIndex + slot) % count] ?? 4;
+    total += Number.isInteger(duration) && duration >= 1 && duration <= 16 ? duration : 4;
+    return total;
+  });
+  const secondsPerBeat = 60 / bpm;
+  return {
+    slotAt(seconds: number) {
+      const beat = Math.max(0, seconds / secondsPerBeat) + 1e-9;
+      const pass = Math.floor(beat / total);
+      const withinPass = beat - pass * total;
+      return pass * count + ends.findIndex(end => withinPass < end);
+    },
+    startOf(slot: number) {
+      const preceding = ends[slot % count - 1] ?? 0;
+      return (Math.floor(slot / count) * total + preceding) * secondsPerBeat;
+    },
+  };
+}
 
 /** Owns its audio clock and voices so previews never touch another instrument's transport. */
 export class ProgressionPlayer {
@@ -51,23 +74,23 @@ export class ProgressionPlayer {
     this.update(IDLE_PLAYBACK);
   };
 
-  play = (voices: number[][], instrument: Instrument, bpm: number, startIndex = 0) => {
-    if (!Number.isFinite(bpm) || bpm <= 0 || bpm > 1000) { this.stop(); return; }
+  play = (voices: number[][], instrument: Instrument, bpm: number, startIndex = 0, beats?: number[]) => {
+    if (!voices.length || !Number.isFinite(bpm) || bpm <= 0 || bpm > 1000) { this.stop(); return; }
     const index = Number.isInteger(startIndex) && startIndex >= 0 && startIndex < voices.length ? startIndex : 0;
-    void this.start(voices, instrument, 240 / bpm, index);
+    void this.start(voices, instrument, loopClock(voices.length, bpm, index, beats), index);
   };
 
   preview = (midis: number[], instrument: Instrument) => {
     void this.start([midis], instrument, null, 0);
   };
 
-  private async start(voices: number[][], instrument: Instrument, bar: number | null, startIndex: number) {
+  private async start(voices: number[][], instrument: Instrument, clock: ReturnType<typeof loopClock> | null, startIndex: number) {
     this.silence();
     const run = this.generation;
     // Preserve doubled notes while strumming only the strings shown on the diagram.
     const chords = voices.map(notes => notes.filter(n => Number.isInteger(n) && n >= 0 && n <= 127).sort((a, b) => a - b));
     if (!chords.length || chords.some(notes => !notes.length)) { this.stop(); return; }
-    this.update({ playing: bar !== null, activeIndex: null, error: null });
+    this.update({ playing: clock !== null, activeIndex: null, error: null });
     const fail = () => {
       if (run !== this.generation) return;
       this.silence();
@@ -83,7 +106,7 @@ export class ProgressionPlayer {
       const harmonics = instrument === "guitar" ? [0, 1, 0.48, 0.24, 0.12, 0.07] : [0, 1, 0.3, 0.11];
       const wave = ctx.createPeriodicWave(new Float32Array(harmonics.length), Float32Array.from(harmonics));
       const origin = ctx.currentTime + 0.015;
-      if (bar === null) {
+      if (clock === null) {
         this.strum(ctx, wave, instrument, chords[0], origin, 1.8, true);
         return;
       }
@@ -93,13 +116,17 @@ export class ProgressionPlayer {
         if (run !== this.generation) return;
         try {
           const now = ctx.currentTime;
-          const current = Math.max(0, Math.floor((now - origin) / bar));
-          // Queue the next attack on the audio clock, and skip missed bars after a stalled frame.
-          const upcoming = Math.max(current, Math.floor((now + 0.1 - origin) / bar));
+          const current = clock.slotAt(now - origin);
+          // Queue attacks on the audio clock, and skip missed chords after a stalled frame.
+          const upcoming = clock.slotAt(now + 0.1 - origin);
           for (let slot = Math.max(current, scheduled + 1); slot <= upcoming; slot++) {
-            const when = Math.max(now, origin + slot * bar);
-            const remaining = origin + (slot + 1) * bar - when;
-            if (remaining > 0.1) this.strum(ctx, wave, instrument, chords[(startIndex + slot) % chords.length], when, remaining, false);
+            const start = origin + clock.startOf(slot);
+            const end = origin + clock.startOf(slot + 1);
+            const when = Math.max(now, start);
+            const remaining = end - when;
+            if (remaining > Math.min(0.1, (end - start) / 2)) {
+              this.strum(ctx, wave, instrument, chords[(startIndex + slot) % chords.length], when, remaining, false);
+            }
           }
           scheduled = upcoming;
           if (displayed !== current) {

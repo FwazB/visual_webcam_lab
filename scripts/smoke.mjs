@@ -7,7 +7,6 @@ const sha256 = (value) => createHash("sha256").update(value).digest("hex");
 const pageTitles = {
   "/fuzz": "Fuzz | body.synth",
   "/progressions": "Chord progression generator | body.synth",
-  "/progressions?instrument=bass": "Chord progression generator | body.synth",
   "/pocket-operators": "Pocket Operator guide | body.synth",
 };
 const publicScripts = [
@@ -19,8 +18,10 @@ const localScripts = new Map(await Promise.all(publicScripts.map(async (path) =>
   path, await readFile(new URL(`../public${path}`, import.meta.url)),
 ])));
 
-for (const path of ["/", "/guitar", "/bass", "/progressions", "/progressions?instrument=bass", "/studio", "/pocket-operators", "/for-you", "/for-you/privacy", "/ascii", "/fuzz", ...publicScripts]) {
-  const response = await fetch(new URL(path, base), { signal: AbortSignal.timeout(15000) });
+const progressionPages = ["/progressions", "/progressions?instrument=bass", "/progressions?instrument=bass&song=creep", "/progressions?mode=free"];
+for (const path of ["/", "/guitar", "/bass", ...progressionPages, "/studio", "/pocket-operators", "/for-you", "/for-you/privacy", "/ascii", "/fuzz", ...publicScripts]) {
+  const url = new URL(path, base);
+  const response = await fetch(url, { signal: AbortSignal.timeout(15000) });
   assert.equal(response.status, 200, `${path} must load`);
   assert.equal(response.headers.get("x-content-type-options"), "nosniff");
   assert.equal(response.headers.get("x-frame-options"), "DENY");
@@ -52,7 +53,7 @@ for (const path of ["/", "/guitar", "/bass", "/progressions", "/progressions?ins
   } else {
     // Most pages use next/dynamic with SSR disabled. HTTP checks can verify
     // their shell/assets; this does not exercise rendered controls or devices.
-    assert.ok(body.includes(`<title>${pageTitles[path] ?? "body.synth"}</title>`), `${path} must have its page title`);
+    assert.ok(body.includes(`<title>${pageTitles[url.pathname] ?? "body.synth"}</title>`), `${path} must have its page title`);
     assert.equal(body.includes('aria-label="AirPods head motion"'), path !== "/for-you/privacy",
       `${path} must have the appropriate site-wide motion controls`);
     assert.equal(/<button\b[^>]*><span\b[^>]*><\/span>Start AirPods<\/button>/.test(body), path !== "/for-you/privacy",
@@ -61,11 +62,20 @@ for (const path of ["/", "/guitar", "/bass", "/progressions", "/progressions?ins
       // The homepage is server-rendered: every project link is in the HTML.
       for (const href of ["/guitar", "/bass", "/progressions", "/studio", "/for-you", "/ascii", "/pocket-operators", "/fuzz"]) assert.ok(body.includes(`href="${href}"`), `/ must link to ${href}`);
     }
-    if (path.startsWith("/progressions")) {
-      const instrument = path.includes("instrument=bass") ? "Bass" : "Guitar";
+    if (url.pathname === "/progressions") {
+      const instrument = url.searchParams.get("instrument") === "bass" ? "Bass" : "Guitar";
       assert.match(body, /<h1\b[^>]*>Chord progression generator<\/h1>/i);
       assert.match(body, new RegExp(`<button\\b[^>]*aria-pressed="true"[^>]*>${instrument}</button>`));
-      assert.ok(body.includes('aria-label="Progression bars"'));
+      if (url.searchParams.get("mode") === "free") {
+        assert.ok(body.includes('aria-label="Progression bars"'));
+        assert.match(body, /<h2\b[^>]*>Your progression<\/h2>/);
+      } else {
+        assert.ok(body.includes('aria-label="Practice chords"'));
+        const advanced = url.searchParams.get("song") === "creep";
+        assert.match(body, advanced ? /<h2\b[^>]*>Creep<\/h2>/ : /<h2\b[^>]*>Three Little Birds<\/h2>/);
+        assert.ok(body.includes(advanced ? 'aria-label="Chord 4, Cm, iv, 8 beats"' : 'aria-label="Chord 2, D, IV, 4 beats"'));
+        if (instrument === "Bass") assert.ok(body.includes(advanced ? "Hear triad" : "Hear root"));
+      }
     }
     if (path === "/fuzz") {
       assert.match(body, /<button\b[^>]*>Start camera<\/button>/);

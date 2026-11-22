@@ -34,14 +34,48 @@
 .instruments button { min-width: 4.2rem; min-height: 36px; padding: .2rem .85rem; border-radius: 2rem; font-size: .88rem; font-weight: 700; }
 .instruments button[aria-pressed="true"] { color: var(--sheet); background: var(--ink); }
 .title {
-  margin: clamp(1.25rem, 3vw, 2.15rem) 0 clamp(1.4rem, 3vw, 2.4rem);
-  max-width: 18ch;
-  font-size: clamp(2.8rem, 7vw, 5.85rem); font-weight: 850;
+  margin: clamp(1.1rem, 2.8vw, 2rem) 0 .7rem;
+  font-size: clamp(2.6rem, 5.6vw, 4.45rem); font-weight: 850;
   letter-spacing: -.078em; line-height: .97; text-wrap: balance;
   text-shadow: 2px 2px var(--pink);
 }
+.modes { display: flex; gap: 1.25rem; margin-bottom: clamp(1.1rem, 2vw, 1.55rem); border-bottom: 1px solid var(--rule); }
+.modes button {
+  min-height: 43px; margin-bottom: -1px; padding: .4rem .1rem; border-bottom: 3px solid transparent;
+  color: var(--quiet); font-weight: 650;
+}
+.modes button[aria-pressed="true"] { border-color: var(--ink); color: var(--ink); }
 .workbench { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: clamp(1.5rem, 3.8vw, 3.3rem); align-items: start; }
 .composer { min-width: 0; }
+.levels { margin: 0; border: 0; padding: 0; }
+.levels legend { margin-bottom: .25rem; font-size: .88rem; font-weight: 650; }
+.levels button { min-height: 40px; padding: .3rem clamp(.55rem, 1.5vw, 1rem); border: 1px solid var(--ink); background: var(--sheet); font-size: .88rem; font-weight: 650; }
+.levels button + button { border-left: 0; }
+.levels button:first-of-type { border-radius: .3rem 0 0 .3rem; }
+.levels button:last-of-type { border-radius: 0 .3rem .3rem 0; }
+.levels button[aria-pressed="true"] { background: var(--ink); color: var(--sheet); }
+.songPicker { margin-top: .65rem; }
+.songPicker label { min-width: 0; }
+.nextSong {
+  display: inline-flex; justify-content: center; align-items: center; min-height: 44px; padding: .4rem .9rem;
+  color: var(--ink); background: var(--pink); border: 1.5px solid var(--ink); border-radius: .3rem;
+  box-shadow: 0 2px var(--ink); font-weight: 750; font-size: .91rem;
+}
+.songHeading { margin-top: 1.2rem; }
+.pathPosition { display: flex; align-items: center; gap: .8rem; color: var(--quiet); font: .76rem/1.3 var(--font-geist-mono), monospace; }
+.pathPosition button, .lessonLink { text-decoration: underline; text-underline-offset: .18em; }
+.pathPosition button { color: var(--ink); min-height: 28px; }
+.songHeading h2 { margin-top: .2rem; font-weight: 780; font-size: clamp(1.9rem, 3.4vw, 2.8rem); line-height: 1.06; letter-spacing: -.055em; }
+.artist { font: italic 1.15rem/1.45 Georgia, serif; color: var(--quiet); }
+.sectionName { margin-top: .55rem; font-weight: 700; font-size: .96rem; }
+.sectionName span { font-weight: 500; }
+.arrangement, .lessonLink { font-size: .84rem; }
+.arrangement { margin-block: .2rem; color: var(--quiet); }
+.songLinks { display: flex; flex-wrap: wrap; gap: 0 1rem; }
+.lessonLink { display: inline-block; padding-block: .2rem; }
+.practiceCue { margin-top: .8rem; font-size: .93rem; }
+.advanceCue { margin-top: .45rem; font-size: .83rem; color: var(--quiet); }
+.partName { margin-top: .15rem; font-weight: 650; font-size: .91rem; }
 .settings { display: flex; align-items: flex-end; flex-wrap: wrap; gap: .55rem .75rem; }
 .settings label, .tempo { font-size: .88rem; font-weight: 650; }
 .settings label { display: grid; flex: 1 1 4rem; gap: .25rem; }
@@ -63,6 +97,8 @@
 .scoreHeading > span, .barLabel, .tileBar { font: .76rem/1.35 var(--font-geist-mono), monospace; }
 .help { margin-top: .4rem; color: var(--quiet); font-size: .94rem; }
 .score { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); list-style: none; gap: .4rem; margin: .9rem 0 0; padding: 0; }
+.score[data-count="3"] { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.score[data-count="5"] { grid-template-columns: repeat(5, minmax(0, 1fr)); }
 .score li { min-width: 0; }
 .tile {
   display: flex; width: 100%; min-height: clamp(6.6rem, 12.5vw, 9.25rem); flex-direction: column; align-items: flex-start;
@@ -139,11 +175,13 @@
 @media (max-width: 430px) {
   .masthead { padding-block: .2rem .6rem; }
   .title { margin-block: 1rem 1.1rem; }
+  .modes { margin-bottom: .8rem; }
   .settings { gap: .4rem; }
   .settings label { flex-basis: 3.3rem; }
   .generate { padding-inline: .55rem; font-size: .82rem; }
   .generate span { font-size: 1.17rem; }
   .score { gap: .27rem; }
+  .score[data-count="5"] { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .tile { min-height: 5.2rem; }
   .scoreHeading > span, .tileBar { font-size: .7rem; }
   .shape { padding: .85rem; }
