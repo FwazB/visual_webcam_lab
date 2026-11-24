@@ -16,12 +16,11 @@ interface Props {
   onLookupView: (open: boolean) => void;
   preview: (notes: number[], instrument: Instrument) => void;
   stop: () => void;
-  audioMessage: string | null;
 }
 
 interface ChartMatch { id: string; sections: ChartSection[] }
 
-export default function SpotifyChordLookup({ instrument, onOpenLesson, onLookupView, preview, stop, audioMessage }: Props) {
+export default function SpotifyChordLookup({ instrument, onOpenLesson, onLookupView, preview, stop }: Props) {
   const [input, setInput] = useState("");
   const [message, setMessage] = useState("");
   const [inLookup, setInLookup] = useState(false);
@@ -146,7 +145,6 @@ export default function SpotifyChordLookup({ instrument, onOpenLesson, onLookupV
         <p className={styles.credit}>Chords from <a href={CHART_SOURCE} target="_blank" rel="noreferrer">Chordonomicon</a> by
           {" "}Kantarelis, Liolitsas, Thomas, Lyberatos, Dervakos and Stamou. Notation adapted for display.
           {" "}<a href={CHART_LICENSE} target="_blank" rel="noreferrer">CC BY-NC 4.0</a>.</p>
-        {audioMessage && <p role="status">{audioMessage}</p>}
       </div>
       {shape ? <ChordShape chord={shape} instrument={instrument} position={`Chord ${chordIndex + 1} of ${section.chords.length}`}
         hear={() => hear(shape)} /> : <section className={layout.shape} aria-label="Selected chord">

@@ -121,18 +121,37 @@ export default function ProgressionGenerator({ initialInstrument = "guitar", ini
   }
   function stopAtCurrent() {
     setSelected(current);
-    player.stop();
+    player.stopLoop();
   }
   function toggleLoop() {
     if (player.playing) stopAtCurrent();
     else player.play(voices, instrument, bpm, selected, beats);
   }
   function changeTempo(value: number) {
-    stopAtCurrent();
+    player.setTempo(value);
     if (mode === "custom") setCustom(draft => ({ ...draft, bpm: value }));
     else if (guided) setSongBpm(value);
     else setFreeBpm(value);
   }
+
+  const transport = <>
+    <div className={styles.transport}>
+      {!lookupOpen && <button type="button" className={styles.play} onClick={toggleLoop}>
+        <span className={player.playing ? styles.stopIcon : styles.playIcon} aria-hidden="true" />
+        {player.playing ? "Stop loop" : "Play loop"}
+      </button>}
+      <label className={styles.metronome}>
+        <input type="checkbox" checked={player.metronome} onChange={() => player.toggleMetronome(bpm)} />
+        Metronome
+      </label>
+      <label className={styles.tempo}>Tempo <span>{bpm} BPM</span>
+        <input type="range" min="50" max="160" value={bpm} aria-label="Tempo" aria-valuetext={`${bpm} beats per minute`}
+          onChange={event => changeTempo(Number(event.target.value))} />
+      </label>
+    </div>
+    {player.starting && <p role="status" className={styles.help}>Starting audio…</p>}
+    {player.error && <p role="alert" className={styles.error}>{player.error}</p>}
+  </>;
 
   return <main className={styles.page}>
     <div className={styles.inner}>
@@ -152,8 +171,8 @@ export default function ProgressionGenerator({ initialInstrument = "guitar", ini
         </div>
         <ProgressionsInstall />
       </div>
-      {guided && <SpotifyChordLookup instrument={instrument} preview={player.preview} stop={player.stop}
-        audioMessage={player.error ?? (player.starting ? "Starting audio…" : null)}
+      {lookupOpen && transport}
+      {guided && <SpotifyChordLookup instrument={instrument} preview={player.preview} stop={player.stopLoop}
         onLookupView={open => { reset(); setLookupOpen(open); }}
         onOpenLesson={slug => {
           const index = SONGS.findIndex(item => item.id === slug);
@@ -215,18 +234,7 @@ export default function ProgressionGenerator({ initialInstrument = "guitar", ini
               </button>
             </li>)}
           </ol>
-          <div className={styles.transport}>
-            <button type="button" className={styles.play} onClick={toggleLoop}>
-              <span className={player.playing ? styles.stopIcon : styles.playIcon} aria-hidden="true" />
-              {player.playing ? "Stop loop" : "Play loop"}
-            </button>
-            <label className={styles.tempo}>Tempo <span>{bpm} BPM</span>
-              <input type="range" min="50" max="160" value={bpm} aria-label="Tempo" aria-valuetext={`${bpm} beats per minute`}
-                onChange={event => changeTempo(Number(event.target.value))} />
-            </label>
-          </div>
-          {player.starting && <p role="status" className={styles.help}>Starting audio…</p>}
-          {player.error && <p role="alert" className={styles.error}>{player.error}</p>}
+          {transport}
           {guided && <p className={styles.advanceCue}>{songIndex === SONGS.length - 1
             ? "Finish with two steady loops, then revisit a song or try the free generator."
             : "When you can play two loops without losing the beat, try the next song."}</p>}

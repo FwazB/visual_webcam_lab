@@ -16,5 +16,8 @@ export function useProgressionPlayer() {
       player.stop();
     };
   }, [player]);
-  return { ...state, play: player.play, preview: player.preview, stop: player.stop };
+  return {
+    ...state, play: player.play, preview: player.preview, stop: player.stop, stopLoop: player.stopLoop,
+    toggleMetronome: player.toggleMetronome, setTempo: player.setTempo,
+  };
 }
