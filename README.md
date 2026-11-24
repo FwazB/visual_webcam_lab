@@ -27,8 +27,9 @@ a local research tool rather than a production accuracy claim.
   neck tracking and MediaPipe fingertip dots. Shapes and Song practice retain
   the existing lesson and chord-loop tools.
 - `/progressions` opens the guitar and bass song library, ordered from easy to
-  advanced. Pick any song to hear the changes and see each fingering. Add the
-  page to your Home Screen to launch directly into the library. **Free generator**
+  advanced. Pick any song to hear the changes and see each fingering. Turn on
+  **Metronome** to hear the selected BPM on its own or alongside the chord loop.
+  Add the page to your Home Screen to launch directly into the library. **Free generator**
   (`/progressions?mode=free`) makes four-chord loops by key and mood. **Custom loop**
   (`/progressions?mode=custom`) lets you choose chords, beat counts and tempo,
   then save the progression in this browser.

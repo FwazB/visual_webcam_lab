@@ -12,16 +12,22 @@ function audio(state = "running") {
     close() { this.state = "closed"; this.onstatechange?.(); return Promise.resolve(); },
     createPeriodicWave(_, harmonics) { return harmonics; },
     createGain() {
+      const levels = [];
       return {
-        gain: { setValueAtTime() {}, linearRampToValueAtTime() {}, exponentialRampToValueAtTime() {} },
-        connect(node) { return node; }, disconnect() {},
+        levels,
+        gain: {
+          setValueAtTime(level) { levels.push(level); },
+          linearRampToValueAtTime(level) { levels.push(level); },
+          exponentialRampToValueAtTime(level) { levels.push(level); },
+        },
+        connect(node) { this.output = node; return node; }, disconnect() {},
       };
     },
     createOscillator() {
       const osc = {
         frequency: { value: 0 }, disconnected: false,
         setPeriodicWave(wave) { this.wave = wave; },
-        connect(node) { return node; }, disconnect() { this.disconnected = true; },
+        connect(node) { this.output = node; return node; }, disconnect() { this.disconnected = true; },
         start(time) { this.startTime = time; }, stop(time) { this.endTime = time; },
       };
       oscillators.push(osc);
@@ -29,6 +35,131 @@ function audio(state = "running") {
     },
   };
 }
+
+function advanceAudio(t, ctx, until) {
+  while (ctx.currentTime < until) {
+    ctx.currentTime = Math.min(until, ctx.currentTime + 0.04);
+    t.mock.timers.tick(40);
+  }
+}
+
+test("standalone metronome ticks once per beat, follows tempo changes and stops cleanly", t => {
+  t.mock.timers.enable({ apis: ["setInterval"] });
+  const ctx = audio();
+  const states = [];
+  const player = new ProgressionPlayer(state => states.push(state), () => ctx);
+  t.after(player.stop);
+  player.toggleMetronome(120);
+  assert.equal(states.at(-1).metronome, true);
+  assert.equal(states.at(-1).playing, false);
+  assert.equal(states.at(-1).activeIndex, null);
+  assert.equal(ctx.oscillators.length, 1);
+  const click = ctx.oscillators[0];
+  assert.equal(click.output.output, ctx.destination);
+  assert.ok(Math.max(...click.output.levels) > 0.01);
+  assert.ok(click.endTime > click.startTime && click.endTime - click.startTime < 0.2);
+  const origin = click.startTime;
+  advanceAudio(t, ctx, origin + 1.46);
+  assert.deepEqual(ctx.oscillators.map(o => o.startTime - origin).map(n => n.toFixed(6)), [
+    "0.000000", "0.500000", "1.000000", "1.500000",
+  ]);
+
+  // The next beat is already queued. A tempo change must not sound it twice.
+  player.setTempo(80);
+  advanceAudio(t, ctx, origin + 4);
+  const retimed = ctx.oscillators.filter(o => !o.disconnected && o.startTime > ctx.currentTime - 2.6);
+  assert.ok(retimed.length >= 3);
+  for (const [i, osc] of retimed.entries()) {
+    if (i > 0) assert.ok(Math.abs(osc.startTime - retimed[i - 1].startTime - 0.75) < 1e-8);
+  }
+
+  // A suspended JS timer must skip the elapsed beats when it wakes.
+  const beforeStall = ctx.oscillators.length;
+  ctx.currentTime += 25;
+  t.mock.timers.tick(40);
+  assert.ok(ctx.oscillators.length - beforeStall <= 1);
+  player.toggleMetronome(80);
+  assert.deepEqual(states.at(-1), IDLE_PLAYBACK);
+  assert.equal(ctx.state, "closed");
+  const count = ctx.oscillators.length;
+  advanceAudio(t, ctx, ctx.currentTime + 1);
+  assert.equal(ctx.oscillators.length, count);
+});
+
+test("a chord preview and then a bass loop can join a standalone click without losing its beat", t => {
+  t.mock.timers.enable({ apis: ["setInterval"] });
+  const ctx = audio();
+  const states = [];
+  const player = new ProgressionPlayer(state => states.push(state), () => ctx);
+  t.after(player.stop);
+  player.toggleMetronome(120);
+  const origin = ctx.oscillators[0].startTime;
+  advanceAudio(t, ctx, origin + 0.2);
+  player.preview([67], "guitar");
+  const preview = ctx.oscillators.find(o => o.frequency.value === midiToHz(67));
+  assert.ok(preview);
+  preview.onended();
+  assert.equal(ctx.state, "running");
+  assert.equal(states.at(-1).metronome, true);
+
+  player.play([[40], [41]], "bass", 120, 1, [2, 1]);
+  advanceAudio(t, ctx, origin + 1.05);
+  const bass = ctx.oscillators.filter(o => o.frequency.value === midiToHz(40) || o.frequency.value === midiToHz(41));
+  const clicks = ctx.oscillators.filter(o => !o.wave && !o.disconnected);
+  assert.deepEqual(bass.map(o => o.frequency.value), [41, 40].map(midiToHz));
+  assert.equal(bass[0].startTime, clicks[1].startTime);
+  assert.equal(bass[1].startTime, clicks[2].startTime);
+  assert.equal(states.at(-1).playing, true);
+  player.stopLoop();
+  assert.equal(states.at(-1).playing, false);
+  assert.equal(states.at(-1).metronome, true);
+  advanceAudio(t, ctx, origin + 1.55);
+  assert.ok(Math.abs(ctx.oscillators.at(-1).startTime - (origin + 1.5)) < 1e-8);
+  assert.ok(!ctx.oscillators.at(-1).wave);
+});
+
+test("enabling and disabling the click during a loop preserves its selected chord and beat phase", t => {
+  t.mock.timers.enable({ apis: ["setInterval"] });
+  const ctx = audio();
+  const states = [];
+  const player = new ProgressionPlayer(state => states.push(state), () => ctx);
+  t.after(player.stop);
+  player.play([[38], [45]], "bass", 120, 1, [2, 1]);
+  const origin = ctx.oscillators[0].startTime;
+  advanceAudio(t, ctx, origin + 0.2);
+  player.toggleMetronome(120);
+  advanceAudio(t, ctx, origin + 1.05);
+  const clicks = ctx.oscillators.filter(o => !o.wave && !o.disconnected);
+  assert.equal(clicks.length, 2);
+  assert.ok(Math.abs(clicks[0].startTime - (origin + 0.5)) < 1e-8);
+  assert.ok(Math.abs(clicks[1].startTime - (origin + 1)) < 1e-8);
+  const bass = ctx.oscillators.filter(o => o.wave);
+  assert.deepEqual(bass.map(o => o.frequency.value), [45, 38].map(midiToHz));
+  assert.equal(bass[1].startTime, clicks[0].startTime);
+  player.toggleMetronome(120);
+  assert.equal(states.at(-1).metronome, false);
+  assert.equal(states.at(-1).playing, true);
+  const startCount = ctx.oscillators.length;
+  advanceAudio(t, ctx, origin + 1.55);
+  assert.deepEqual(ctx.oscillators.slice(startCount).map(o => o.frequency.value), [midiToHz(45)]);
+});
+
+test("turning off a metronome waiting for mobile audio prevents late clicks", async t => {
+  const ctx = audio("suspended");
+  const states = [];
+  const player = new ProgressionPlayer(state => states.push(state), () => ctx);
+  t.after(player.stop);
+  let finishResume;
+  ctx.resume = () => new Promise(resolve => { finishResume = resolve; });
+  player.toggleMetronome(84);
+  assert.equal(states.at(-1).starting, true);
+  player.toggleMetronome(84);
+  finishResume();
+  await Promise.resolve();
+  assert.deepEqual(states.at(-1), IDLE_PLAYBACK);
+  assert.equal(ctx.state, "closed");
+  assert.deepEqual(ctx.oscillators, []);
+});
 
 test("loops the diagram pitches from the selected bar and highlights only at the four-beat boundary", t => {
   t.mock.timers.enable({ apis: ["setInterval"] });
@@ -239,6 +370,7 @@ test("hidden tabs, pagehide and unmount each release the hook's audio", t => {
   const player = hookModule.exports.useProgressionPlayer();
   assert.equal(contexts.length, 0);
   player.play([[52]], "bass", 80);
+  player.toggleMetronome(80);
   doc.hidden = false;
   doc.dispatchEvent(new Event("visibilitychange"));
   assert.equal(contexts[0].state, "running");
