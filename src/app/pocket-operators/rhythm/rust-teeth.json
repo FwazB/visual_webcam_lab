@@ -1,0 +1,10 @@
+{
+  "bpm": 90,
+  "chain": ["A", "A", "A", "B"],
+  "parts": [
+    { "name": "Kick", "sound": 1, "A": [1, 7, 12, 15], "B": [1, 7, 12] },
+    { "name": "Snare", "sound": 2, "A": [9], "B": [9, 16] },
+    { "name": "Closed hi-hat", "sound": 3, "A": [1, 3, 7, 11, 14], "B": [1, 3, 7, 11, 14] },
+    { "name": "Low tom", "sound": 11, "A": [], "B": [13, 15] }
+  ]
+}

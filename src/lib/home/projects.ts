@@ -94,7 +94,7 @@ export const STRUNG_PROJECTS: StringProject[] = [
   {
     id: "pocket-operators",
     title: "Pocket Operators",
-    blurb: "Make a beat on Rhythm, sample with K.O., and find your way into the studio.",
+    blurb: "Learn Rhythm, K.O. and Factory one at a time, then play them together.",
     href: "/pocket-operators",
     external: false,
     doodle: "cassette",

@@ -15,7 +15,8 @@ const hints: Record<string, string> = {
   "/studio": "Tilt left or right to pan clip playback.",
   "/ascii": "Tilt toward one shoulder for coarser text or the other for finer text.",
   "/for-you": "Tilt 15° left or right to step between practice cards. Return to center before the next step.",
-  "/pocket-operators": "Tilt 15° left or right to step between drum parts. Return to center before the next step.",
+  "/pocket-operators": "Tilt left or right to focus a session link. Press Enter to open it.",
+  "/pocket-operators/rhythm": "Tilt 15° left or right to step between drum parts. Return to center before the next step.",
   "/fuzz": "Tilt toward either shoulder to lengthen the browser camera trail. The Fuzz panel pairs separately with TouchDesigner.",
 };
 

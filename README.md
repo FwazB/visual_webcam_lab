@@ -83,7 +83,7 @@ Both devices must be on the same Wi-Fi.
 | ASCII camera | Makes the character grid coarser or finer around the Density setting. |
 | Fuzz | Lengthens the browser camera trail toward either shoulder. Click **Start camera** to see it. |
 | For You | Steps between practice cards. Press Enter to open the selected lesson. |
-| Pocket Operators | Steps through the kick, snare and hi-hat in the pattern guide. |
+| Pocket Operators | Selects a session link in the directory or steps through kick, snare and hi-hat in the Rhythm guide. |
 
 For strums and steps, tilt about 15° and return to center before the next
 gesture. **Set center** recalibrates. Closing the panel leaves tracking on

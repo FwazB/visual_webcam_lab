@@ -5,10 +5,17 @@ import { gunzipSync } from "node:zlib";
 
 const base = new URL(process.argv[2] ?? "http://127.0.0.1:3000");
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
+const pocketSessions = {
+  "/pocket-operators/rhythm": "PO-12 Rhythm",
+  "/pocket-operators/ko": "PO-33 K.O!",
+  "/pocket-operators/factory": "PO-16 Factory",
+  "/pocket-operators/combined": "All three together",
+};
 const pageTitles = {
   "/fuzz": "Fuzz | body.synth",
   "/progressions": "Chord progressions | body.synth",
   "/pocket-operators": "Pocket Operator guide | body.synth",
+  ...Object.fromEntries(Object.entries(pocketSessions).map(([path, title]) => [path, `${title} | body.synth`])),
 };
 const publicScripts = [
   "/worklets/pitch-processor.js", "/worklets/recorder-processor.js",
@@ -23,7 +30,7 @@ const progressionPages = [
   "/progressions", "/progressions?instrument=bass", "/progressions?instrument=bass&song=creep",
   "/progressions?mode=free", "/progressions?mode=custom",
 ];
-for (const path of ["/", "/guitar", "/bass", ...progressionPages, "/studio", "/pocket-operators", "/for-you", "/for-you/privacy", "/ascii", "/fuzz", ...publicScripts]) {
+for (const path of ["/", "/guitar", "/bass", ...progressionPages, "/studio", "/pocket-operators", ...Object.keys(pocketSessions), "/for-you", "/for-you/privacy", "/ascii", "/fuzz", ...publicScripts]) {
   const url = new URL(path, base);
   const response = await fetch(url, { signal: AbortSignal.timeout(15000) });
   assert.equal(response.status, 200, `${path} must load`);
@@ -58,9 +65,10 @@ for (const path of ["/", "/guitar", "/bass", ...progressionPages, "/studio", "/p
     // Most pages use next/dynamic with SSR disabled. HTTP checks can verify
     // their shell/assets; this does not exercise rendered controls or devices.
     assert.ok(body.includes(`<title>${pageTitles[url.pathname] ?? "body.synth"}</title>`), `${path} must have its page title`);
-    assert.equal(body.includes('aria-label="AirPods head motion"'), path !== "/for-you/privacy",
+    const hasMotion = path !== "/for-you/privacy" && (!(path in pocketSessions) || path === "/pocket-operators/rhythm");
+    assert.equal(body.includes('aria-label="AirPods head motion"'), hasMotion,
       `${path} must have the appropriate site-wide motion controls`);
-    assert.equal(/<button\b[^>]*><span\b[^>]*><\/span>Start AirPods<\/button>/.test(body), path !== "/for-you/privacy",
+    assert.equal(/<button\b[^>]*><span\b[^>]*><\/span>Start AirPods<\/button>/.test(body), hasMotion,
       `${path} must show the one-click AirPods launcher on creative pages`);
     if (path === "/") {
       const cardSection = body.match(/<section\b[^>]*aria-labelledby="things-title"[^>]*>([\s\S]*?)<\/section>/)?.[1] ?? "";
@@ -71,6 +79,26 @@ for (const path of ["/", "/guitar", "/bass", ...progressionPages, "/studio", "/p
       assert.ok(cardSection.includes('href="/progressions"'));
       assert.ok(cardSection.includes('href="https://github.com/FwazB/visual_webcam_lab/tree/main/touchdesigner/projection_mapping"'));
       assert.ok(!body.includes('href="/progressions/manifest.webmanifest"'), "Progressions install metadata must be page-specific");
+    }
+    if (path === "/pocket-operators") {
+      const directory = body.match(/<nav[^>]*aria-label="Practice sessions"[^>]*>([\s\S]*?)<\/nav>/)?.[1] ?? "";
+      assert.deepEqual([...directory.matchAll(/href="([^"]+)"/g)].map(match => match[1]), Object.keys(pocketSessions));
+    }
+    if (path in pocketSessions) {
+      assert.ok(body.includes(`<h1>${pocketSessions[path]}</h1>`), `${path} must show its own lesson`);
+      assert.ok(body.includes('id="challenge-title"'), `${path} must include a mastery exercise`);
+      assert.ok(body.includes('href="/pocket-operators"'));
+    }
+    if (path === "/pocket-operators/rhythm") {
+      assert.ok(body.includes('id="guitar-backing"'));
+      const player = body.match(/<audio\b[^>]*>/)?.[0] ?? "";
+      assert.match(player, /\bcontrols\b/);
+      assert.match(player, /\bloop\b/);
+      assert.match(player, /src="\/audio\/rust-teeth\.wav"/);
+      const backing = await fetch(new URL("/audio/rust-teeth.wav", base), { signal: AbortSignal.timeout(15000) });
+      assert.equal(backing.status, 200);
+      const file = await readFile(new URL("../public/audio/rust-teeth.wav", import.meta.url));
+      assert.equal(sha256(Buffer.from(await backing.arrayBuffer())), sha256(file), "backing loop must match the score's local render");
     }
     if (url.pathname === "/progressions") {
       const instrument = url.searchParams.get("instrument") === "bass" ? "Bass" : "Guitar";

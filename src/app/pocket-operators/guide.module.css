@@ -1,3 +1,6 @@
+/* These reading pages use document scrolling so lesson links and fragments
+   work with the browser’s normal navigation. Instrument screens scroll locally. */
+:global(html):has(.page), :global(body):has(.page) { height: auto; overflow: visible; }
 .page {
   --paper: #17141d;
   --panel: #26212f;
@@ -5,13 +8,11 @@
   --quiet: #c0b7cc;
   --accent: #d8b9ff;
   --step: #f2ce75;
-  height: 100dvh;
-  overflow: auto;
+  min-height: 100dvh;
   background: var(--paper);
   color: var(--ink);
   font-family: var(--font-geist-sans), sans-serif;
   line-height: 1.65;
-  scroll-padding-top: 24px;
 }
 .inner { max-width: 1200px; margin: 0 auto; padding: 0 40px; }
 .page a { text-underline-offset: 4px; }
@@ -21,21 +22,28 @@
 .brand { font-size: 22px; font-weight: 750; letter-spacing: -1px; }
 .navigation nav { display: flex; flex-wrap: wrap; gap: 12px 24px; font-size: 14px; }
 .navigation nav a:last-child { color: var(--accent); }
-.navigation nav a[aria-current="page"] { border-bottom: 2px solid var(--accent); padding-bottom: 4px; }
+.navigation nav a[aria-current] { border-bottom: 2px solid var(--accent); padding-bottom: 4px; }
 .connectionJump { display: inline-block; color: var(--accent); font-size: 14px; margin-top: 28px; text-decoration: underline; }
 .intro { padding: 64px 0 52px; }
 .eyebrow { color: var(--accent); font-size: 14px; margin: 0 0 16px; }
 .page h1 { font-size: clamp(40px, 6.8vw, 76px); line-height: 1.04; font-weight: 650; letter-spacing: -0.055em; margin: 0 0 24px; }
 .lead { max-width: 660px; font-size: 20px; color: var(--quiet); }
-.deviceList { display: flex; flex-wrap: wrap; gap: 24px 40px; margin-top: 36px; }
-.deviceList a { display: flex; flex-direction: column; gap: 2px; }
-.deviceList strong { font-size: 16px; }
-.deviceList span { color: var(--quiet); font-size: 13px; }
+.back { display: inline-block; color: var(--accent); font-size: 14px; margin-bottom: 20px; }
+.directory { max-width: 780px; margin-top: 32px; }
+.directory ol { list-style: none; padding: 0; margin: 0; }
+.directory li { border-bottom: 1px solid #443b50; scroll-margin-top: 16px; }
+.directory a { display: grid; grid-template-columns: minmax(12rem, 1fr) minmax(0, 1fr) auto; align-items: baseline; gap: 4px 20px; padding: 16px 8px; }
+.directory a:hover, .directory a:focus-visible { background: var(--panel); text-decoration: none; }
+.directory strong { font-size: clamp(19px, 2.8vw, 26px); font-weight: 600; letter-spacing: -0.03em; }
+.directory span { color: var(--quiet); font-size: 15px; }
+.directory span:last-child { color: var(--accent); }
+.directory li:last-child { margin-top: 18px; border-left: 3px solid var(--step); background: var(--panel); }
+.directory li:last-child a { padding-inline: 16px; }
 .lesson { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(300px, 0.9fr); gap: 64px; padding: 52px 0 64px; border-top: 1px solid #443b50; }
 .page h2 { font-size: clamp(26px, 3.4vw, 38px); line-height: 1.17; font-weight: 600; letter-spacing: -0.035em; margin: 0 0 20px; }
 .page h3 { font-size: 18px; line-height: 1.35; font-weight: 650; margin: 0 0 8px; }
 .page p { max-width: 72ch; }
-.lessonCopy > p:not(.eyebrow), .nextLesson p, .factory > p, .connections > p:not(.eyebrow) { color: var(--quiet); }
+.referenceCard p, .referenceCard dd, .checkpoint p, .connections > p:not(.eyebrow) { color: var(--quiet); }
 .instructions { list-style: none; counter-reset: lesson; padding: 0; margin: 30px 0; }
 .instructions li { position: relative; padding-left: 40px; margin-bottom: 28px; counter-increment: lesson; }
 .instructions li::before { content: counter(lesson); position: absolute; top: 0; left: 0; color: var(--accent); font-size: 18px; font-variant-numeric: tabular-nums; }
@@ -43,7 +51,7 @@
 .page kbd { display: inline-block; color: var(--ink); border: 1px solid #695d79; border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; font-family: var(--font-geist-mono), monospace; font-size: 0.85em; line-height: 1.5; }
 .instructions p.note { padding-left: 12px; border-left: 2px solid var(--step); font-size: 13px; }
 .source { font-size: 12px; color: var(--quiet); }
-.source a, .factory a, .connections a:not(.studioLink a) { color: var(--accent); text-decoration: underline; }
+.source a, .instructions a, .lessonLinks a, .connections a:not(.studioLink a) { color: var(--accent); text-decoration: underline; }
 .reference { align-self: start; position: sticky; top: 24px; }
 .pattern { padding: 28px; margin: 0; border-radius: 18px; background: var(--panel); }
 .pattern figcaption > p { margin: 0; color: var(--quiet); font-size: 14px; }
@@ -64,14 +72,28 @@
 .help { border-bottom: 1px solid #443b50; font-size: 14px; padding: 18px 2px; }
 .page summary { cursor: pointer; font-weight: 550; }
 .help p { color: var(--quiet); margin-bottom: 0; }
-.nextLesson { display: grid; grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.2fr); gap: 24px 64px; padding: 52px 0; border-top: 1px solid #443b50; }
-.nextLesson > .source { grid-column: 1 / -1; margin: 0; }
-.koSteps { padding-left: 22px; margin: 0; }
-.koSteps li { margin-bottom: 24px; padding-left: 8px; }
-.koSteps li::marker { color: var(--accent); }
-.koSteps p { font-size: 15px; margin: 0; }
-.factory { display: grid; grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.2fr); gap: 64px; padding: 40px 0; border-top: 1px solid #443b50; }
-.factory p { margin-top: 0; }
+.referenceCard { background: var(--panel); border-radius: 12px; padding: 24px; }
+.referenceCard p, .referenceCard dd { font-size: 15px; }
+.referenceCard dl { margin: 16px 0 0; }
+.referenceCard dt { color: var(--step); font-weight: 600; border-top: 1px solid #55495f; padding-top: 12px; margin-top: 12px; }
+.referenceCard dd { margin: 4px 0 0; }
+.referenceCard dl + p { margin-top: 20px; }
+.checkpoint { border-top: 1px solid #443b50; padding: 32px 0 44px; }
+.lessonLinks { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 12px 24px; padding: 0 0 32px; }
+.backing { border-top: 1px solid #443b50; padding: 40px 0 16px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 20px 48px; scroll-margin-top: 20px; }
+.backing header > p { color: var(--quiet); }
+.loopPlayer { margin: 24px 0 0; }
+.loopPlayer figcaption { font-size: 14px; margin-bottom: 8px; }
+.loopPlayer audio { display: block; width: 100%; max-width: 420px; color-scheme: dark; }
+.backingScore { align-self: start; background: var(--panel); border-radius: 12px; padding: 18px; }
+.backingScore table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.backingScore caption { text-align: left; font-size: 18px; font-weight: 650; margin-bottom: 10px; }
+.backingScore :is(th, td) { border-bottom: 1px solid #514759; padding: 7px 6px 7px 0; text-align: left; }
+.backingScore th { font-weight: 550; }
+.backingScore td, .chain strong { color: var(--step); font-variant-numeric: tabular-nums; }
+.chain { margin-top: 14px; font-size: 14px; }
+.chain strong { margin-left: 8px; }
+.backing > ol { grid-column: 1 / -1; margin: 4px 0 0; }
 .connections { padding: 52px 0; border-top: 1px solid #443b50; }
 .routes { display: grid; grid-template-columns: 1fr 1fr; gap: 32px; margin: 32px 0; }
 .routes > div { padding: 22px 24px; background: var(--panel); border-radius: 10px; }
@@ -91,7 +113,6 @@
   .inner { padding: 0 24px; }
   .lesson { gap: 28px; grid-template-columns: minmax(0, 1fr) minmax(280px, 0.85fr); }
   .pattern { padding: 20px; }
-  .nextLesson, .factory { gap: 32px; }
 }
 @media (max-width: 660px) {
   .inner { padding: 0 20px; }
@@ -99,12 +120,14 @@
   .navigation nav { gap: 12px 18px; }
   .intro { padding: 40px 0; }
   .lead { font-size: 18px; }
-  .deviceList { gap: 18px; flex-direction: column; }
-  .lesson, .nextLesson, .factory, .routes { grid-template-columns: 1fr; gap: 28px; }
+  .directory a { grid-template-columns: 1fr auto; }
+  .directory a > span:nth-child(2) { grid-column: 1; }
+  .directory a > span:last-child { grid-column: 2; grid-row: 1 / 3; align-self: center; }
+  .lesson, .routes, .backing { grid-template-columns: 1fr; gap: 28px; }
   .lesson { padding: 36px 0; }
   .reference { position: static; }
   .pattern { max-width: 420px; margin-inline: auto; }
   .pad { max-height: 74px; }
-  .nextLesson, .connections { padding: 36px 0; }
+  .connections { padding: 36px 0; }
   .studioLink { flex-direction: column; align-items: flex-start; padding: 22px; }
 }
