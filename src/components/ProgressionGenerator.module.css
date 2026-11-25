@@ -133,7 +133,7 @@
 .neck { fill: #f7f0dc; }
 .fretWire, .string, .barre { stroke: currentColor; }
 .fretLabel, .stringLabel, .openString, .fingerDigit { font-family: var(--font-geist-mono), monospace; fill: currentColor; }
-.fretLabel { font-size: 11px; }
+.fretLabel { font-size: 12px; font-weight: 700; }
 .stringLabel { font-size: 15px; font-weight: 750; }
 .openString { font-size: 13px; }
 .fingerDot { fill: currentColor; }
@@ -147,11 +147,10 @@
 .symbols b { color: var(--ink); }
 .symbols b + b { margin-left: .3rem; }
 .barreTip { margin: .45rem 0 .8rem; font-size: .88rem; }
-.positions { border-top: 1px solid var(--rule); font-size: .85rem; }
-.positions summary { padding: .75rem 0 .15rem; font-weight: 650; }
-.positions table { margin-top: .7rem; width: 100%; text-align: center; border-collapse: collapse; font-variant-numeric: tabular-nums; }
-.positions caption { text-align: left; font-weight: 500; margin-bottom: .35rem; color: var(--quiet); }
-.positions :is(th, td) { padding: .2rem .1rem; border-bottom: 1px solid var(--rule); }
+.positions { margin-top: .7rem; width: 100%; text-align: center; border-collapse: collapse; font-size: .85rem; font-variant-numeric: tabular-nums; }
+.positions caption { text-align: left; font-weight: 700; margin-bottom: .35rem; }
+.positions :is(th, td) { padding: .3rem .1rem; border-bottom: 1px solid var(--rule); }
+.positions tbody tr:first-child { background: var(--paper); font-weight: 700; }
 .positions tr > :first-child { text-align: left; }
 @media (hover: hover) {
   .tile:not([aria-pressed="true"]):hover, .generate:hover, .hear:hover { background: #f8dfeb; }
@@ -182,5 +181,4 @@
   .scoreHeading > span, .tileBar { font-size: .7rem; }
   .shape { padding: .85rem; }
   .diagram { height: auto; max-height: 13rem; }
-  .positions table { font-size: .77rem; }
 }

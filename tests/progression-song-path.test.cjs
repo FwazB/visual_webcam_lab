@@ -41,6 +41,7 @@ test("the excerpt order and beat lengths survive repeated chords and split bars"
   ]));
   assert.deepEqual(charts, {
     "three-little-birds": [["A", 8], ["D", 4], ["A", 4]],
+    "about-a-girl": [["Em", 2], ["G", 2]],
     "bad-moon-rising": [["D", 4], ["A", 2], ["G", 2], ["D", 8]],
     "sweet-home-alabama": [["D", 2], ["C", 2], ["G", 4]],
     zombie: [["Em", 4], ["C", 4], ["G", 4], ["D", 4]],

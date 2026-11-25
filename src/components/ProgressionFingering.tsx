@@ -25,7 +25,7 @@ function ChordDiagram({ chord, labels, title }: { chord: Chord; labels: string[]
   const highest = Math.max(0, ...fretted);
   const first = highest <= 4 ? 1 : Math.min(...fretted);
   const rows = Math.max(4, highest - first + 1);
-  const left = 30;
+  const left = 38;
   const top = 50;
   const step = 36;
   const stringX = (index: number) => left + index * 32;
@@ -42,6 +42,7 @@ function ChordDiagram({ chord, labels, title }: { chord: Chord; labels: string[]
       {barre && ` Barre finger ${barre.finger} across strings ${stringName(labels, barre.from)} through ${stringName(labels, barre.to)} at fret ${barre.fret}.`}
     </desc>
     <rect x={left} y={top} width={right - left} height={bottom - top} className={styles.neck} />
+    <text x={left - 9} y={36} textAnchor="end" className={styles.fretLabel}>Fret</text>
     {Array.from({ length: rows + 1 }, (_, index) => <g key={index}>
       <line x1={left} x2={right} y1={top + index * step} y2={top + index * step}
         className={styles.fretWire} strokeWidth={!index && first === 1 ? 5 : 1.5} />
@@ -85,10 +86,21 @@ export default function ChordShape({ chord, instrument, position, level, hear }:
         <span className={styles.playIcon} aria-hidden="true" />{part?.preview ?? "Hear chord"}
       </button>
     </header>
+    <table className={styles.positions}>
+      <caption>Fret positions</caption>
+      <thead><tr><th scope="col">String</th>{labels.map((label, index) =>
+        <th key={label} scope="col">{stringName(labels, index)}</th>)}</tr></thead>
+      <tbody>
+        <tr><th scope="row">Fret</th>{chord.strings.map((string, index) =>
+          <td key={index}>{string.fret === null ? "Mute" : string.fret === 0 ? "Open" : string.fret}</td>)}</tr>
+        <tr><th scope="row">Finger</th>{chord.strings.map((string, index) =>
+          <td key={index}>{string.finger ?? "—"}</td>)}</tr>
+      </tbody>
+    </table>
     <div className={styles.shapeBody}>
       <figure className={styles.diagramFigure}><ChordDiagram chord={chord} labels={labels}
         title={part ? `${chord.name}, ${part.label.toLowerCase()} diagram` : `${chord.name} chord diagram`} />
-        <figcaption>Lowest string on the left</figcaption>
+        <figcaption>Lowest string on the left. Dots show finger numbers.</figcaption>
       </figure>
       <div className={styles.shapeGuide}>
         <h3>{part ? "Notes to play" : "Chord tones"}</h3>
@@ -101,17 +113,5 @@ export default function ChordShape({ chord, instrument, position, level, hear }:
       </div>
     </div>
     {barre && <p className={styles.barreTip}>Lay your {fingers[barre.finger - 1]} finger across the {stringName(labels, barre.from)} through {stringName(labels, barre.to)} strings at fret {barre.fret}.</p>}
-    <details className={styles.positions}>
-      <summary>String-by-string fingering</summary>
-      <table>
-        <caption>Strings from low to high</caption>
-        <thead><tr><th scope="col">String</th>{labels.map((label, index) =>
-          <th key={label} scope="col" aria-label={stringName(labels, index)}>{label}</th>)}</tr></thead>
-        <tbody>
-          <tr><th scope="row">Fret</th>{chord.strings.map((string, index) => <td key={index}>{string.fret === null ? "Mute" : string.fret === 0 ? "Open" : string.fret}</td>)}</tr>
-          <tr><th scope="row">Finger</th>{chord.strings.map((string, index) => <td key={index}>{string.finger ?? "—"}</td>)}</tr>
-        </tbody>
-      </table>
-    </details>
   </section>;
 }
