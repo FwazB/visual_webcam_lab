@@ -5,6 +5,9 @@ export const SPOTIFY_SONG_IDS: Readonly<Record<string, string>> = {
   "4XWNSeZCSs8fm7gyJmr0qE": "three-little-birds",
   "4efoEY8iDBzUqitjmNDhpN": "three-little-birds",
 
+  "2SHTKB8YYlawTGIuJ2b2ok": "about-a-girl",
+  "0zeqKbySjKbfW5jyl3PMsW": "about-a-girl",
+
   "20OFwXhEXf12DzwXmaV7fj": "bad-moon-rising",
   "5UbNHohr0ybXrqh2sYeYoY": "bad-moon-rising",
   "2ZFxZ4QNiciMhvJV2GjKWL": "bad-moon-rising",

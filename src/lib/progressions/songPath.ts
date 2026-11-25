@@ -87,6 +87,16 @@ export const SONGS: SongLesson[] = [
     listenUrl: "https://music.apple.com/us/song/three-little-birds/1629115759",
   },
   {
+    id: "about-a-girl", level: "easy",
+    title: "About a Girl", artist: "Nirvana",
+    section: "Intro and verse loop", practiceKey: 4, keyLabel: "E minor",
+    chart: [step("Em", "i", 2), step("G", "♭III", 2)],
+    arrangement: "Count one bar of four. Start on Em, switch to G on beat three, then come back to Em on the next beat one.",
+    sourceLabel: "Fender Play intro and verse lesson",
+    sourceUrl: "https://www.fender.com/play/lessons/about-a-girl-intro-and-verse",
+    listenUrl: "https://music.apple.com/us/song/about-a-girl/669728225",
+  },
+  {
     id: "bad-moon-rising", level: "easy",
     title: "Bad Moon Rising", artist: "Creedence Clearwater Revival",
     section: "Verse phrase", practiceKey: 2,
